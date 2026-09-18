@@ -1,0 +1,120 @@
+=== RUN   TestCapacityShadowAndAutomaticJournal
+=== RUN   TestCapacityShadowAndAutomaticJournal/Bucket
+=== RUN   TestCapacityShadowAndAutomaticJournal/PersistentFleet
+--- PASS: TestCapacityShadowAndAutomaticJournal (1.40s)
+    --- PASS: TestCapacityShadowAndAutomaticJournal/Bucket (0.94s)
+    --- PASS: TestCapacityShadowAndAutomaticJournal/PersistentFleet (0.46s)
+=== RUN   TestCapacityAutomaticContractionKeepsQualificationGates
+=== RUN   TestCapacityAutomaticContractionKeepsQualificationGates/Bucket
+=== RUN   TestCapacityAutomaticContractionKeepsQualificationGates/PersistentFleet
+--- PASS: TestCapacityAutomaticContractionKeepsQualificationGates (1.53s)
+    --- PASS: TestCapacityAutomaticContractionKeepsQualificationGates/Bucket (0.75s)
+    --- PASS: TestCapacityAutomaticContractionKeepsQualificationGates/PersistentFleet (0.79s)
+=== RUN   TestCapacityManualOverrideAndRestart
+--- PASS: TestCapacityManualOverrideAndRestart (0.42s)
+=== RUN   TestCapacityConflictingReconcilers
+--- PASS: TestCapacityConflictingReconcilers (0.34s)
+=== RUN   TestCapacityRetainedClaimBlockCannotBeBypassed
+--- PASS: TestCapacityRetainedClaimBlockCannotBeBypassed (0.17s)
+=== RUN   TestCapacityQualifiedSeamRevalidatesBeforeRemoval
+=== RUN   TestCapacityQualifiedSeamRevalidatesBeforeRemoval/pressure
+=== RUN   TestCapacityQualifiedSeamRevalidatesBeforeRemoval/policy
+=== RUN   TestCapacityQualifiedSeamRevalidatesBeforeRemoval/loss
+=== RUN   TestCapacityQualifiedSeamRevalidatesBeforeRemoval/allow
+--- PASS: TestCapacityQualifiedSeamRevalidatesBeforeRemoval (3.11s)
+    --- PASS: TestCapacityQualifiedSeamRevalidatesBeforeRemoval/pressure (0.78s)
+    --- PASS: TestCapacityQualifiedSeamRevalidatesBeforeRemoval/policy (0.77s)
+    --- PASS: TestCapacityQualifiedSeamRevalidatesBeforeRemoval/loss (0.78s)
+    --- PASS: TestCapacityQualifiedSeamRevalidatesBeforeRemoval/allow (0.78s)
+=== RUN   TestCapacityDisableDoesNotReplayOldManualTarget
+--- PASS: TestCapacityDisableDoesNotReplayOldManualTarget (0.09s)
+=== RUN   TestCapacityEditDuringCollectionDiscardsRecommendation
+--- PASS: TestCapacityEditDuringCollectionDiscardsRecommendation (0.18s)
+=== RUN   TestCollectorRuntimeAndMetrics
+=== RUN   TestCollectorRuntimeAndMetrics/complete
+=== RUN   TestCollectorRuntimeAndMetrics/denied
+=== RUN   TestCollectorRuntimeAndMetrics/missing_cpu
+=== RUN   TestCollectorRuntimeAndMetrics/stale
+=== RUN   TestCollectorRuntimeAndMetrics/future
+=== RUN   TestCollectorRuntimeAndMetrics/unknown_state
+=== RUN   TestCollectorRuntimeAndMetrics/restarted
+=== RUN   TestCollectorRuntimeAndMetrics/oversize
+=== RUN   TestCollectorRuntimeAndMetrics/redirect
+=== RUN   TestCollectorRuntimeAndMetrics/bad_window
+=== RUN   TestCollectorRuntimeAndMetrics/wrong_identity
+=== RUN   TestCollectorRuntimeAndMetrics/unready
+=== RUN   TestCollectorRuntimeAndMetrics/canceled
+--- PASS: TestCollectorRuntimeAndMetrics (0.23s)
+    --- PASS: TestCollectorRuntimeAndMetrics/complete (0.02s)
+    --- PASS: TestCollectorRuntimeAndMetrics/denied (0.02s)
+    --- PASS: TestCollectorRuntimeAndMetrics/missing_cpu (0.02s)
+    --- PASS: TestCollectorRuntimeAndMetrics/stale (0.02s)
+    --- PASS: TestCollectorRuntimeAndMetrics/future (0.02s)
+    --- PASS: TestCollectorRuntimeAndMetrics/unknown_state (0.02s)
+    --- PASS: TestCollectorRuntimeAndMetrics/restarted (0.02s)
+    --- PASS: TestCollectorRuntimeAndMetrics/oversize (0.02s)
+    --- PASS: TestCollectorRuntimeAndMetrics/redirect (0.02s)
+    --- PASS: TestCollectorRuntimeAndMetrics/bad_window (0.02s)
+    --- PASS: TestCollectorRuntimeAndMetrics/wrong_identity (0.02s)
+    --- PASS: TestCollectorRuntimeAndMetrics/unready (0.02s)
+    --- PASS: TestCollectorRuntimeAndMetrics/canceled (0.01s)
+=== RUN   TestLifecycleSettlementUncertaintyRestartsWindow
+--- PASS: TestLifecycleSettlementUncertaintyRestartsWindow (0.24s)
+PASS
+ok  	github.com/ewhauser/celld-operator/internal/controller	8.771s
+=== RUN   TestBurstBoundsAndRestart
+--- PASS: TestBurstBoundsAndRestart (0.00s)
+=== RUN   TestDecliningDemandFullWindowAndCooldown
+--- PASS: TestDecliningDemandFullWindowAndCooldown (0.00s)
+=== RUN   TestUncertaintyResetsWindow
+=== RUN   TestUncertaintyResetsWindow/partial
+=== RUN   TestUncertaintyResetsWindow/stale_metrics
+=== RUN   TestUncertaintyResetsWindow/future_runtime
+=== RUN   TestUncertaintyResetsWindow/stale_receipt
+=== RUN   TestUncertaintyResetsWindow/unknown_runtime
+=== RUN   TestUncertaintyResetsWindow/short_window
+=== RUN   TestUncertaintyResetsWindow/unready
+=== RUN   TestUncertaintyResetsWindow/missing_pod
+=== RUN   TestUncertaintyResetsWindow/missing_metrics
+=== RUN   TestUncertaintyResetsWindow/duplicate_identity
+=== RUN   TestUncertaintyResetsWindow/long_window
+=== RUN   TestUncertaintyResetsWindow/negative
+--- PASS: TestUncertaintyResetsWindow (0.00s)
+    --- PASS: TestUncertaintyResetsWindow/partial (0.00s)
+    --- PASS: TestUncertaintyResetsWindow/stale_metrics (0.00s)
+    --- PASS: TestUncertaintyResetsWindow/future_runtime (0.00s)
+    --- PASS: TestUncertaintyResetsWindow/stale_receipt (0.00s)
+    --- PASS: TestUncertaintyResetsWindow/unknown_runtime (0.00s)
+    --- PASS: TestUncertaintyResetsWindow/short_window (0.00s)
+    --- PASS: TestUncertaintyResetsWindow/unready (0.00s)
+    --- PASS: TestUncertaintyResetsWindow/missing_pod (0.00s)
+    --- PASS: TestUncertaintyResetsWindow/missing_metrics (0.00s)
+    --- PASS: TestUncertaintyResetsWindow/duplicate_identity (0.00s)
+    --- PASS: TestUncertaintyResetsWindow/long_window (0.00s)
+    --- PASS: TestUncertaintyResetsWindow/negative (0.00s)
+=== RUN   TestReplayGapPolicyEditAndClockRewind
+--- PASS: TestReplayGapPolicyEditAndClockRewind (0.00s)
+=== RUN   TestDeterministicPressureSignalsAndFloors
+=== RUN   TestDeterministicPressureSignalsAndFloors/cpu
+=== RUN   TestDeterministicPressureSignalsAndFloors/memory
+=== RUN   TestDeterministicPressureSignalsAndFloors/runtime
+=== RUN   TestDeterministicPressureSignalsAndFloors/backlog
+=== RUN   TestDeterministicPressureSignalsAndFloors/floor
+--- PASS: TestDeterministicPressureSignalsAndFloors (0.00s)
+    --- PASS: TestDeterministicPressureSignalsAndFloors/cpu (0.00s)
+    --- PASS: TestDeterministicPressureSignalsAndFloors/memory (0.00s)
+    --- PASS: TestDeterministicPressureSignalsAndFloors/runtime (0.00s)
+    --- PASS: TestDeterministicPressureSignalsAndFloors/backlog (0.00s)
+    --- PASS: TestDeterministicPressureSignalsAndFloors/floor (0.00s)
+=== RUN   TestPolicyEditCannotExecuteCachedShadowRecommendation
+--- PASS: TestPolicyEditCannotExecuteCachedShadowRecommendation (0.00s)
+=== RUN   TestLowDemandCannotReplaceMissingObservations
+--- PASS: TestLowDemandCannotReplaceMissingObservations (0.00s)
+=== RUN   TestFrequentReconcileKeepsDiagnosticButCannotAct
+--- PASS: TestFrequentReconcileKeepsDiagnosticButCannotAct (0.00s)
+PASS
+ok  	github.com/ewhauser/celld-operator/internal/capacity	1.033s
+=== RUN   TestCapacityDefaultsAndValidation
+--- PASS: TestCapacityDefaultsAndValidation (0.00s)
+PASS
+ok  	github.com/ewhauser/celld-operator/api/v1alpha1	1.020s

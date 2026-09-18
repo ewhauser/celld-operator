@@ -1,0 +1,30 @@
+apiVersion: celld.example.com/v1alpha1
+kind: CelldFleet
+metadata:
+  name: bucket-example
+  namespace: default
+spec:
+  qualification: Experimental
+  profile: Bucket
+  replicas: 3
+  serviceAccountName: celld-runtime
+  storage:
+    bucket: replace-with-dedicated-bucket
+    region: us-east-1
+    sizeGiB: 10
+  placement:
+    azCount: 3
+    zones: [us-east-1a, us-east-1b, us-east-1c]
+  # Add this block to either profile. Collect observations before enabling ScaleOut.
+  capacity:
+    mode: Shadow
+    minReplicas: 3
+    maxReplicas: 6
+    scaleOutStep: 1
+    sampleIntervalSeconds: 15
+    maxAgeSeconds: 45
+    scaleOutStabilizationSeconds: 30
+    scaleInStabilizationSeconds: 600
+    scaleOutCooldownSeconds: 300
+    scaleInCooldownSeconds: 900
+    provisioningTimeoutSeconds: 600

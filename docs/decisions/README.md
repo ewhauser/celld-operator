@@ -23,3 +23,5 @@ The original proposal is `/Users/ewhauser/Downloads/Celld_Fleet_Operator_Design.
 Future decisions should receive a new numbered record. Material changes should identify which earlier record they supersede. Do not rewrite a qualification hypothesis as a proven guarantee.
 
 - [ADR 0012: restart-safe manual lifecycle](0012-restart-safe-manual-lifecycle.md)
+
+Step 4: [ADR 0013: capacity collection and policy](0013-capacity-policy.md).

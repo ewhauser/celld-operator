@@ -110,7 +110,7 @@ func fresh(sample, now time.Time, age time.Duration) bool {
 type State struct {
 	CapacityWaiting, ActivationWaiting, Restoring, Occupied, OwnedCells uint64
 	ResidentCells, RSSBytes, InUseBytes                                 uint64
-	Pressured, MemoryHeadroom                                           bool
+	Draining, RebalancePaused, Pressured, MemoryHeadroom                bool
 	SampledAt                                                           time.Time
 }
 
@@ -135,7 +135,7 @@ func (*Adapter) ParseState(status int, data []byte, received, now time.Time, age
 		return s, err
 	}
 	var sampled int64
-	for k, p := range map[string]any{"sampled_ms": &sampled, "resident_cells": &s.ResidentCells, "rss_bytes": &s.RSSBytes, "in_use_bytes": &s.InUseBytes, "pressured": &s.Pressured, "memory_headroom": &s.MemoryHeadroom} {
+	for k, p := range map[string]any{"draining": &s.Draining, "rebalance_paused": &s.RebalancePaused, "sampled_ms": &sampled, "resident_cells": &s.ResidentCells, "rss_bytes": &s.RSSBytes, "in_use_bytes": &s.InUseBytes, "pressured": &s.Pressured, "memory_headroom": &s.MemoryHeadroom} {
 		if err := required(load, k, p); err != nil {
 			return s, err
 		}

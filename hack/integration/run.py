@@ -96,7 +96,7 @@ nodes:
             apply({'apiVersion':'v1','kind':'Pod','metadata':{'name':'minio','namespace':'celld-test-store','labels':{'app':'minio'}},'spec':{'containers':[{'name':'minio','image':MINIO,'args':['server','/data'],'env':[{'name':'MINIO_ROOT_USER','value':'qualification'},{'name':'MINIO_ROOT_PASSWORD','value':'qualification-only'}]}]}})
             k('-n','celld-test-store','expose','pod','minio','--port=9000')
             k('-n','celld-test-store','wait','--for=condition=Ready','pod/minio','--timeout=120s')
-            k('-n','celld-test-store','run','seed','--restart=Never','--image='+MC,'--command','--','/bin/sh','-c','mc alias set local http://minio:9000 qualification qualification-only && mc mb local/bucket-alpha local/bucket-beta')
+            k('-n','celld-test-store','run','seed','--restart=Never','--image='+MC,'--command','--','/bin/sh','-c','attempt=0; until mc alias set local http://minio:9000 qualification qualification-only; do attempt=$((attempt+1)); test "$attempt" -lt 30 || exit 1; sleep 2; done; mc mb local/bucket-alpha local/bucket-beta')
             wait_for(lambda: succeeded('seed','celld-test-store'),'create two isolated test buckets')
             arch=json.loads(k('get','node',name+'-control-plane','-o','json'))['status']['nodeInfo']['architecture']
             package,integrity={
@@ -228,6 +228,25 @@ nodes:
                 k('-n','fleets','patch','celldfleet',fleet_name,'--type=merge','-p',json.dumps({'spec':{'replicas':3}}))
                 wait_for(lambda:ready(fleet_name),'restored desired capacity: '+fleet_name)
             print('PASS: both profiles scale out without template changes; contraction gates persist',flush=True)
+            # No Metrics Server is installed in this isolated cluster. Verify the
+            # real API defaults/validation, exact metrics RBAC, and conservative
+            # missing-data path in both profiles. Native HTTP fixture tests cover
+            # successful /state + Metrics Server transport and pod incarnation races.
+            for fleet_name, kind in (('alpha','deployment'),('beta','statefulset')):
+                before=get(kind,fleet_name)
+                k('-n','fleets','patch','celldfleet',fleet_name,'--type=merge','-p',json.dumps({'spec':{'capacity':{}}}))
+                wait_for(lambda:get('celldfleet',fleet_name).get('status',{}).get('capacity',{}).get('mode')=='Shadow','capacity defaults to shadow: '+fleet_name)
+                assert get(kind,fleet_name)['spec']==before['spec']
+                assert get('celldfleet',fleet_name)['spec']['capacity']['maxReplicas']==10
+                try:
+                    k('-n','fleets','patch','celldfleet',fleet_name,'--type=merge','-p',json.dumps({'spec':{'capacity':{'minReplicas':10,'maxReplicas':3}}}))
+                except RuntimeError as err:
+                    assert 'invalid' in str(err).lower(),str(err)
+                else: raise AssertionError('admission accepted inverted capacity bounds')
+                k('-n','fleets','patch','celldfleet',fleet_name,'--type=merge','-p',json.dumps({'spec':{'capacity':{'mode':'ScaleOut'}}}))
+                wait_for(lambda:get('celldfleet',fleet_name).get('status',{}).get('capacity',{}).get('reason') in ('PendingCapacity','IncompleteMetrics'),'missing metrics block automatic capacity: '+fleet_name)
+                assert get(kind,fleet_name)['spec']==before['spec']
+            print('PASS: shadow and opt-in automatic modes preserve capacity with missing metrics; API policy edits/defaults validated',flush=True)
             sts=get('statefulset','beta')
             assert sts['spec']['persistentVolumeClaimRetentionPolicy']=={'whenDeleted':'Retain','whenScaled':'Retain'}
             assert sts['spec']['updateStrategy']['type']=='OnDelete'

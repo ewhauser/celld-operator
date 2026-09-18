@@ -9,9 +9,11 @@ import (
 	"time"
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
+	"github.com/ewhauser/celld-operator/internal/capacity"
 	v050 "github.com/ewhauser/celld-operator/internal/runtime/v050"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/util/retry"
@@ -35,6 +37,7 @@ type lifecycleJournal struct {
 	Claims           map[string]types.UID
 	Loss             string
 	History          []lifecycleCompletion
+	Capacity         *capacity.State
 }
 type lifecycleCompletion struct {
 	ID, TargetPod, TargetUID, TargetGeneration string
@@ -43,6 +46,9 @@ type lifecycleCompletion struct {
 }
 
 type lifecycleOperation struct {
+	PolicyHash                             string
+	ManualBaseline                         int32
+	Automatic                              bool
 	ID, Phase, WorkloadVersion             string
 	From, To                               int32
 	TargetPod, TargetUID, TargetGeneration string
@@ -101,7 +107,7 @@ func readJournal(res *fleet.CelldStorageReservation) (*lifecycleJournal, error) 
 		return nil, errors.New("invalid lifecycle journal")
 	}
 	if op := j.Operation; op != nil {
-		if op.ID == "" || op.From != j.Applied || op.To < 1 || op.To > 100 || op.To == op.From || (op.To < op.From && op.To != op.From-1) || (op.Phase != "Intent" && op.Phase != "Prepared" && op.Phase != "Recovering") {
+		if (op.Automatic && (j.Capacity == nil || op.PolicyHash == "" || op.ManualBaseline < 1 || op.ManualBaseline > 100)) || op.ID == "" || op.From != j.Applied || op.To < 1 || op.To > 100 || op.To == op.From || (op.To < op.From && op.To != op.From-1) || (op.Phase != "Intent" && op.Phase != "Prepared" && op.Phase != "Recovering") {
 			return nil, errors.New("invalid lifecycle operation")
 		}
 	}
@@ -230,10 +236,28 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 		}
 	}
 	if op == nil {
-		if f.Spec.Replicas == j.Applied {
+		target, automatic := r.capacityTarget(ctx, f, j)
+		// Persist diagnostics even when a qualification gate will reject the request.
+		// No replica action occurs until the later atomic journal+intent write succeeds.
+		if j.Capacity != nil {
+			if err := r.saveJournal(ctx, res, j); err != nil {
+				return ctrl.Result{}, true, err
+			}
+		}
+		if target == j.Applied {
 			return ctrl.Result{}, false, nil
 		}
-		op = &lifecycleOperation{ID: string(uuid.NewUUID()), Phase: "Intent", From: j.Applied, To: f.Spec.Replicas, WorkloadVersion: w.GetResourceVersion()}
+		if automatic {
+			latest := &fleet.CelldFleet{}
+			if err := r.Get(ctx, client.ObjectKeyFromObject(f), latest); err != nil {
+				return ctrl.Result{}, true, err
+			}
+			latest.Default()
+			if latest.UID != f.UID || !latest.DeletionTimestamp.IsZero() || !equality.Semantic.DeepEqual(latest.Spec, f.Spec) {
+				return block("CapacityChanged", "Fleet changed during collection; discard the recommendation and reconcile the new request")
+			}
+		}
+		op = &lifecycleOperation{ID: string(uuid.NewUUID()), Phase: "Intent", From: j.Applied, To: target, WorkloadVersion: w.GetResourceVersion(), Automatic: automatic}
 		if op.To < op.From {
 			if f.Spec.Profile == "Bucket" {
 				return block("BucketCompletionUnqualified", "No qualified no-log completion rule or deterministic Deployment victim; contraction is unavailable")
@@ -252,6 +276,7 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 				return block("RecoveryBlocked", "No target/session capture")
 			}
 			captured.ID, captured.Phase, captured.From, captured.To, captured.WorkloadVersion = op.ID, "Intent", op.From, op.From-1, op.WorkloadVersion
+			captured.Automatic = automatic
 			op = captured
 			for _, previous := range j.Sessions {
 				if !slices.Contains(op.Sessions, previous) {
@@ -273,8 +298,30 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 				return block("RecoveryBlocked", "Selected target lacks a live exact session")
 			}
 		}
+		if automatic {
+			op.PolicyHash = j.Capacity.Config
+			op.ManualBaseline = f.Spec.Replicas
+		}
 		j.Operation = op
+		if j.Capacity != nil {
+			capacity.RecordAction(j.Capacity, r.capacityNow(), op.From, op.To)
+		}
 		return save(j) // No external action before the intent has survived an API write.
+	}
+	if f.Spec.Capacity != nil && j.Capacity != nil {
+		observation := capacity.Observation{At: r.capacityNow()}
+		if r.Collector != nil {
+			observation = r.Collector.Collect(ctx, f)
+		}
+		*j.Capacity = capacity.Evaluate(*f.Spec.Capacity, *j.Capacity, observation, max(op.From, op.To))
+		if j.Capacity.Decision.Reason != "PendingCapacity" && j.Capacity.Decision.Reason != "IneffectiveCapacity" {
+			j.Capacity.Decision.Reason = "LifecycleInFlight"
+			j.Capacity.Decision.Message = "Recorded operation retains its original target; new policy and manual requests wait"
+		}
+		j.Capacity.Decision.DesiredReplicas = op.To
+		if err := r.saveJournal(ctx, res, j); err != nil {
+			return ctrl.Result{}, true, err
+		}
 	}
 	if (op.Phase == "Intent" || op.Phase == "Prepared") && replicas(w) == op.From && w.GetResourceVersion() != op.WorkloadVersion {
 		// An obsolete version cannot still win a CAS. Persist the replacement
@@ -298,7 +345,7 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 	if op.Phase == "Intent" {
 		// Desired count changes never retarget an existing operation. Before issue,
 		// freeze rather than cancel: a delayed previous leader could still issue it.
-		if f.Spec.Replicas >= op.From {
+		if !op.Automatic && f.Spec.Replicas >= op.From {
 			return block("DesiredChanged", "Existing removal intent retained; no new removal authorized")
 		}
 		if err := r.localLifecycle.Validate(ctx, f, op); err != nil {
@@ -320,6 +367,18 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 		}
 		if !evidenceFresh(evidence, r.localLifecycle.Now()) {
 			return block("RecoveryBlocked", "Preflight evidence expired during membership revalidation")
+		}
+		if op.Automatic {
+			if f.Spec.Capacity == nil || f.Spec.Capacity.Mode != "Automatic" || op.PolicyHash != j.Capacity.Config || op.ManualBaseline != f.Spec.Replicas || op.To < f.Spec.Capacity.MinReplicas || r.Collector == nil {
+				return block("CapacityChanged", "Automatic removal intent retained; changed policy/manual request requires review")
+			}
+			observation := r.Collector.Collect(ctx, f)
+			if j.Capacity.LowSince.IsZero() || j.Capacity.LowSamples < f.Spec.Capacity.MinSamples || observation.At.Sub(j.Capacity.LowSince) < capacity.Seconds(f.Spec.Capacity.ScaleInStabilizationSeconds) || !capacity.LowDemand(*f.Spec.Capacity, observation, op.From) || observation.At.After(r.capacityNow()) || r.capacityNow().Sub(observation.At) > capacity.Seconds(f.Spec.Capacity.MaxAgeSeconds) {
+				return block("CapacityUncertain", "Fresh complete low-demand evidence is required before automatic removal")
+			}
+			if !evidenceFresh(evidence, r.localLifecycle.Now()) {
+				return block("RecoveryBlocked", "Recovery evidence expired during capacity revalidation")
+			}
 		}
 		if err := r.applyReplicas(ctx, w, op); err != nil {
 			return block("ReplicaUpdateBlocked", err.Error())

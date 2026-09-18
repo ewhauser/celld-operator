@@ -117,7 +117,7 @@ func TestState(t *testing.T) {
 			}
 		})
 	}
-	for _, field := range []string{"pressured", "memory_headroom", "sampled_ms", "resident_cells", "rss_bytes", "in_use_bytes"} {
+	for _, field := range []string{"draining", "rebalance_paused", "pressured", "memory_headroom", "sampled_ms", "resident_cells", "rss_bytes", "in_use_bytes"} {
 		bad := mutate(t, b, func(m map[string]any) { delete(m["node_load"].(map[string]any), field) })
 		if _, err := a.ParseState(200, bad, now, now, 5*time.Second); err == nil {
 			t.Fatalf("accepted missing %s", field)

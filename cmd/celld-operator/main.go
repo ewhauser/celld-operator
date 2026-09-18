@@ -68,7 +68,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	reconciler := &controller.Reconciler{Client: direct, Options: controller.Options{OperatorNamespace: *namespace, LocalTest: *localTest}, NetworkPolicyEnforced: *enforced}
+	collector, err := controller.NewCollector(direct, config)
+	if err != nil {
+		return err
+	}
+	reconciler := &controller.Reconciler{Collector: collector, Client: direct, Options: controller.Options{OperatorNamespace: *namespace, LocalTest: *localTest}, NetworkPolicyEnforced: *enforced}
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		return err
 	}

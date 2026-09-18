@@ -1,6 +1,7 @@
 # Experimental fleet provisioning
 
-Step 3 adds journaled manual scale-out to the initial infrastructure. It does not enable production scaling,
+Step 4 adds optional [capacity policy](capacity-policy.md) and metrics collection to
+journaled manual scale-out. It does not enable production scaling,
 upgrades, automatic recovery operations, or deletion. Read
 [ADR 0011](decisions/0011-initial-fleet-api.md) and the
 [remaining qualification gates](qualification/README.md) first.
@@ -37,7 +38,8 @@ a separate read-only identity and is not connected in step 2.
 | --- | --- |
 | `qualification` | Required literal `Experimental`; no production setting |
 | `profile` | Required `Bucket` or `PersistentFleet` |
-| `replicas` | Desired count, 1–100; default 3; at least AZ count |
+| `replicas` | Manual target/override, 1–100; default 3; at least AZ count |
+| `capacity` | Optional shadow/automatic policy; see [capacity policy](capacity-policy.md) |
 | `serviceAccountName` | Existing account in the fleet namespace |
 | `storage.bucket` | Dedicated canonical bucket, lowercase letters/digits/hyphens |
 | `storage.region` | Explicit AWS region; immutable |
@@ -47,7 +49,7 @@ a separate read-only identity and is not connected in step 2.
 | `placement.azCount` | Must equal number of zones, 1–6 |
 | `placement.mode` | Strict (default) or Relaxed; same allowlist in either mode |
 
-Fleet names must be DNS labels up to 40 characters. Only `replicas` is mutable.
+Fleet names must be DNS labels up to 40 characters. Only `replicas` and `capacity` are mutable.
 Invalid cross-field combinations fail admission; name/dependency errors also
 produce clear controller conditions. No `/scale` API is exposed. Production image
 updates, resize, storage changes and placement changes require a

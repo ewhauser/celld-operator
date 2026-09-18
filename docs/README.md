@@ -17,3 +17,5 @@ commands and explicit lifecycle restrictions.
 
 Step 3: [manual lifecycle design](decisions/0012-restart-safe-manual-lifecycle.md)
 and [validation results](qualification/lifecycle/README.md).
+
+Step 4: [capacity collection and policy](capacity-policy.md).

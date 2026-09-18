@@ -35,10 +35,17 @@ type Reconciler struct {
 	NetworkPolicyEnforced bool
 	// localLifecycle is only supplied by in-package qualification tests. No production fence exists.
 	localLifecycle lifecycleEvidence
+	Collector      capacityCollector
+	now            func() time.Time
 }
 
-func digest(data []byte) string           { h := sha256.Sum256(data); return hex.EncodeToString(h[:]) }
-func specHash(f *fleet.CelldFleet) string { b, _ := json.Marshal(f.Spec); return digest(b) }
+func digest(data []byte) string { h := sha256.Sum256(data); return hex.EncodeToString(h[:]) }
+func specHash(f *fleet.CelldFleet) string {
+	spec := f.Spec
+	spec.Capacity = nil
+	b, _ := json.Marshal(spec)
+	return digest(b)
+}
 func reservationName(f *fleet.CelldFleet) string {
 	return "s3-" + digest([]byte(f.Spec.Storage.Bucket))[:56]
 }
@@ -148,6 +155,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if result, handled, err := r.lifecycle(ctx, f, reservation, actual); handled || err != nil {
 		return result, err
 	}
+	// In automatic mode, the journal owns applied capacity, while spec.replicas
+	// remains the user's manual command field. Never reconcile it back implicitly.
+	if f.Spec.Capacity != nil {
+		setReplicas(desired, replicas(actual))
+	}
 	if !matches(desired, actual) {
 		return r.report(ctx, f, "LifecycleBlocked", "Existing workload differs from the journaled spec; no rollout, adoption or drift repair is authorized", 0, false)
 	}
@@ -167,7 +179,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if observed < actual.GetGeneration() {
 		ready = 0
 	}
-	if ready != f.Spec.Replicas {
+	if ready != replicas(actual) {
 		return r.report(ctx, f, "Provisioning", "Waiting for ready replicas; inspect Pod scheduling, PVC binding and runtime readiness. Capacity is externally provisioned", ready, true)
 	}
 	return r.report(ctx, f, "Provisioned", "Initial infrastructure and runtime readiness observed; this is not production or durability qualification", ready, true)
@@ -213,6 +225,10 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, reason, me
 	if err := r.Get(ctx, types.NamespacedName{Name: reservationName(f)}, res); err == nil {
 		if j, err := readJournal(res); err == nil && j != nil && res.Spec.FleetUID == string(f.UID) {
 			f.Status.Lifecycle = fleet.LifecycleStatus{PossibleLoss: j.Loss}
+			f.Status.Capacity = fleet.CapacityStatus{}
+			if j.Capacity != nil && f.Spec.Capacity != nil {
+				f.Status.Capacity = j.Capacity.Decision
+			}
 			if op := j.Operation; op != nil {
 				f.Status.Lifecycle = fleet.LifecycleStatus{OperationID: op.ID, Phase: op.Phase, From: op.From, To: op.To, TargetPod: op.TargetPod, TargetUID: op.TargetUID, TargetGeneration: op.TargetGeneration, PossibleLoss: j.Loss}
 			}
@@ -230,7 +246,13 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, reason, me
 		}
 		meta.SetStatusCondition(&f.Status.Conditions, metav1.Condition{Type: kind, Status: status, Reason: why, Message: msg, ObservedGeneration: f.Generation})
 	}
-	set("Ready", provisioned && ready == f.Spec.Replicas, reason, message)
+	expectedReady := f.Spec.Replicas
+	if f.Spec.Capacity != nil {
+		if j, err := readJournal(res); err == nil && j != nil {
+			expectedReady = j.Applied
+		}
+	}
+	set("Ready", provisioned && ready == expectedReady, reason, message)
 	set("InfrastructureReady", provisioned || reason == "LifecycleProgress", reason, message)
 	set("Progressing", reason == "LifecycleProgress" || reason == "Provisioning", reason, message)
 	set("Blocked", !provisioned && reason != "LifecycleProgress", reason, message)

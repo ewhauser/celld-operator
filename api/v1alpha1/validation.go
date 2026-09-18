@@ -10,6 +10,9 @@ import (
 )
 
 func (f *CelldFleet) Default() {
+	if f.Spec.Capacity != nil {
+		f.Spec.Capacity.Default()
+	}
 	if f.Spec.Replicas == 0 {
 		f.Spec.Replicas = 3
 	}
@@ -23,6 +26,14 @@ func (f *CelldFleet) Default() {
 
 func (f *CelldFleet) Validate() error {
 	s := f.Spec
+	if s.Capacity != nil {
+		if err := s.Capacity.Validate(); err != nil {
+			return err
+		}
+		if s.Capacity.MinReplicas < s.Placement.AZCount {
+			return fmt.Errorf("capacity minimum must cover requested AZs")
+		}
+	}
 	switch {
 	case len(f.Name) > 40 || len(validation.IsDNS1123Label(f.Name)) != 0:
 		return fmt.Errorf("fleet name must be a DNS label of at most 40 characters")

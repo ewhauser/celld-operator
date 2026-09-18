@@ -45,6 +45,128 @@ spec:
             type: object
           spec:
             properties:
+              capacity:
+                description: Optional policy; omission keeps manual ownership.
+                properties:
+                  cpuHighMillicores:
+                    default: 200
+                    format: int32
+                    maximum: 1000000
+                    minimum: 1
+                    type: integer
+                  cpuLowMillicores:
+                    default: 80
+                    format: int32
+                    maximum: 1000000
+                    minimum: 1
+                    type: integer
+                  maxAgeSeconds:
+                    default: 45
+                    format: int32
+                    maximum: 600
+                    minimum: 10
+                    type: integer
+                  maxReplicas:
+                    default: 10
+                    format: int32
+                    maximum: 100
+                    minimum: 1
+                    type: integer
+                  maxWindowSeconds:
+                    default: 60
+                    format: int32
+                    maximum: 300
+                    minimum: 5
+                    type: integer
+                  memoryHighMiB:
+                    default: 768
+                    format: int32
+                    maximum: 1048576
+                    minimum: 1
+                    type: integer
+                  memoryLowMiB:
+                    default: 384
+                    format: int32
+                    maximum: 1048576
+                    minimum: 1
+                    type: integer
+                  minReplicas:
+                    default: 3
+                    format: int32
+                    maximum: 100
+                    minimum: 1
+                    type: integer
+                  minSamples:
+                    default: 3
+                    format: int32
+                    maximum: 100
+                    minimum: 2
+                    type: integer
+                  minWindowSeconds:
+                    default: 5
+                    format: int32
+                    maximum: 60
+                    minimum: 1
+                    type: integer
+                  mode:
+                    default: Shadow
+                    enum:
+                    - Shadow
+                    - ScaleOut
+                    - Automatic
+                    type: string
+                  provisioningTimeoutSeconds:
+                    default: 600
+                    format: int32
+                    maximum: 86400
+                    minimum: 60
+                    type: integer
+                  sampleIntervalSeconds:
+                    default: 15
+                    format: int32
+                    maximum: 300
+                    minimum: 5
+                    type: integer
+                  scaleInCooldownSeconds:
+                    default: 900
+                    format: int32
+                    maximum: 86400
+                    minimum: 60
+                    type: integer
+                  scaleInStabilizationSeconds:
+                    default: 600
+                    format: int32
+                    maximum: 86400
+                    minimum: 60
+                    type: integer
+                  scaleOutCooldownSeconds:
+                    default: 300
+                    format: int32
+                    maximum: 86400
+                    minimum: 30
+                    type: integer
+                  scaleOutStabilizationSeconds:
+                    default: 30
+                    format: int32
+                    maximum: 3600
+                    minimum: 10
+                    type: integer
+                  scaleOutStep:
+                    default: 1
+                    format: int32
+                    maximum: 10
+                    minimum: 1
+                    type: integer
+                type: object
+                x-kubernetes-validations:
+                - message: invalid replica bounds
+                  rule: self.minReplicas <= self.maxReplicas
+                - message: low thresholds must be below high thresholds
+                  rule: self.cpuLowMillicores < self.cpuHighMillicores && self.memoryLowMiB
+                    < self.memoryHighMiB
+                - message: invalid sampling windows
+                  rule: self.minWindowSeconds <= self.maxWindowSeconds && self.sampleIntervalSeconds
+                    <= self.maxAgeSeconds
               placement:
                 properties:
                   azCount:
@@ -138,7 +260,7 @@ spec:
             - storage
             type: object
             x-kubernetes-validations:
-            - message: only replicas may change
+            - message: only replicas and capacity may change
               rule: self.qualification == oldSelf.qualification && self.profile ==
                 oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName
                 && self.storage == oldSelf.storage && self.placement == oldSelf.placement
@@ -152,8 +274,31 @@ spec:
             - message: zones must be standard AZ names in storage.region
               rule: self.placement.zones.all(z, z.startsWith(self.storage.region)
                 && size(z) == size(self.storage.region) + 1 && z.matches('.*[a-z]$'))
+            - message: capacity minimum must cover requested AZs
+              rule: '!has(self.capacity) || self.capacity.minReplicas >= self.placement.azCount'
           status:
             properties:
+              capacity:
+                properties:
+                  coveredReplicas:
+                    format: int32
+                    type: integer
+                  desiredReplicas:
+                    format: int32
+                    type: integer
+                  message:
+                    type: string
+                  mode:
+                    type: string
+                  pendingReplicas:
+                    format: int32
+                    type: integer
+                  reason:
+                    type: string
+                  usefulReplicas:
+                    format: int32
+                    type: integer
+                type: object
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current

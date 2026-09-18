@@ -1,0 +1,46 @@
+Creating isolated cluster celld-step2-c3858f34
+Pulling into disposable node: ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8
+Pulling into disposable node: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+Pulling into disposable node: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+Pulling into disposable node: curlimages/curl:8.12.1
+NAMESPACE            NAME                                                         READY   STATUS    RESTARTS   AGE   IP               NODE                                 NOMINATED NODE   READINESS GATES
+celld-test-store     minio                                                        1/1     Running   0          3s    192.168.252.69   celld-step2-c3858f34-control-plane   <none>           <none>
+celld-test-store     seed                                                         0/1     Error     0          2s    192.168.252.70   celld-step2-c3858f34-control-plane   <none>           <none>
+kube-system          calico-kube-controllers-78576cf5c8-6ndcd                     1/1     Running   0          54s   192.168.252.66   celld-step2-c3858f34-control-plane   <none>           <none>
+kube-system          calico-node-2pskm                                            1/1     Running   0          54s   172.18.0.3       celld-step2-c3858f34-control-plane   <none>           <none>
+kube-system          coredns-7c65d6cfc9-5mkcl                                     1/1     Running   0          54s   192.168.252.68   celld-step2-c3858f34-control-plane   <none>           <none>
+kube-system          coredns-7c65d6cfc9-spkd6                                     1/1     Running   0          54s   192.168.252.65   celld-step2-c3858f34-control-plane   <none>           <none>
+kube-system          etcd-celld-step2-c3858f34-control-plane                      1/1     Running   0          61s   172.18.0.3       celld-step2-c3858f34-control-plane   <none>           <none>
+kube-system          kube-apiserver-celld-step2-c3858f34-control-plane            1/1     Running   0          60s   172.18.0.3       celld-step2-c3858f34-control-plane   <none>           <none>
+kube-system          kube-controller-manager-celld-step2-c3858f34-control-plane   1/1     Running   0          60s   172.18.0.3       celld-step2-c3858f34-control-plane   <none>           <none>
+kube-system          kube-proxy-slmgp                                             1/1     Running   0          54s   172.18.0.3       celld-step2-c3858f34-control-plane   <none>           <none>
+kube-system          kube-scheduler-celld-step2-c3858f34-control-plane            1/1     Running   0          60s   172.18.0.3       celld-step2-c3858f34-control-plane   <none>           <none>
+local-path-storage   local-path-provisioner-6fdc965494-mbmxt                      1/1     Running   0          54s   192.168.252.67   celld-step2-c3858f34-control-plane   <none>           <none>
+
+apiVersion: v1
+items: []
+kind: List
+metadata:
+  resourceVersion: ""
+
+No resources found in fleets namespace.
+
+Cleaning up only cluster celld-step2-c3858f34
+Traceback (most recent call last):
+  File "/Users/ewhauser/.codex/worktrees/a90b/celld-operator/hack/integration/run.py", line 306, in <module>
+    main()
+    ~~~~^^
+  File "/Users/ewhauser/.codex/worktrees/a90b/celld-operator/hack/integration/run.py", line 100, in main
+    wait_for(lambda: succeeded('seed','celld-test-store'),'create two isolated test buckets')
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ewhauser/.codex/worktrees/a90b/celld-operator/hack/integration/run.py", line 58, in wait_for
+    if check():
+       ~~~~~^^
+  File "/Users/ewhauser/.codex/worktrees/a90b/celld-operator/hack/integration/run.py", line 100, in <lambda>
+    wait_for(lambda: succeeded('seed','celld-test-store'),'create two isolated test buckets')
+                     ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ewhauser/.codex/worktrees/a90b/celld-operator/hack/integration/run.py", line 53, in succeeded
+    raise RuntimeError('Test Pod failed: '+pod+'\n'+k('-n',ns,'logs',pod))
+RuntimeError: Test Pod failed: seed
+mc: <ERROR> Unable to initialize new alias from the provided credentials. Get "http://minio:9000/probe-bsign-ewinpviitxgfpo1iildqbuqnjp02s0/?location=": dial tcp 10.96.41.137:9000: connect: connection refused.
+

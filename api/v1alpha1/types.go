@@ -26,7 +26,7 @@ var AddToScheme = SchemeBuilder.AddToScheme
 type CelldFleet struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	// +kubebuilder:validation:XValidation:rule="self.qualification == oldSelf.qualification && self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement",message="only replicas may change"
+	// +kubebuilder:validation:XValidation:rule="self.qualification == oldSelf.qualification && self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement",message="only replicas and capacity may change"
 	Spec   CelldFleetSpec   `json:"spec"`
 	Status CelldFleetStatus `json:"status,omitempty"`
 }
@@ -35,6 +35,7 @@ type CelldFleet struct {
 // +kubebuilder:validation:XValidation:rule="self.replicas >= self.placement.azCount",message="replicas must be at least azCount"
 // +kubebuilder:validation:XValidation:rule="self.profile == 'PersistentFleet' ? has(self.storage.storageClassName) && size(self.storage.storageClassName) > 0 : !has(self.storage.storageClassName)",message="storageClassName is required only for PersistentFleet"
 // +kubebuilder:validation:XValidation:rule="self.placement.zones.all(z, z.startsWith(self.storage.region) && size(z) == size(self.storage.region) + 1 && z.matches('.*[a-z]$'))",message="zones must be standard AZ names in storage.region"
+// +kubebuilder:validation:XValidation:rule="!has(self.capacity) || self.capacity.minReplicas >= self.placement.azCount",message="capacity minimum must cover requested AZs"
 type CelldFleetSpec struct {
 	// A required acknowledgment of the qualification boundary; production is unavailable.
 	// +kubebuilder:validation:Enum=Experimental
@@ -45,6 +46,8 @@ type CelldFleetSpec struct {
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=100
 	Replicas int32 `json:"replicas,omitempty"`
+	// Optional policy; omission keeps manual ownership.
+	Capacity *CapacityPolicy `json:"capacity,omitempty"`
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
@@ -107,6 +110,7 @@ type LifecycleStatus struct {
 }
 
 type CelldFleetStatus struct {
+	Capacity           CapacityStatus  `json:"capacity,omitempty"`
 	Lifecycle          LifecycleStatus `json:"lifecycle,omitempty"`
 	ObservedGeneration int64           `json:"observedGeneration,omitempty"`
 	ReadyReplicas      int32           `json:"readyReplicas,omitempty"`
