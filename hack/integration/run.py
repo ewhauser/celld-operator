@@ -70,6 +70,12 @@ nodes:
 - role: control-plane
   labels:
     topology.kubernetes.io/zone: us-east-1a
+- role: worker
+  labels:
+    topology.kubernetes.io/zone: us-east-1a
+- role: worker
+  labels:
+    topology.kubernetes.io/zone: us-east-1a
 ''')
             print('Creating isolated cluster', name, flush=True)
             # Name is unique; cleanup is authorized only for this invocation's cluster.
@@ -81,6 +87,7 @@ nodes:
             (tmp / 'calico.yaml').write_bytes(calico)
             k('apply', '-f', str(tmp / 'calico.yaml'))
             k('wait', '--for=condition=Ready', 'nodes', '--all', '--timeout=240s')
+            k('taint', 'nodes', name+'-control-plane', 'node-role.kubernetes.io/control-plane:NoSchedule-')
             k('-n', 'kube-system', 'rollout', 'status', 'daemonset/calico-node', '--timeout=240s')
             k('apply', '-f', str(ROOT / 'config/crd'))
             k('wait', '--for=condition=Established', 'crd/celldfleets.celld.example.com', '--timeout=60s')
@@ -92,7 +99,8 @@ nodes:
                 k('-n', ns, 'create', 'serviceaccount', 'runtime')
             for image in (IMAGE, MINIO, MC, CURL):
                 print('Pulling into disposable node:', image, flush=True)
-                run(['docker', 'exec', name + '-control-plane', 'crictl', 'pull', image], timeout=300)
+                for node in (name+'-control-plane', name+'-worker', name+'-worker2'):
+                    run(['docker', 'exec', node, 'crictl', 'pull', image], timeout=300)
             apply({'apiVersion':'v1','kind':'Pod','metadata':{'name':'minio','namespace':'celld-test-store','labels':{'app':'minio'}},'spec':{'containers':[{'name':'minio','image':MINIO,'args':['server','/data'],'env':[{'name':'MINIO_ROOT_USER','value':'qualification'},{'name':'MINIO_ROOT_PASSWORD','value':'qualification-only'}]}]}})
             k('-n','celld-test-store','expose','pod','minio','--port=9000')
             k('-n','celld-test-store','wait','--for=condition=Ready','pod/minio','--timeout=120s')
@@ -114,7 +122,7 @@ nodes:
             for bucket in ('bucket-alpha','bucket-beta'):
                 deploy_name='deploy-'+bucket
                 deploy_env={'CELLD_BUCKET':'s3://'+bucket,'AWS_REGION':'us-east-1','AWS_ALLOW_HTTP':'true','S3_ENDPOINT':'http://minio:9000','AWS_ACCESS_KEY_ID':'qualification','AWS_SECRET_ACCESS_KEY':'qualification-only','CELLD_ESBUILD':'/esbuild'}
-                apply({'apiVersion':'v1','kind':'Pod','metadata':{'name':deploy_name,'namespace':'celld-test-store'},'spec':{'restartPolicy':'Never','containers':[{'name':'deploy','image':IMAGE,'args':['deploy','/app'],'env':[{'name':key,'value':value} for key,value in deploy_env.items()],'volumeMounts':[{'name':'app','mountPath':'/app','readOnly':True},{'name':'esbuild','mountPath':'/esbuild','readOnly':True}]}],'volumes':[{'name':'app','hostPath':{'path':'/opt/celld-test-app'}},{'name':'esbuild','hostPath':{'path':'/opt/celld-test-esbuild'}}]}})
+                apply({'apiVersion':'v1','kind':'Pod','metadata':{'name':deploy_name,'namespace':'celld-test-store'},'spec':{'nodeName':name+'-control-plane','restartPolicy':'Never','containers':[{'name':'deploy','image':IMAGE,'args':['deploy','/app'],'env':[{'name':key,'value':value} for key,value in deploy_env.items()],'volumeMounts':[{'name':'app','mountPath':'/app','readOnly':True},{'name':'esbuild','mountPath':'/esbuild','readOnly':True}]}],'volumes':[{'name':'app','hostPath':{'path':'/opt/celld-test-app'}},{'name':'esbuild','hostPath':{'path':'/opt/celld-test-esbuild'}}]}})
                 wait_for(lambda:succeeded(deploy_name,'celld-test-store'),'qualification app deployed to '+bucket,timeout=120)
             apply({'apiVersion':'storage.k8s.io/v1','kind':'StorageClass','metadata':{'name':'retained'},'provisioner':'rancher.io/local-path','reclaimPolicy':'Retain','volumeBindingMode':'WaitForFirstConsumer'})
             token = k('-n','celld-system','create','token','celld-operator','--duration=1h').strip()
@@ -148,9 +156,9 @@ nodes:
                 uid=get('celldfleet',n)['metadata']['uid']
                 selected=[p for p in pods if p['metadata']['labels'].get('celld.example.com/fleet-uid')==uid]
                 assert len(selected)==2
-                assert len({p['spec']['nodeName'] for p in selected})==1
+                assert len({p['spec']['nodeName'] for p in selected})==2
                 addresses[n]=selected[0]['status']['podIP']
-            print('PASS: placement constrained to the configured zone',flush=True)
+            print('PASS: strict replicas use distinct nodes within the configured zone',flush=True)
             unavailable=fleet('unavailable','bucket-unavailable')
             unavailable['spec']['placement']={'azCount':2,'zones':['us-east-1a','us-east-1b']}
             apply(unavailable)
@@ -188,6 +196,7 @@ nodes:
             assert json.loads(curl('client-beta','beta','/?cell=integration&id=ack',8080))['stored'] is False
             print('PASS: application writes readable only in their own fleet storage scope',flush=True)
             print('PASS: same-fleet/operator peer access, cross-fleet/untrusted/client peer denial, ClusterIP health routing',flush=True)
+            k('-n','fleets','delete','pod','same-fleet','--wait=true')
             apply(fleet('conflict','bucket-alpha',namespace='other'))
             wait_for(lambda:any(c['reason']=='StorageScopeConflict' for c in get('celldfleet','conflict','other').get('status',{}).get('conditions',[])),'cross-namespace storage conflict blocked')
             for mutate in ('upgrade','invalid-az','invalid-storage'):
@@ -219,6 +228,9 @@ nodes:
                 process=subprocess.Popen([str(ROOT/'bin/celld-operator'),'--network-policy-enforced','--local-test'],env={**env,'KUBECONFIG':str(operator_path)},stdout=log,stderr=subprocess.STDOUT)
                 wait_for(lambda: get(kind,fleet_name)['spec']['replicas']==3 and ready(fleet_name),'journaled scale-out after controller restart: '+fleet_name,timeout=300)
                 after=get(kind,fleet_name)
+                uid=get('celldfleet',fleet_name)['metadata']['uid']
+                scaled=json.loads(k('-n','fleets','get','pods','-l','celld.example.com/fleet-uid='+uid,'-o','json'))['items']
+                assert len({pod['spec']['nodeName'] for pod in scaled})==3
                 assert after['metadata']['uid']==before['metadata']['uid']
                 assert after['spec']['template']==before_template
                 k('-n','fleets','patch','celldfleet',fleet_name,'--type=merge','-p',json.dumps({'spec':{'replicas':1}}))
@@ -250,7 +262,7 @@ nodes:
             for fleet_name, kind in (('alpha','deployment'),('beta','statefulset')):
                 before=get(kind,fleet_name)
                 k('-n','fleets','patch','celldfleet',fleet_name,'--type=merge','-p',json.dumps({'spec':{'maintenance':{'paused':True}}}))
-                wait_for(lambda:get(kind,fleet_name)['metadata'].get('annotations',{}).get('celld.example.com/maintenance-fence')=='paused','pause fence acknowledged: '+fleet_name)
+                wait_for(lambda:get(kind,fleet_name)['metadata'].get('annotations',{}).get('celld.example.com/maintenance-fence')=='paused' and get('celldfleet',fleet_name).get('status',{}).get('readyReplicas')==3 and ready(fleet_name),'pause preserves serving readiness: '+fleet_name)
                 assert get(kind,fleet_name)['spec']==before['spec']
                 k('-n','fleets','patch','celldfleet',fleet_name,'--type=merge','-p',json.dumps({'spec':{'maintenance':{'paused':False,'restartToken':'integration-restart'}}}))
                 wait_for(lambda:any(c['reason']=='DisruptionUnqualified' for c in get('celldfleet',fleet_name).get('status',{}).get('conditions',[])),'restart request blocked: '+fleet_name)

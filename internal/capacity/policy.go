@@ -30,6 +30,10 @@ type Stamp struct{ Runtime, Metrics time.Time }
 
 // State is retained with the lifecycle journal. Status is never an input.
 type State struct {
+	Load               map[string]Load
+	Addition           *Addition
+	IneffectiveBatches int32
+
 	// Actionable is refreshed by each evaluation; cached recommendations are informational.
 	Actionable                                                     bool
 	Config, Membership                                             string
@@ -55,6 +59,10 @@ func reset(s *State) {
 	s.LowSince = time.Time{}
 	s.HighSamples = 0
 	s.LowSamples = 0
+	if s.Addition != nil {
+		s.Addition.Since = time.Time{}
+		s.Addition.Samples = 0
+	}
 }
 
 // Evaluate requires 100% coverage for either direction. Pending replicas reserve
@@ -63,6 +71,10 @@ func Evaluate(p fleet.CapacityPolicy, old State, o Observation, current int32) S
 	s := old
 	s.Actionable = false
 	s.Stamps = make(map[string]Stamp, len(old.Stamps))
+	if old.Addition != nil {
+		addition := *old.Addition
+		s.Addition = &addition
+	}
 
 	s.Decision = fleet.CapacityStatus{Mode: p.Mode, DesiredReplicas: current}
 	hold := func(reason, message string) State { s.Decision.Reason = reason; s.Decision.Message = message; return s }
@@ -141,6 +153,8 @@ func Evaluate(p fleet.CapacityPolicy, old State, o Observation, current int32) S
 		low = false
 	}
 	if intermediate {
+		s.Load = loads(o)
+		_ = assessAddition(p, &s, o.At, current, false)
 		if config != old.Config || membership != old.Membership {
 			return hold("PolicyChanged", "Policy or membership changed; a new stabilization window is required")
 		}
@@ -154,6 +168,12 @@ func Evaluate(p fleet.CapacityPolicy, old State, o Observation, current int32) S
 	if !newSources {
 		reset(&s)
 		return hold("RepeatedSamples", "Source timestamps did not advance for every replica; stabilization restarted")
+	}
+	s.Load = loads(o)
+	if reason := assessAddition(p, &s, o.At, current, true); reason != "" && high && current >= p.MinReplicas {
+		s.HighSince = time.Time{}
+		s.HighSamples = 0
+		return hold(reason, "Observe added capacity; repeated ready-but-idle additions are held until load redistributes or independent CPU demand grows")
 	}
 	if high {
 		s.LowSince = time.Time{}
@@ -195,7 +215,8 @@ func Evaluate(p fleet.CapacityPolicy, old State, o Observation, current int32) S
 		s.Decision.DesiredReplicas = current - 1
 		return hold("ScaleInRecommended", "Low demand across every node; one removal still requires qualified lifecycle evidence")
 	}
-	reset(&s)
+	s.HighSince, s.LowSince = time.Time{}, time.Time{}
+	s.HighSamples, s.LowSamples = 0, 0
 	return hold("WithinThresholds", fmt.Sprintf("All %d replicas observed; demand lies between thresholds", current))
 }
 
@@ -206,6 +227,9 @@ func RecordAction(s *State, now time.Time, from, to int32) {
 	// Retain the qualified low window while a removal intent awaits issuance.
 	// Any subsequent pressure, missing sample or gap still resets it in Evaluate.
 	if to > from {
+		if len(s.Load) == int(from) {
+			s.Addition = &Addition{Before: s.Load, Target: to}
+		}
 		reset(s)
 		s.PendingSince = now
 	} else {
@@ -237,4 +261,12 @@ func LowDemand(p fleet.CapacityPolicy, o Observation, current int32) bool {
 		}
 	}
 	return true
+}
+
+func loads(o Observation) map[string]Load {
+	result := make(map[string]Load, len(o.Samples))
+	for _, v := range o.Samples {
+		result[v.Identity] = Load{CPU: v.CPU, MemoryMiB: v.MemoryMiB, Pressure: v.Pressured || v.Backlog}
+	}
+	return result
 }

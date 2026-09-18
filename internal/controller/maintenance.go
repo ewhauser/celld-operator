@@ -162,6 +162,10 @@ func resetMaintenanceCapacity(j *lifecycleJournal) {
 	if j.Capacity == nil {
 		return
 	}
+	if j.Capacity.Addition != nil {
+		j.Capacity.Addition.Since = time.Time{}
+		j.Capacity.Addition.Samples = 0
+	}
 	j.Capacity.Actionable = false
 	j.Capacity.LowSince, j.Capacity.HighSince = time.Time{}, time.Time{}
 	j.Capacity.LowSamples, j.Capacity.HighSamples = 0, 0

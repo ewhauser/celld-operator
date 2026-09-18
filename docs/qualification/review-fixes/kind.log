@@ -1,0 +1,50 @@
+go build -o /dev/null ./...
+CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=d3ea0df-dirty" -o bin/celld-operator ./cmd/celld-operator
+python3 hack/integration/run.py
+Creating isolated cluster celld-step2-54e88174
+Pulling into disposable node: ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8
+Pulling into disposable node: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+Pulling into disposable node: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+Pulling into disposable node: curlimages/curl:8.12.1
+PASS: create two isolated test buckets
+PASS: qualification app deployed to bucket-alpha
+PASS: qualification app deployed to bucket-beta
+PASS: pre-existing PVC blocks initial StatefulSet creation
+PASS: both runtime profiles ready through operator reconciliation
+PASS: strict replicas use distinct nodes within the configured zone
+PASS: strict placement blocks a missing eligible zone
+PASS: probe same-fleet running
+PASS: probe client running
+PASS: probe client-beta running
+PASS: probe untrusted running
+PASS: probe operator running
+PASS: application writes readable only in their own fleet storage scope
+PASS: same-fleet/operator peer access, cross-fleet/untrusted/client peer denial, ClusterIP health routing
+PASS: cross-namespace storage conflict blocked
+PASS: schema rejects invalid specs and lifecycle mutations
+PASS: additional probe and bucket override are reported as unsafe drift
+PASS: restored original template matches normalized API defaults
+PASS: journaled scale-out after controller restart: alpha
+PASS: unqualified contraction blocked: alpha
+PASS: restored desired capacity: alpha
+PASS: journaled scale-out after controller restart: beta
+PASS: unqualified contraction blocked: beta
+PASS: restored desired capacity: beta
+PASS: both profiles scale out without template changes; contraction gates persist
+PASS: capacity defaults to shadow: alpha
+PASS: missing metrics block automatic capacity: alpha
+PASS: capacity defaults to shadow: beta
+PASS: missing metrics block automatic capacity: beta
+PASS: shadow and opt-in automatic modes preserve capacity with missing metrics; API policy edits/defaults validated
+PASS: pause preserves serving readiness: alpha
+PASS: restart request blocked: alpha
+PASS: unqualified image transition blocked: alpha
+PASS: pause preserves serving readiness: beta
+PASS: restart request blocked: beta
+PASS: unqualified image transition blocked: beta
+PASS: deletion blocked without touching StatefulSet or PVCs
+PASS: restarted controller reconciles readiness from durable reservation
+PASS: reservation persists before blocked initial provisioning
+PASS: replica edit before workload creation preserves reservation baseline
+PASS: controller restart preserves initial workload; all integration assertions passed
+Cleaning up only cluster celld-step2-54e88174

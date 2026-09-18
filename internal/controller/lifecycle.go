@@ -111,11 +111,11 @@ func readJournal(res *fleet.CelldStorageReservation) (*lifecycleJournal, error) 
 	if j.RuntimeImage != Image {
 		return nil, errors.New("unsupported journal runtime image")
 	}
-	if (j.Version != 1 && j.Version != 2) || j.Initial < 1 || j.Initial > 100 || j.Applied < 1 || j.Applied > 100 {
+	if (j.Version != 1 && j.Version != 2 && j.Version != 3) || j.Initial < 1 || j.Initial > 100 || j.Applied < 1 || j.Applied > 100 {
 		return nil, errors.New("invalid lifecycle journal")
 	}
-	// Step-4 binaries reject version 2 instead of ignoring maintenance intent.
-	j.Version = 2
+	// Older binaries reject version 3 instead of ignoring redistribution holds.
+	j.Version = 3
 	if req := j.Request; req != nil {
 		if req.ID == "" || req.SourceImage != j.RuntimeImage || req.WorkloadUID != j.WorkloadUID || (req.Kind != "Upgrade" && req.Kind != "Restart" && req.Kind != "Delete") {
 			return nil, errors.New("invalid disruption request")
@@ -198,7 +198,7 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 		if initial == 0 {
 			initial = replicas(w)
 		}
-		j = &lifecycleJournal{Version: 2, RuntimeImage: Image, Initial: initial, Applied: replicas(w), WorkloadUID: w.GetUID(), Claims: map[string]types.UID{}}
+		j = &lifecycleJournal{Version: 3, RuntimeImage: Image, Initial: initial, Applied: replicas(w), WorkloadUID: w.GetUID(), Claims: map[string]types.UID{}}
 		// Creation records claim UIDs before workload creation. Verify those bindings;
 		// missing or replaced claims can never be adopted.
 		var created map[string]types.UID

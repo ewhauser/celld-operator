@@ -30,6 +30,7 @@ Server. Strict configured AZ placement is unchanged.
 | scaleOutCooldownSeconds | 300 | Minimum time from last durable action to another addition |
 | scaleInCooldownSeconds | 900 | Minimum time from last durable action to a removal request |
 | provisioningTimeoutSeconds | 600 | Deadline for useful capacity, after which additions remain blocked |
+| redistributionObservationSeconds | 120 | Continuous complete observation window for judging an addition, 30–3600 seconds |
 | cpuHighMillicores / cpuLowMillicores | 200 / 80 | Absolute per-container CPU thresholds |
 | memoryHighMiB / memoryLowMiB | 768 / 384 | Absolute per-container memory thresholds |
 
@@ -66,6 +67,31 @@ before issuance; recovery of an already issued action still completes. The
 journal survives controller restart, leader change and status clearing. Do not
 edit reservation annotations to reset it. See [ADR 0013](decisions/0013-capacity-policy.md)
 for field ownership, timestamps and concurrency rules.
+
+After an addition, `ObservingRedistribution` holds another pressure-driven batch
+while observing its effect. The journal retains the incumbent container identities
+and CPU/memory/pressure baseline. Two consecutive additions with idle newcomers,
+unchanged incumbent pressure and no independent CPU increase set
+`LoadNotRedistributed`. Ready pods alone do not release this hold. Release requires
+the full observation window and minimum sample count showing active newcomers,
+fewer pressured incumbents, or aggregate CPU growth exceeding both 10% of the
+baseline and `cpuLowMillicores`. Newcomer activity uses the configured low CPU
+threshold. Memory footprint or backlog alone is not evidence of useful
+redistribution. These are conservative diagnostics, not proof of improved
+application latency.
+
+Missing, repeated or stale samples reset the observation window. Intervening
+contrary samples invalidate improvement even between counted sample intervals.
+Restart, pause and policy edits retain the failed-batch count and baseline;
+pause resets positive observation windows. Replaced incumbent identities report
+`RedistributionUnknown` rather than treating their disappearance as relief.
+An explicit minimum still permits bounded additions to reach that floor, and
+manual replica commands retain their existing precedence. Do not edit reservation
+annotations to clear holds.
+
+Fleet reconciliations use four workers, so one slow collector does not occupy the
+entire controller. Each collection still has its ten-second deadline and eight
+per-pod workers. This is bounded concurrency, not an unlimited-fleet timing SLA.
 
 [Validation and remaining limitations](qualification/capacity/README.md).
 

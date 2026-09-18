@@ -104,7 +104,7 @@ installs SHA-checked Calico, local MinIO and local-path persistent volumes, runs
 real pinned runtime and operator with its ServiceAccount RBAC, tests strict missing-zone blocking, then deletes only
 that invocation's cluster. It never uses a pre-existing cluster. Docker images and
 build caches may remain. Tests need Docker, kind, kubectl, network access and enough
-memory for a Kubernetes node and four runtime pods. No AWS qualification follows
+memory for three Kubernetes nodes and at least six runtime pods. No AWS qualification follows
 from this local test, and local-path disk recovery is not EBS recovery.
 
 Recorded results and remaining limits: [step 2 evidence](qualification/infrastructure/README.md).
@@ -145,3 +145,28 @@ blockers. Deletion retains its finalizer and all identities; it is not a support
 cleanup operation. Never delete a reservation to reuse a bucket or retained disk.
 
 Step 5 [validation and limitations](qualification/maintenance/README.md).
+
+## Review corrections
+
+Strict placement now requires same-fleet pods to use distinct hostnames, in
+addition to the zone constraints. Insufficient eligible hosts leave pods Pending.
+Relaxed placement keeps the AZ allowlist but makes both hostname separation and
+zone balance preferences. Node separation still does not establish runtime
+follower AZ diversity.
+
+The stronger pod template applies to newly provisioned fleets. Existing templates
+without hostname anti-affinity are detected as drift; the operator does not roll
+out a disruptive template repair. They need a separately qualified migration.
+Do not delete reservations or edit journals to bypass that boundary.
+
+`status.readyReplicas` and `Ready` now describe the owned workload's observed
+availability, independent of desired scaling or maintenance permission. A paused
+fleet or an unsupported restart/image request can remain Ready while Blocked is
+also true. Workload status must cover its current generation; missing or replaced
+fleet identities cannot supply availability. `Ready` is not a recovery certificate.
+
+New journal writes use version 3 to preserve redistribution holds against an
+older binary silently ignoring them. Versions 1 and 2 are read conservatively;
+older binaries reject version 3. Downgrading after journal advancement is not a
+supported rollback procedure. All contraction and maintenance qualification gates
+remain unchanged.

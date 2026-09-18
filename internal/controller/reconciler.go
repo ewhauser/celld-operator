@@ -22,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	controlleroptions "sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
@@ -252,6 +253,25 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, reason, me
 		f.Status.Reservation = reservationName(f)
 	}
 	f.Status.ObservedGeneration = f.Generation
+	observed := emptyObject(workload(f, r.Options))
+	serving := false
+	if err := r.Get(ctx, client.ObjectKeyFromObject(f), observed); err != nil && !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, err
+	} else if err == nil && observed.GetLabels()[FleetLabel] == string(f.UID) && observed.GetDeletionTimestamp().IsZero() {
+		var generation int64
+		switch w := observed.(type) {
+		case *appsv1.Deployment:
+			ready, generation = w.Status.ReadyReplicas, w.Status.ObservedGeneration
+		case *appsv1.StatefulSet:
+			ready, generation = w.Status.ReadyReplicas, w.Status.ObservedGeneration
+		}
+		if generation < observed.GetGeneration() {
+			ready = 0
+		}
+		serving = ready > 0 && ready == replicas(observed)
+	} else {
+		ready = 0
+	}
 	f.Status.ReadyReplicas = ready
 	set := func(kind string, yes bool, why, msg string) {
 		status := metav1.ConditionFalse
@@ -260,15 +280,9 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, reason, me
 		}
 		meta.SetStatusCondition(&f.Status.Conditions, metav1.Condition{Type: kind, Status: status, Reason: why, Message: msg, ObservedGeneration: f.Generation})
 	}
-	expectedReady := f.Spec.Replicas
-	if f.Spec.Capacity != nil {
-		if j, err := readJournal(res); err == nil && j != nil {
-			expectedReady = j.Applied
-		}
-	}
 	set("MaintenancePaused", paused(f), reason, message)
 	set("Deleting", !f.DeletionTimestamp.IsZero(), reason, message)
-	set("Ready", provisioned && ready == expectedReady, reason, message)
+	set("Ready", serving, reason, message)
 	set("InfrastructureReady", provisioned || reason == "LifecycleProgress", reason, message)
 	set("Progressing", reason == "LifecycleProgress" || reason == "Provisioning", reason, message)
 	set("Blocked", !provisioned && reason != "LifecycleProgress", reason, message)
@@ -283,5 +297,9 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, reason, me
 }
 
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).For(&fleet.CelldFleet{}).Complete(r)
+	return ctrl.NewControllerManagedBy(mgr).For(&fleet.CelldFleet{}).WithOptions(fleetControllerOptions()).Complete(r)
+}
+
+func fleetControllerOptions() controlleroptions.Options {
+	return controlleroptions.Options{MaxConcurrentReconciles: 4}
 }

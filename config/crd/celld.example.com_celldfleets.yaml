@@ -121,6 +121,14 @@ spec:
                     maximum: 86400
                     minimum: 60
                     type: integer
+                  redistributionObservationSeconds:
+                    default: 120
+                    description: Continuous complete observation after an addition
+                      before judging redistribution.
+                    format: int32
+                    maximum: 3600
+                    minimum: 30
+                    type: integer
                   sampleIntervalSeconds:
                     default: 15
                     format: int32

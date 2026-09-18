@@ -7,6 +7,12 @@ import "fmt"
 // +kubebuilder:validation:XValidation:rule="self.cpuLowMillicores < self.cpuHighMillicores && self.memoryLowMiB < self.memoryHighMiB",message="low thresholds must be below high thresholds"
 // +kubebuilder:validation:XValidation:rule="self.minWindowSeconds <= self.maxWindowSeconds && self.sampleIntervalSeconds <= self.maxAgeSeconds",message="invalid sampling windows"
 type CapacityPolicy struct {
+	// Continuous complete observation after an addition before judging redistribution.
+	// +kubebuilder:default=120
+	// +kubebuilder:validation:Minimum=30
+	// +kubebuilder:validation:Maximum=3600
+	RedistributionObservationSeconds int32 `json:"redistributionObservationSeconds,omitempty"`
+
 	// +kubebuilder:default=Shadow
 	// +kubebuilder:validation:Enum=Shadow;ScaleOut;Automatic
 	Mode string `json:"mode,omitempty"`
@@ -91,6 +97,9 @@ type CapacityStatus struct {
 }
 
 func (p *CapacityPolicy) Default() {
+	if p.RedistributionObservationSeconds == 0 {
+		p.RedistributionObservationSeconds = 120
+	}
 	if p.Mode == "" {
 		p.Mode = "Shadow"
 	}
@@ -147,6 +156,9 @@ func (p *CapacityPolicy) Default() {
 	}
 }
 func (p *CapacityPolicy) Validate() error {
+	if p.RedistributionObservationSeconds < 30 || p.RedistributionObservationSeconds > 3600 {
+		return fmt.Errorf("capacity.redistributionObservationSeconds must be 30..3600")
+	}
 	if p.Mode != "Shadow" && p.Mode != "ScaleOut" && p.Mode != "Automatic" {
 		return fmt.Errorf("invalid capacity mode")
 	}

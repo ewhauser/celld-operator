@@ -129,6 +129,13 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 			},
 		},
 	}
+	hostTerm := corev1.PodAffinityTerm{LabelSelector: selector(f), TopologyKey: corev1.LabelHostname}
+	pod.Affinity.PodAntiAffinity = &corev1.PodAntiAffinity{}
+	if s.Placement.Mode == "Relaxed" {
+		pod.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution = []corev1.WeightedPodAffinityTerm{{Weight: 100, PodAffinityTerm: hostTerm}}
+	} else {
+		pod.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution = []corev1.PodAffinityTerm{hostTerm}
+	}
 	if s.Profile == "Bucket" {
 		size := resource.MustParse(fmt.Sprintf("%dGi", s.Storage.SizeGiB))
 		pod.Volumes = []corev1.Volume{{Name: "data", EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: &size}}}
