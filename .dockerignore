@@ -6,3 +6,6 @@ docs/
 .DS_Store
 coverage.out
 *.test
+.qualification-venv/
+.qualification-runs/
+**/__pycache__/

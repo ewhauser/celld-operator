@@ -16,7 +16,10 @@ make check
 This builds all packages and `bin/celld-operator`, runs `go test -race`, and runs
 the pinned golangci-lint suite. The command currently supports `--help` and
 `--version`; starting it without either flag reports that reconciliation is not
-implemented. There are no application tests yet.
+implemented. A versioned runtime adapter, fixture tests, and an isolated local
+qualification harness are available; they do not enable production scaling.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for formatting, linting, hooks, and container
 builds, and [docs/](docs/README.md) for the architecture and qualification work.
+
+Runtime qualification: [measured findings and release gates](docs/qualification/README.md), [local harness](hack/qualification/README.md).

@@ -1,0 +1,89 @@
+{
+  "observed_unix_ms": 1789748849296,
+  "complete": true,
+  "nodes": {
+    "nodes/a.json": {
+      "node": "a",
+      "expires_ms": 1789748856244,
+      "addr": "a:8081",
+      "probe_public_key": "b6c94094f3fec2d622dfe1ea1a7f7abbeacd47724905242e8248c6fbba4bbdd9",
+      "peer_protocol": 5,
+      "paced_handoff": true,
+      "ownership_index_generation": "b6c94094f3fec2d622dfe1ea1a7f7abbeacd47724905242e8248c6fbba4bbdd9",
+      "log": {
+        "state": "open",
+        "epoch": 1,
+        "ensemble": [
+          "b"
+        ],
+        "tiered": 0,
+        "active": false,
+        "claimant": null,
+        "claimed_ms": null
+      },
+      "load": {
+        "sampled_ms": 1789748846245,
+        "owned_cells": 0,
+        "placement_weight": 4,
+        "bucket_format": 2,
+        "resident_cells": 0,
+        "host_websockets": 0,
+        "rss_bytes": 57171968,
+        "in_use_bytes": 48579784,
+        "cgroup_working_set_bytes": 127946752,
+        "cgroup_current_bytes": 127983616,
+        "cpu_percent_x100": 498,
+        "open_fds": 26,
+        "fd_limit": 524288,
+        "pressured": true,
+        "memory_headroom": false,
+        "shed_cells": 2,
+        "restoring": 0,
+        "rebalance_paused": false,
+        "draining": false
+      }
+    },
+    "nodes/b.json": {
+      "node": "b",
+      "expires_ms": 1789748859050,
+      "addr": "b:8081",
+      "probe_public_key": "ddae32f76e3e67e7a518aae75a407d9586888bf1392daebd902b63533086aef3",
+      "peer_protocol": 5,
+      "paced_handoff": true,
+      "ownership_index_generation": "ddae32f76e3e67e7a518aae75a407d9586888bf1392daebd902b63533086aef3",
+      "log": {
+        "state": "open",
+        "epoch": 1,
+        "ensemble": [
+          "a"
+        ],
+        "tiered": 0,
+        "active": false,
+        "claimant": null,
+        "claimed_ms": null
+      },
+      "load": {
+        "sampled_ms": 1789748849051,
+        "owned_cells": 1,
+        "placement_weight": 4,
+        "bucket_format": 2,
+        "resident_cells": 1,
+        "host_websockets": 0,
+        "rss_bytes": 53768192,
+        "in_use_bytes": 45489424,
+        "cgroup_working_set_bytes": 23498752,
+        "cgroup_current_bytes": 23605248,
+        "cpu_percent_x100": 499,
+        "open_fds": 38,
+        "fd_limit": 524288,
+        "pressured": false,
+        "memory_headroom": true,
+        "shed_cells": 0,
+        "restoring": 0,
+        "rebalance_paused": false,
+        "draining": false
+      }
+    }
+  },
+  "log_keys": []
+}

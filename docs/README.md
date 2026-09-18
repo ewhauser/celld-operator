@@ -9,3 +9,5 @@ The supporting investigations are:
 - [Read-only S3 recovery evidence](s3-recovery-evidence.md): the proposed metadata contract, IAM scope, conservative removal sequence, and required tests.
 
 These documents describe decisions and investigation results. They do not establish that the operator is implemented or production-qualified.
+
+Step 1 implementation and measured local results: [qualification findings](qualification/README.md), with [repeatable harness commands](../hack/qualification/README.md).

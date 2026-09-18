@@ -1,0 +1,17 @@
+[
+  {
+    "scenario": "incumbent-startup",
+    "ready_seconds": 4.079
+  },
+  {
+    "scenario": "pressured-startup",
+    "ready_seconds": null,
+    "observation_window_seconds": 20
+  },
+  {
+    "scenario": "pressure-cleared",
+    "ready_seconds": 1.009,
+    "acknowledged": 5,
+    "missing": []
+  }
+]

@@ -34,3 +34,15 @@ image:
 
 clean:
 	rm -rf bin
+
+.PHONY: qualification-replay qualification-local
+qualification-replay:
+	sh hack/qualification/replay.sh
+
+# Explicit opt-in. Each run uses isolated local Docker resources and a new output directory.
+qualification-local:
+	.qualification-venv/bin/python hack/qualification/run.py --scenario $(SCENARIO) --output $(OUTPUT)
+
+.PHONY: qualification-test
+qualification-test:
+	.qualification-venv/bin/python -m unittest discover -s hack/qualification -p 'test_*.py'

@@ -1,0 +1,38 @@
+[
+  {
+    "scenario": "startup-a",
+    "ready_seconds": 4.109
+  },
+  {
+    "scenario": "startup-b",
+    "ready_seconds": 1.063
+  },
+  {
+    "scenario": "startup-c",
+    "ready_seconds": 1.053
+  },
+  {
+    "scenario": "graceful",
+    "exit_code": 0,
+    "stop_seconds": 0.21,
+    "candidate_complete": true,
+    "loss": [],
+    "recovery_seconds": 28.406,
+    "acknowledged": 30,
+    "missing": []
+  },
+  {
+    "scenario": "next-controlled-removal-gate",
+    "blocked": false
+  },
+  {
+    "scenario": "second-graceful",
+    "exit_code": 0,
+    "stop_seconds": 0.213,
+    "candidate_complete": true,
+    "loss": [],
+    "recovery_seconds": 30.54,
+    "acknowledged": 60,
+    "missing": []
+  }
+]

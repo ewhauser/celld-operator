@@ -1,0 +1,63 @@
+{
+  "source_run": "pressure-3",
+  "files": {
+    "pressure-metadata.json": {
+      "source_sha256": "ee6b380b9267bf294f3b975b83aa35508b70a3044e68550e1547677bb814e6a3",
+      "export_sha256": "ee6b380b9267bf294f3b975b83aa35508b70a3044e68550e1547677bb814e6a3",
+      "removed_fields": []
+    },
+    "incumbent-after-join-state.json": {
+      "source_sha256": "8cf4a7441d9e7778182aa0781c5fc8280c6657c74a960d9e18fb275734194235",
+      "export_sha256": "c01d9ce9ae62f9a43eaf928871f63d5205d95b52d5150695d0e3664d719a9a77",
+      "removed_fields": [
+        "deployment",
+        "residents",
+        "published"
+      ]
+    },
+    "joining-state.json": {
+      "source_sha256": "056bf63d15412e3a3e67042fc10d6fb3c63146ec41d2a12c686b2ade92b76bdd",
+      "export_sha256": "4bc738cd7db7eb180c2bd2160757f79a8249785b8f009ebe6e86bc7184f86aa9",
+      "removed_fields": [
+        "deployment",
+        "residents",
+        "published"
+      ]
+    },
+    "pressured-incumbent-state.json": {
+      "source_sha256": "6e5155fe49f648787422471b80d9b891415d4d3df4d6f7b4533451678a3a162a",
+      "export_sha256": "601b2d323154d8b6faf07f76df476404c66a5a6dd0af340b097a737904e126dc",
+      "removed_fields": [
+        "deployment",
+        "residents",
+        "published"
+      ]
+    },
+    "results.json": {
+      "source_sha256": "75f71bb898e1c54051115d36c68120036857fc1f6779cdb36765698237a948d1",
+      "export_sha256": "75f71bb898e1c54051115d36c68120036857fc1f6779cdb36765698237a948d1",
+      "removed_fields": []
+    },
+    "version.json": {
+      "source_sha256": "f702dacfb7fc43b9fa6857be3b66e12cc8d4272018f79d60ce98533bda942533",
+      "export_sha256": "f702dacfb7fc43b9fa6857be3b66e12cc8d4272018f79d60ce98533bda942533",
+      "removed_fields": []
+    },
+    "acknowledged-ledger.json": {
+      "source_sha256": "052bf7de4a45f66b8e45490267574de4f4ed2f79db19e294acbdb4e1653c899a",
+      "export_sha256": "052bf7de4a45f66b8e45490267574de4f4ed2f79db19e294acbdb4e1653c899a",
+      "removed_fields": []
+    }
+  },
+  "runtime": {
+    "architecture": "arm64",
+    "labels": {
+      "org.opencontainers.image.revision": "12d5b6333fe52717325addcfe1e99e9fd4f77bcd",
+      "org.opencontainers.image.title": "celld",
+      "org.opencontainers.image.version": "0.5.0"
+    },
+    "repo_digests": [
+      "ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8"
+    ]
+  }
+}

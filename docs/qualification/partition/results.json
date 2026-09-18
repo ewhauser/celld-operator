@@ -1,0 +1,13 @@
+[
+  {
+    "scenario": "network-partition",
+    "process_still_running": false,
+    "observation_seconds": 10.466,
+    "exit_code": 3,
+    "candidate_complete": true,
+    "loss": [],
+    "recovery_seconds": 18.293,
+    "acknowledged": 30,
+    "missing": []
+  }
+]

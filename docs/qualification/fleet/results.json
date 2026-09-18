@@ -1,0 +1,54 @@
+[
+  {
+    "scenario": "startup-a",
+    "ready_seconds": 1.063
+  },
+  {
+    "scenario": "startup-b",
+    "ready_seconds": 1.064
+  },
+  {
+    "scenario": "startup-c",
+    "ready_seconds": 1.05
+  },
+  {
+    "scenario": "graceful",
+    "exit_code": 0,
+    "stop_seconds": 0.219,
+    "candidate_complete": true,
+    "loss": [],
+    "recovery_seconds": 28.416,
+    "acknowledged": 30,
+    "missing": []
+  },
+  {
+    "scenario": "next-controlled-removal-gate",
+    "blocked": false
+  },
+  {
+    "scenario": "abrupt-process-loss",
+    "exit_code": 137,
+    "stop_seconds": 0.183,
+    "candidate_complete": true,
+    "loss": [],
+    "recovery_seconds": 30.472,
+    "acknowledged": 60,
+    "missing": []
+  },
+  {
+    "scenario": "retained-disk-restart",
+    "ready_seconds": 1.063,
+    "acknowledged": 60,
+    "missing": []
+  },
+  {
+    "scenario": "deadline-cut-storage-stall",
+    "exit_code": 0,
+    "stop_seconds": 0.149,
+    "candidate_complete": true,
+    "loss": [],
+    "recovery_seconds": 18.291,
+    "acknowledged": 70,
+    "missing": []
+  }
+]

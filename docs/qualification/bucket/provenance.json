@@ -1,0 +1,75 @@
+{
+  "source_run": "bucket-1",
+  "files": {
+    "after-abrupt-metadata.json": {
+      "source_sha256": "d697d34113fc9b2dcc223dd2def27196ccb8430dad1d21fe8011dd7e2b5e1688",
+      "export_sha256": "d697d34113fc9b2dcc223dd2def27196ccb8430dad1d21fe8011dd7e2b5e1688",
+      "removed_fields": []
+    },
+    "after-deadline-metadata.json": {
+      "source_sha256": "b232c0e14fbf49bfb7ee85f268f65c4653cd9b1d62a83c8f4e900ddbfae2f978",
+      "export_sha256": "b232c0e14fbf49bfb7ee85f268f65c4653cd9b1d62a83c8f4e900ddbfae2f978",
+      "removed_fields": []
+    },
+    "after-graceful-metadata.json": {
+      "source_sha256": "3926f2ae100489026c6c07685b4ef7564118d5b2ce2417b6e6600b7298ac0601",
+      "export_sha256": "3926f2ae100489026c6c07685b4ef7564118d5b2ce2417b6e6600b7298ac0601",
+      "removed_fields": []
+    },
+    "before-abrupt-metadata.json": {
+      "source_sha256": "cc7926128ea7cd98dd0d33e8a4869acab9b3227853e2f0acb6401abbedde4cd6",
+      "export_sha256": "cc7926128ea7cd98dd0d33e8a4869acab9b3227853e2f0acb6401abbedde4cd6",
+      "removed_fields": []
+    },
+    "before-deadline-metadata.json": {
+      "source_sha256": "f73f7c54757a7c42fd7f8ece61884b13ef1a6bca450419c9c219d81427e3ac60",
+      "export_sha256": "f73f7c54757a7c42fd7f8ece61884b13ef1a6bca450419c9c219d81427e3ac60",
+      "removed_fields": []
+    },
+    "before-graceful-metadata.json": {
+      "source_sha256": "1a463ebf49019c8fd0a9b81bc02bac2c76446fe8a0bdf054fbb889ca999602a1",
+      "export_sha256": "1a463ebf49019c8fd0a9b81bc02bac2c76446fe8a0bdf054fbb889ca999602a1",
+      "removed_fields": []
+    },
+    "immediate-deadline-metadata.json": {
+      "source_sha256": "2bf19889d95cf1f2ce68deb6147f685cc8ff181cda3fc96dc8e175ba8c28ec1b",
+      "export_sha256": "2bf19889d95cf1f2ce68deb6147f685cc8ff181cda3fc96dc8e175ba8c28ec1b",
+      "removed_fields": []
+    },
+    "before-graceful-state.json": {
+      "source_sha256": "3fd68b852b741c3b2b497345a3341d9b1f2bbf12658459b99c45f9dfce64f5ef",
+      "export_sha256": "3d60c9b436275d27c8a4235f08671138a12879b3243cc6fd28f976316ba2580d",
+      "removed_fields": [
+        "deployment",
+        "residents",
+        "published"
+      ]
+    },
+    "results.json": {
+      "source_sha256": "ace186b5c6656e4d7eb5f3944211420cfe8ba58bbf84f09794f74cd978b1adbc",
+      "export_sha256": "ace186b5c6656e4d7eb5f3944211420cfe8ba58bbf84f09794f74cd978b1adbc",
+      "removed_fields": []
+    },
+    "version.json": {
+      "source_sha256": "f702dacfb7fc43b9fa6857be3b66e12cc8d4272018f79d60ce98533bda942533",
+      "export_sha256": "f702dacfb7fc43b9fa6857be3b66e12cc8d4272018f79d60ce98533bda942533",
+      "removed_fields": []
+    },
+    "acknowledged-ledger.json": {
+      "source_sha256": "5e2fb00eeca2e9a421c81a492dcaf4deaf0fa85703376465d5a4bf756c5f3357",
+      "export_sha256": "5e2fb00eeca2e9a421c81a492dcaf4deaf0fa85703376465d5a4bf756c5f3357",
+      "removed_fields": []
+    }
+  },
+  "runtime": {
+    "architecture": "arm64",
+    "labels": {
+      "org.opencontainers.image.revision": "12d5b6333fe52717325addcfe1e99e9fd4f77bcd",
+      "org.opencontainers.image.title": "celld",
+      "org.opencontainers.image.version": "0.5.0"
+    },
+    "repo_digests": [
+      "ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8"
+    ]
+  }
+}

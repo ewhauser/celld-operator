@@ -1,0 +1,90 @@
+{
+  "source_run": "review-contraction",
+  "files": {
+    "after-abrupt-metadata.json": {
+      "source_sha256": "4fab16074a4fe4f8145c0b09eded9e5a27bcd0506a8c907a41d813e42f952469",
+      "export_sha256": "4fab16074a4fe4f8145c0b09eded9e5a27bcd0506a8c907a41d813e42f952469",
+      "removed_fields": []
+    },
+    "after-graceful-metadata.json": {
+      "source_sha256": "09ebe2c3e0c29109672dfc1609205703675b7eacff56d8ebaab8ea86114acc42",
+      "export_sha256": "09ebe2c3e0c29109672dfc1609205703675b7eacff56d8ebaab8ea86114acc42",
+      "removed_fields": []
+    },
+    "before-abrupt-metadata.json": {
+      "source_sha256": "27b511d4e9cf53a34e38a095fad06b1ddb4a3daede4a168ad6126f37af770a84",
+      "export_sha256": "27b511d4e9cf53a34e38a095fad06b1ddb4a3daede4a168ad6126f37af770a84",
+      "removed_fields": []
+    },
+    "before-graceful-metadata.json": {
+      "source_sha256": "536597635b2f61dc5c49470fbbbaff33fba11510dd3ba8b36ffd076e97b7bd7d",
+      "export_sha256": "536597635b2f61dc5c49470fbbbaff33fba11510dd3ba8b36ffd076e97b7bd7d",
+      "removed_fields": []
+    },
+    "immediate-graceful-metadata.json": {
+      "source_sha256": "da88493f8cdbc206f21d9e84946ce3f47e6ae5d2a92f55771a7ba7b6d955bb33",
+      "export_sha256": "da88493f8cdbc206f21d9e84946ce3f47e6ae5d2a92f55771a7ba7b6d955bb33",
+      "removed_fields": []
+    },
+    "immediate-second-removal-metadata.json": {
+      "source_sha256": "c00dc68b29d6edad82387df1c2f491a094b01ab7e342aba8b5fa80385fd2ebcf",
+      "export_sha256": "c00dc68b29d6edad82387df1c2f491a094b01ab7e342aba8b5fa80385fd2ebcf",
+      "removed_fields": []
+    },
+    "before-graceful-state.json": {
+      "source_sha256": "565675f1646b65ab7a8d03b1ddfa384dab54ae405f7caf11295fc31be88b31c6",
+      "export_sha256": "acd6dc10d1de34a3767898dc66a7f0f5b1ae808c830b0b6821654f4d2dd40354",
+      "removed_fields": [
+        "deployment",
+        "residents",
+        "published"
+      ]
+    },
+    "a-health-1.json": {
+      "source_sha256": "d28b716c0b89cc00ab3a511cb23c4cf05e2aa37c9769868cbbb5e9f803311056",
+      "export_sha256": "d28b716c0b89cc00ab3a511cb23c4cf05e2aa37c9769868cbbb5e9f803311056",
+      "removed_fields": []
+    },
+    "b-health-2.json": {
+      "source_sha256": "ddd3a3a7ff0d48df929166215d99462204025b436150b83ce643055db564ecf1",
+      "export_sha256": "ddd3a3a7ff0d48df929166215d99462204025b436150b83ce643055db564ecf1",
+      "removed_fields": []
+    },
+    "c-health-3.json": {
+      "source_sha256": "b2361288dc49d6b9a2d134d22a398d62f55c337b5447f9157553c288ac2430f1",
+      "export_sha256": "b2361288dc49d6b9a2d134d22a398d62f55c337b5447f9157553c288ac2430f1",
+      "removed_fields": []
+    },
+    "results.json": {
+      "source_sha256": "91f40454a0b68a211338072e575c2381214edd6978ca962629bbabcafe773167",
+      "export_sha256": "91f40454a0b68a211338072e575c2381214edd6978ca962629bbabcafe773167",
+      "removed_fields": []
+    },
+    "version.json": {
+      "source_sha256": "f702dacfb7fc43b9fa6857be3b66e12cc8d4272018f79d60ce98533bda942533",
+      "export_sha256": "f702dacfb7fc43b9fa6857be3b66e12cc8d4272018f79d60ce98533bda942533",
+      "removed_fields": []
+    },
+    "acknowledged-ledger.json": {
+      "source_sha256": "6dc4005a91438d46f17a0b8aea2cd8a2ad2ce90ba01975f2ed03c4537c4cd3b4",
+      "export_sha256": "6dc4005a91438d46f17a0b8aea2cd8a2ad2ce90ba01975f2ed03c4537c4cd3b4",
+      "removed_fields": []
+    },
+    "harness.json": {
+      "source_sha256": "a260c83a867f16e92e28227843b2eba3952b3dfd2bd6f7e6327471dbb9714da2",
+      "export_sha256": "a260c83a867f16e92e28227843b2eba3952b3dfd2bd6f7e6327471dbb9714da2",
+      "removed_fields": []
+    }
+  },
+  "runtime": {
+    "architecture": "arm64",
+    "labels": {
+      "org.opencontainers.image.revision": "12d5b6333fe52717325addcfe1e99e9fd4f77bcd",
+      "org.opencontainers.image.title": "celld",
+      "org.opencontainers.image.version": "0.5.0"
+    },
+    "repo_digests": [
+      "ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8"
+    ]
+  }
+}

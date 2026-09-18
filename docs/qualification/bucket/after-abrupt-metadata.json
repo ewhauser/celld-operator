@@ -1,0 +1,37 @@
+{
+  "observed_unix_ms": 1789748234005,
+  "complete": true,
+  "nodes": {
+    "nodes/c.json": {
+      "node": "c",
+      "expires_ms": 1789748241550,
+      "addr": "c:8081",
+      "probe_public_key": "afc18e06a861d7b7b1c7597693ce4793e69a5f3bfd65f1ef93f94d23f5a74889",
+      "peer_protocol": 5,
+      "paced_handoff": true,
+      "ownership_index_generation": "afc18e06a861d7b7b1c7597693ce4793e69a5f3bfd65f1ef93f94d23f5a74889",
+      "load": {
+        "sampled_ms": 1789748231550,
+        "owned_cells": 1,
+        "placement_weight": 4,
+        "bucket_format": 2,
+        "resident_cells": 1,
+        "host_websockets": 0,
+        "rss_bytes": 49745920,
+        "in_use_bytes": 41926104,
+        "cgroup_working_set_bytes": 19668992,
+        "cgroup_current_bytes": 19767296,
+        "cpu_percent_x100": 99,
+        "open_fds": 28,
+        "fd_limit": 524288,
+        "pressured": false,
+        "memory_headroom": true,
+        "shed_cells": 0,
+        "restoring": 0,
+        "rebalance_paused": false,
+        "draining": false
+      }
+    }
+  },
+  "log_keys": []
+}

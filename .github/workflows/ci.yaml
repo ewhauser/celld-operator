@@ -33,6 +33,12 @@ jobs:
           go-version-file: go.mod
           cache: false
       - run: make test
+      - run: make qualification-replay
+      - name: Prepare qualification collector tests
+        run: |
+          python3 -m venv .qualification-venv
+          .qualification-venv/bin/pip install -r hack/qualification/requirements.txt
+      - run: make qualification-test
 
   lint:
     runs-on: ubuntu-latest

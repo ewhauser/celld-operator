@@ -56,6 +56,9 @@ actionlint .github/workflows/ci.yaml
 ```
 
 CI has separate build, race-test, and lint jobs using the same Make targets.
+The test job also runs `make qualification-replay` and `make qualification-test`;
+see the [qualification harness](hack/qualification/README.md) for Python setup
+and the separately invoked local Docker experiments.
 GitHub Actions are pinned to immutable commits and workflow permissions are
 read-only. Renovate follows the source project's security-only update policy,
 three-day release cooldown, and grouped, digest-pinned GitHub Actions updates.

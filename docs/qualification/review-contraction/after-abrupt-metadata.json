@@ -1,0 +1,131 @@
+{
+  "observed_unix_ms": 1789749123359,
+  "complete": true,
+  "nodes": {
+    "nodes/a.json": {
+      "node": "a",
+      "expires_ms": 0,
+      "ownership_index_generation": "0a3e41861a81b062f7ce646ba49f28b25c23e63349ec668f7c31fb6d6c35387a",
+      "probe_public_key": "0a3e41861a81b062f7ce646ba49f28b25c23e63349ec668f7c31fb6d6c35387a",
+      "log": {
+        "active": true,
+        "claimant": null,
+        "claimed_ms": null,
+        "ensemble": [
+          "b"
+        ],
+        "epoch": 1,
+        "state": "sealed",
+        "tiered": 0
+      },
+      "addr": "a:8081",
+      "load": {
+        "bucket_format": 2,
+        "cgroup_current_bytes": 20824064,
+        "cgroup_working_set_bytes": 20676608,
+        "cpu_percent_x100": 99,
+        "draining": false,
+        "fd_limit": 524288,
+        "host_websockets": 0,
+        "in_use_bytes": 41468752,
+        "memory_headroom": true,
+        "open_fds": 36,
+        "owned_cells": 0,
+        "placement_weight": 4,
+        "pressured": false,
+        "rebalance_paused": false,
+        "resident_cells": 0,
+        "restoring": 0,
+        "rss_bytes": 47185920,
+        "sampled_ms": 1789749063569,
+        "shed_cells": 0
+      },
+      "paced_handoff": true,
+      "peer_protocol": 5
+    },
+    "nodes/b.json": {
+      "node": "b",
+      "expires_ms": 0,
+      "ownership_index_generation": "7ed4e09d58c2e755b5092c9c44913d1fcc9d7d414ba852f8c84f58a562251d66",
+      "probe_public_key": "7ed4e09d58c2e755b5092c9c44913d1fcc9d7d414ba852f8c84f58a562251d66",
+      "log": {
+        "active": true,
+        "claimant": null,
+        "claimed_ms": null,
+        "ensemble": [
+          "c"
+        ],
+        "epoch": 2,
+        "state": "sealed",
+        "tiered": 0
+      },
+      "addr": "b:8081",
+      "load": {
+        "bucket_format": 2,
+        "cgroup_current_bytes": 24801280,
+        "cgroup_working_set_bytes": 24502272,
+        "cpu_percent_x100": 99,
+        "draining": false,
+        "fd_limit": 524288,
+        "host_websockets": 0,
+        "in_use_bytes": 45198464,
+        "memory_headroom": true,
+        "open_fds": 37,
+        "owned_cells": 0,
+        "placement_weight": 4,
+        "pressured": false,
+        "rebalance_paused": false,
+        "resident_cells": 0,
+        "restoring": 0,
+        "rss_bytes": 54345728,
+        "sampled_ms": 1789749092576,
+        "shed_cells": 0
+      },
+      "paced_handoff": true,
+      "peer_protocol": 5
+    },
+    "nodes/c.json": {
+      "node": "c",
+      "expires_ms": 1789749132366,
+      "addr": "c:8081",
+      "probe_public_key": "6c53fb94a8b578f10ba9fc1ffb55edd7b627810936604e4cf56ea88c2acf62b5",
+      "peer_protocol": 5,
+      "paced_handoff": true,
+      "ownership_index_generation": "6c53fb94a8b578f10ba9fc1ffb55edd7b627810936604e4cf56ea88c2acf62b5",
+      "log": {
+        "state": "open",
+        "epoch": 1,
+        "ensemble": [
+          "a",
+          "b"
+        ],
+        "tiered": 0,
+        "active": false,
+        "claimant": null,
+        "claimed_ms": null
+      },
+      "load": {
+        "sampled_ms": 1789749122367,
+        "owned_cells": 2,
+        "placement_weight": 4,
+        "bucket_format": 2,
+        "resident_cells": 1,
+        "host_websockets": 0,
+        "rss_bytes": 50159616,
+        "in_use_bytes": 42344984,
+        "cgroup_working_set_bytes": 19984384,
+        "cgroup_current_bytes": 20197376,
+        "cpu_percent_x100": 200,
+        "open_fds": 39,
+        "fd_limit": 524288,
+        "pressured": false,
+        "memory_headroom": true,
+        "shed_cells": 0,
+        "restoring": 0,
+        "rebalance_paused": false,
+        "draining": false
+      }
+    }
+  },
+  "log_keys": []
+}

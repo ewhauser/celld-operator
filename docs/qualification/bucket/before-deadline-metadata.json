@@ -1,0 +1,67 @@
+{
+  "observed_unix_ms": 1789748245784,
+  "complete": true,
+  "nodes": {
+    "nodes/b.json": {
+      "node": "b",
+      "expires_ms": 1789748254591,
+      "addr": "b:8081",
+      "probe_public_key": "141be2b479749a2fda48eb427a34314c34d0a79269ae380500e7984899fb8621",
+      "peer_protocol": 5,
+      "paced_handoff": true,
+      "ownership_index_generation": "141be2b479749a2fda48eb427a34314c34d0a79269ae380500e7984899fb8621",
+      "load": {
+        "sampled_ms": 1789748244592,
+        "owned_cells": 0,
+        "placement_weight": 4,
+        "bucket_format": 2,
+        "resident_cells": 0,
+        "host_websockets": 0,
+        "rss_bytes": 40144896,
+        "in_use_bytes": 33055552,
+        "cgroup_working_set_bytes": 16089088,
+        "cgroup_current_bytes": 16089088,
+        "cpu_percent_x100": 0,
+        "open_fds": 18,
+        "fd_limit": 524288,
+        "pressured": false,
+        "memory_headroom": true,
+        "shed_cells": 0,
+        "restoring": 0,
+        "rebalance_paused": false,
+        "draining": false
+      }
+    },
+    "nodes/c.json": {
+      "node": "c",
+      "expires_ms": 1789748254783,
+      "addr": "c:8081",
+      "probe_public_key": "afc18e06a861d7b7b1c7597693ce4793e69a5f3bfd65f1ef93f94d23f5a74889",
+      "peer_protocol": 5,
+      "paced_handoff": true,
+      "ownership_index_generation": "afc18e06a861d7b7b1c7597693ce4793e69a5f3bfd65f1ef93f94d23f5a74889",
+      "load": {
+        "sampled_ms": 1789748244784,
+        "owned_cells": 2,
+        "placement_weight": 4,
+        "bucket_format": 2,
+        "resident_cells": 2,
+        "host_websockets": 0,
+        "rss_bytes": 58413056,
+        "in_use_bytes": 48945616,
+        "cgroup_working_set_bytes": 28561408,
+        "cgroup_current_bytes": 28766208,
+        "cpu_percent_x100": 199,
+        "open_fds": 67,
+        "fd_limit": 524288,
+        "pressured": false,
+        "memory_headroom": true,
+        "shed_cells": 0,
+        "restoring": 0,
+        "rebalance_paused": false,
+        "draining": false
+      }
+    }
+  },
+  "log_keys": []
+}

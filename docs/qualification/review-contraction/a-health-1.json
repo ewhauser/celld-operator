@@ -1,0 +1,22 @@
+[
+  {
+    "seconds": 0.0,
+    "status": 503
+  },
+  {
+    "seconds": 1.062,
+    "status": 503
+  },
+  {
+    "seconds": 2.073,
+    "status": 503
+  },
+  {
+    "seconds": 3.088,
+    "status": 503
+  },
+  {
+    "seconds": 4.102,
+    "status": 200
+  }
+]

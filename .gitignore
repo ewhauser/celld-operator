@@ -2,3 +2,7 @@ bin/
 *.test
 coverage.out
 .DS_Store
+
+.qualification-venv/
+.qualification-runs/
+hack/qualification/__pycache__/
