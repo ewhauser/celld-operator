@@ -113,7 +113,8 @@ func (c *Collector) sample(ctx context.Context, f *fleet.CelldFleet, p *corev1.P
 			adapter, adapterErr := v050.New(Image)
 			if readErr == nil && closeErr == nil && adapterErr == nil && len(data) <= 1024*1024 {
 				state, parseErr := adapter.ParseState(response.StatusCode, data, received, received, capacity.Seconds(f.Spec.Capacity.MaxAgeSeconds))
-				if parseErr == nil && !state.SampledAt.Before(started) {
+				if parseErr == nil && !state.SampledAt.Before(started) && state.RSSBytes <= 1<<50 && state.InUseBytes <= 1<<50 {
+					s.RuntimeMemoryMiB = int64((max(state.RSSBytes, state.InUseBytes) + (1 << 20) - 1) / (1 << 20))
 					s.RuntimeAt, s.RuntimeReceived = state.SampledAt, received
 					s.Pressured = state.Pressured || !state.MemoryHeadroom
 					s.Backlog = state.Draining || state.RebalancePaused || state.CapacityWaiting > 0 || state.ActivationWaiting > 0 || state.Restoring > 0

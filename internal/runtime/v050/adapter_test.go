@@ -340,3 +340,18 @@ func TestInspectLivePreflightStillChecksHistory(t *testing.T) {
 		t.Fatalf("loss not classified: %v", err)
 	}
 }
+
+func TestLiveEpochCannotRewind(t *testing.T) {
+	a, _ := New(Image)
+	b := fixture(t, "node-open")
+	n, err := a.ParseNode("nodes/a.json", b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(100, 0)
+	r := &reader{data: b, pages: map[string]Page{"nodes/": {Keys: []string{"nodes/a.json"}, Complete: true}, "log/": {Complete: true}}}
+	req := Request{OperationID: "live", Sessions: []Session{{Node: "a", Generation: n.Generation, Epoch: n.Epoch + 1}}, InventoryComplete: true, CapturedAt: now, MaxAge: time.Second, PageBudget: 10}
+	if _, err := a.Inspect(t.Context(), r, req, func() time.Time { return now }); err == nil {
+		t.Fatal("live epoch rewind accepted")
+	}
+}

@@ -1,5 +1,7 @@
 # ADR 0012 Journaled manual lifecycle and explicit contraction gates
 
+The production read-only transport, observational history, deadlines and cancellation authority below are updated by [ADR 0015](0015-shared-lifecycle-safety.md). Mode-specific contraction remains blocked.
+
 Status: Implemented experimental scale-out; contraction engine tested with injected evidence only
 
 ## Authority and journal

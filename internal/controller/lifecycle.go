@@ -29,6 +29,7 @@ const operationKey = "celld.example.com/lifecycle-operation"
 // The reservation survives status loss and fleet deletion. Never prune session
 // history or PVC identities automatically. Exhausting annotation capacity blocks.
 type lifecycleJournal struct {
+	Inventory        recoveryInventory
 	Request          *disruptionRequest
 	RuntimeImage     string
 	Version          int
@@ -45,9 +46,12 @@ type lifecycleCompletion struct {
 	ID, TargetPod, TargetUID, TargetGeneration string
 	From, To                                   int32
 	EvidenceAt                                 time.Time
+	Outcome                                    string
 }
 
 type lifecycleOperation struct {
+	StartedAt, Deadline                    time.Time
+	Stalled                                bool
 	PolicyHash                             string
 	ManualBaseline                         int32
 	Automatic                              bool
@@ -111,18 +115,21 @@ func readJournal(res *fleet.CelldStorageReservation) (*lifecycleJournal, error) 
 	if j.RuntimeImage != Image {
 		return nil, errors.New("unsupported journal runtime image")
 	}
-	if (j.Version != 1 && j.Version != 2 && j.Version != 3) || j.Initial < 1 || j.Initial > 100 || j.Applied < 1 || j.Applied > 100 {
+	if (j.Version != 1 && j.Version != 2 && j.Version != 3 && j.Version != 4) || j.Initial < 1 || j.Initial > 100 || j.Applied < 1 || j.Applied > 100 {
 		return nil, errors.New("invalid lifecycle journal")
 	}
-	// Older binaries reject version 3 instead of ignoring redistribution holds.
-	j.Version = 3
+	// Older binaries reject version 4 instead of ignoring lifecycle safety state.
+	j.Version = 4
 	if req := j.Request; req != nil {
 		if req.ID == "" || req.SourceImage != j.RuntimeImage || req.WorkloadUID != j.WorkloadUID || (req.Kind != "Upgrade" && req.Kind != "Restart" && req.Kind != "Delete") {
 			return nil, errors.New("invalid disruption request")
 		}
 	}
 	if op := j.Operation; op != nil {
-		if (op.Automatic && (j.Capacity == nil || op.PolicyHash == "" || op.ManualBaseline < 1 || op.ManualBaseline > 100)) || op.ID == "" || op.From != j.Applied || op.To < 1 || op.To > 100 || op.To == op.From || (op.To < op.From && op.To != op.From-1) || (op.Phase != "Intent" && op.Phase != "Prepared" && op.Phase != "Recovering") {
+		if !op.StartedAt.IsZero() && !op.Deadline.IsZero() && !op.Deadline.After(op.StartedAt) {
+			return nil, errors.New("invalid operation deadline")
+		}
+		if (op.Automatic && (j.Capacity == nil || op.PolicyHash == "" || op.ManualBaseline < 1 || op.ManualBaseline > 100)) || op.ID == "" || op.From != j.Applied || op.To < 1 || op.To > 100 || op.To == op.From || (op.To < op.From && op.To != op.From-1) || (op.Phase != "Intent" && op.Phase != "Prepared" && op.Phase != "Recovering" && op.Phase != "Blocked" && op.Phase != "Canceling") {
 			return nil, errors.New("invalid lifecycle operation")
 		}
 	}
@@ -132,12 +139,18 @@ func readJournal(res *fleet.CelldStorageReservation) (*lifecycleJournal, error) 
 	return &j, nil
 }
 func (r *Reconciler) saveJournal(ctx context.Context, res *fleet.CelldStorageReservation, j *lifecycleJournal) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	b, err := json.Marshal(j)
 	if err != nil {
 		return err
 	}
 	if res.Annotations == nil {
 		res.Annotations = map[string]string{}
+	}
+	if len(b) > 200*1024 {
+		return errors.New("lifecycle journal budget exhausted; retain history and block further actions")
 	}
 	res.Annotations[journalKey] = string(b)
 	// Update carries the read resourceVersion. Never retry with a fresh version:
@@ -198,7 +211,7 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 		if initial == 0 {
 			initial = replicas(w)
 		}
-		j = &lifecycleJournal{Version: 3, RuntimeImage: Image, Initial: initial, Applied: replicas(w), WorkloadUID: w.GetUID(), Claims: map[string]types.UID{}}
+		j = &lifecycleJournal{Version: 4, RuntimeImage: Image, Initial: initial, Applied: replicas(w), WorkloadUID: w.GetUID(), Claims: map[string]types.UID{}}
 		// Creation records claim UIDs before workload creation. Verify those bindings;
 		// missing or replaced claims can never be adopted.
 		var created map[string]types.UID
@@ -248,6 +261,16 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 		}
 		if got.UID != uid || !got.DeletionTimestamp.IsZero() || len(got.OwnerReferences) != 0 || got.Labels[FleetLabel] != string(f.UID) || got.Annotations["celld.example.com/storage-reservation"] != res.Name {
 			return block("StorageIdentityConflict", "Retained PVC identity, ownership or deletion state changed: "+name)
+		}
+	}
+	if r.Evidence != nil {
+		inventory, loss := r.Evidence.Observe(ctx, f, j.Inventory)
+		j.Inventory = inventory
+		if loss != "" && j.Loss == "" {
+			return r.recordLoss(ctx, f, w, res, j, "possible loss declaration: "+loss)
+		}
+		if err := r.saveJournal(ctx, res, j); err != nil {
+			return ctrl.Result{}, true, err
 		}
 	}
 	if maintenanceFence(f) == "" && w.GetAnnotations()[maintenanceFenceKey] != "" {
@@ -313,7 +336,25 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 				return block("CapacityChanged", "Fleet changed during collection; discard the recommendation and reconcile the new request")
 			}
 		}
-		op = &lifecycleOperation{ID: string(uuid.NewUUID()), Phase: "Intent", From: j.Applied, To: target, WorkloadVersion: w.GetResourceVersion(), Automatic: automatic}
+		op = &lifecycleOperation{ID: string(uuid.NewUUID()), Phase: "Intent", StartedAt: r.capacityNow(), Deadline: r.capacityNow().Add(operationBudget), From: j.Applied, To: target, WorkloadVersion: w.GetResourceVersion(), Automatic: automatic}
+		if op.To < op.From && (!r.Options.LocalTest || r.localLifecycle == nil) {
+			// Record blocked authority without pretending target/session evidence is
+			// qualified. No production execution path accepts this phase.
+			op.Phase, op.To = "Blocked", op.From-1
+			if f.Spec.Profile == "PersistentFleet" {
+				op.TargetPod = fmt.Sprintf("%s-%d", f.Name, op.To)
+			}
+			if automatic {
+				op.PolicyHash = j.Capacity.Config
+				op.ManualBaseline = f.Spec.Replicas
+			}
+			j.Operation = op
+			if err := r.saveJournal(ctx, res, j); err != nil {
+				return ctrl.Result{}, true, err
+			}
+			reason, message := r.productionRemovalBlock(ctx, f, j)
+			return block(reason, message)
+		}
 		if op.To < op.From {
 			if f.Spec.Profile == "Bucket" {
 				return block("BucketCompletionUnqualified", "No qualified no-log completion rule or deterministic Deployment victim; contraction is unavailable")
@@ -333,6 +374,7 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 			}
 			captured.ID, captured.Phase, captured.From, captured.To, captured.WorkloadVersion = op.ID, "Intent", op.From, op.From-1, op.WorkloadVersion
 			captured.Automatic = automatic
+			captured.StartedAt, captured.Deadline = op.StartedAt, op.Deadline
 			op = captured
 			for _, previous := range j.Sessions {
 				if !slices.Contains(op.Sessions, previous) {
@@ -363,6 +405,38 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 			capacity.RecordAction(j.Capacity, r.capacityNow(), op.From, op.To)
 		}
 		return save(j) // No external action before the intent has survived an API write.
+	}
+	if op.StartedAt.IsZero() || op.Deadline.IsZero() {
+		// Legacy in-flight records get one durable deadline on first resumption.
+		op.StartedAt = r.capacityNow()
+		op.Deadline = op.StartedAt.Add(operationBudget)
+		return save(j)
+	}
+	if op.Phase == "Canceling" {
+		return r.cancelRemoval(ctx, res, j, w)
+	}
+	if op.To < op.From && (op.Phase == "Intent" || op.Phase == "Blocked") && maintenanceFence(f) == "" {
+		target, _ := r.capacityTarget(ctx, f, j)
+		if target > op.From {
+			op.Phase = "Canceling"
+			return save(j)
+		}
+	}
+	if !r.capacityNow().Before(op.Deadline) && !op.Stalled {
+		op.Stalled = true
+		return save(j)
+	}
+	if op.Phase == "Blocked" {
+		if op.Stalled {
+			return block("OperationStalled", "Removal deadline exceeded; authority and evidence retained; compatible additions can supersede this unissued request")
+		}
+		reason, message := r.productionRemovalBlock(ctx, f, j)
+		return block(reason, message)
+	}
+	// Expiration never certifies recovery or cancels an issued operation. Prevent
+	// further unissued effects, while still reconstructing an already issued CAS.
+	if op.Stalled && (w.GetAnnotations()[operationKey] != op.ID || replicas(w) != op.To) && op.Phase != "Recovering" {
+		return block("OperationStalled", "Operation deadline exceeded before replica issuance; authority retained")
 	}
 	if maintenanceFence(f) == "" && f.Spec.Capacity != nil && j.Capacity != nil {
 		observation := capacity.Observation{At: r.capacityNow()}
@@ -505,6 +579,12 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 // A delayed old leader can only replay this exact CAS once. Never fetch a fresh
 // resourceVersion and retry an old intent: that could remove a second target.
 func (r *Reconciler) applyReplicas(ctx context.Context, w client.Object, op *lifecycleOperation) error {
+	if w.GetAnnotations()[canceledOperationKey] == op.ID {
+		return errors.New("operation was canceled on the workload")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if w.GetAnnotations()[maintenanceFenceKey] != "" {
 		return errors.New("workload carries a maintenance fence")
 	}
@@ -513,6 +593,12 @@ func (r *Reconciler) applyReplicas(ctx context.Context, w client.Object, op *lif
 	}
 	if replicas(w) == op.To && w.GetAnnotations()[operationKey] == op.ID {
 		return nil
+	}
+	if op.Phase == "Blocked" || op.Phase == "Canceling" {
+		return errors.New("operation phase cannot issue replicas")
+	}
+	if !op.Deadline.IsZero() && !r.capacityNow().Before(op.Deadline) {
+		return errors.New("operation deadline expired")
 	}
 	if replicas(w) != op.From || w.GetResourceVersion() != op.WorkloadVersion {
 		return errors.New("workload changed since durable intent; operation is frozen for investigation")
@@ -534,6 +620,13 @@ func (r *Reconciler) expand(ctx context.Context, f *fleet.CelldFleet, res *fleet
 	if op.Phase == "Intent" {
 		for ordinal := op.From; ordinal < op.To; ordinal++ {
 			node := fmt.Sprintf("%s-%d", f.Name, ordinal)
+			if f.Spec.Profile == "PersistentFleet" {
+				for _, session := range j.Inventory.Sessions {
+					if session.Node == node {
+						return fail(errors.New("observed runtime identity reactivation is unqualified: " + node))
+					}
+				}
+			}
 			for _, session := range j.Sessions {
 				if session.Node == node {
 					return fail(errors.New("retained runtime identity reactivation is unqualified: " + node))

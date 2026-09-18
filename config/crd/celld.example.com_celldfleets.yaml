@@ -390,6 +390,12 @@ spec:
                   LifecycleStatus is an informational projection of the retained reservation journal.
                   Clearing status never cancels an operation or removes recovery evidence.
                 properties:
+                  deadline:
+                    type: string
+                  evidenceBlocker:
+                    type: string
+                  evidenceCheckedAt:
+                    type: string
                   from:
                     format: int32
                     type: integer
@@ -403,6 +409,11 @@ spec:
                     type: string
                   requestKind:
                     type: string
+                  sessionCount:
+                    format: int32
+                    type: integer
+                  stalled:
+                    type: boolean
                   targetGeneration:
                     type: string
                   targetImage:

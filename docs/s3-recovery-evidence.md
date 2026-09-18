@@ -1,5 +1,6 @@
 # Read-only S3 recovery evidence
 
+Current implementation: [shared lifecycle safety](shared-lifecycle-safety.md). Production collection is now wired; exact identity/fencing and mode-specific removal qualification remain blocked.
 Implementation follow-up: [step 1 adapter, real local experiments, and remaining release gates](qualification/README.md). The earlier source conclusions below are historical; the follow-up distinguishes observations from unqualified hypotheses.
 
 18 September 2026. Proposed contract for celld v0.5.0, commit `12d5b6333fe52717325addcfe1e99e9fd4f77bcd`, following [shutdown evidence](shutdown-evidence.md). The user has accepted narrowly scoped read-only S3 metadata access. This is a source-backed design for qualification, not an implemented controller or an AWS-tested safety guarantee.

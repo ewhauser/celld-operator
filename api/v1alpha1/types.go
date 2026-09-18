@@ -116,17 +116,22 @@ type PlacementSpec struct {
 // LifecycleStatus is an informational projection of the retained reservation journal.
 // Clearing status never cancels an operation or removes recovery evidence.
 type LifecycleStatus struct {
-	RequestKind      string `json:"requestKind,omitempty"`
-	RequestID        string `json:"requestID,omitempty"`
-	TargetImage      string `json:"targetImage,omitempty"`
-	OperationID      string `json:"operationID,omitempty"`
-	Phase            string `json:"phase,omitempty"`
-	From             int32  `json:"from,omitempty"`
-	To               int32  `json:"to,omitempty"`
-	TargetPod        string `json:"targetPod,omitempty"`
-	TargetUID        string `json:"targetUID,omitempty"`
-	TargetGeneration string `json:"targetGeneration,omitempty"`
-	PossibleLoss     string `json:"possibleLoss,omitempty"`
+	EvidenceBlocker   string `json:"evidenceBlocker,omitempty"`
+	EvidenceCheckedAt string `json:"evidenceCheckedAt,omitempty"`
+	SessionCount      int32  `json:"sessionCount,omitempty"`
+	Deadline          string `json:"deadline,omitempty"`
+	Stalled           bool   `json:"stalled,omitempty"`
+	RequestKind       string `json:"requestKind,omitempty"`
+	RequestID         string `json:"requestID,omitempty"`
+	TargetImage       string `json:"targetImage,omitempty"`
+	OperationID       string `json:"operationID,omitempty"`
+	Phase             string `json:"phase,omitempty"`
+	From              int32  `json:"from,omitempty"`
+	To                int32  `json:"to,omitempty"`
+	TargetPod         string `json:"targetPod,omitempty"`
+	TargetUID         string `json:"targetUID,omitempty"`
+	TargetGeneration  string `json:"targetGeneration,omitempty"`
+	PossibleLoss      string `json:"possibleLoss,omitempty"`
 }
 
 type CelldFleetStatus struct {

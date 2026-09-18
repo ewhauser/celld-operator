@@ -126,7 +126,7 @@ func TestCapacityAutomaticContractionKeepsQualificationGates(t *testing.T) {
 			r.now = func() time.Time { return c.now }
 			advancePolicy(t, r, f, c, 42)
 			j := getJournal(t, r, f)
-			if j.Applied != 3 || j.Operation != nil || j.Capacity.Decision.DesiredReplicas != 2 {
+			if j.Applied != 3 || j.Operation == nil || j.Operation.Phase != "Blocked" || j.Capacity.Decision.DesiredReplicas != 2 {
 				t.Fatal(j)
 			}
 			c.now = c.now.Add(15 * time.Second)

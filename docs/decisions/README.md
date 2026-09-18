@@ -27,3 +27,5 @@ Future decisions should receive a new numbered record. Material changes should i
 Step 4: [ADR 0013: capacity collection and policy](0013-capacity-policy.md).
 
 Step 5: [ADR 0014: coordinated maintenance and retained deletion](0014-coordinated-maintenance.md).
+
+- [0015 Shared lifecycle safety](0015-shared-lifecycle-safety.md): evidence, deadlines and safe cancellation; production fencing remains blocked.

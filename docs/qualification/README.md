@@ -1,5 +1,7 @@
 # Step 1 findings — 18 September 2026
 
+Implementation update: [shared lifecycle safety](../shared-lifecycle-safety.md) adds production read-only collection and shared authority prerequisites. The experiments below remain historical local evidence, not AWS or contraction qualification.
+
 The pinned runtime passed the bounded local acknowledged-write checks below.
 This is **not production qualification**. Repeated peer-disk recovery has positive
 local evidence, but the candidate read sequence remains a hypothesis outside

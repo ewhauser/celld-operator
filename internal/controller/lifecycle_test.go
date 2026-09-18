@@ -153,7 +153,7 @@ func TestLifecycleContractionQualificationBlocks(t *testing.T) {
 			f = desiredCount(t, r, f, 1)
 			reconcile(t, r, f)
 			j := getJournal(t, r, f)
-			if j.Operation != nil || j.Applied != 3 {
+			if j.Operation == nil || j.Operation.Phase != "Blocked" || j.Applied != 3 {
 				t.Fatal("unqualified contraction issued")
 			}
 		})
@@ -310,7 +310,7 @@ func TestLifecycleDesiredChangesKeepRecordedIntent(t *testing.T) {
 		reconcile(t, r, f)
 	}
 	j := getJournal(t, r, f)
-	if j.Applied != 5 || j.Operation != nil {
+	if j.Applied != 5 || j.Operation == nil || j.Operation.Phase != "Blocked" {
 		t.Fatal("additive intent retargeted")
 	}
 	w := &appsv1.Deployment{}

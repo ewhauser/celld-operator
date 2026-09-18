@@ -1,5 +1,6 @@
 # Requirements and code review before step 6
 
+Current implementation: [shared lifecycle safety](shared-lifecycle-safety.md). Production collection is now wired; exact identity/fencing and mode-specific removal qualification remain blocked.
 Reviewed 18 September 2026 at `d3ea0df` on main. Baseline: the original
 `Celld_Fleet_Operator_Design.docx` in Downloads, the user's accepted decisions
 in ADRs 0002–0010, and the six-step implementation plan. Later implementation

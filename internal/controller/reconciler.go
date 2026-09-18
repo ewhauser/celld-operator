@@ -36,6 +36,7 @@ type Reconciler struct {
 	NetworkPolicyEnforced bool
 	// localLifecycle is only supplied by in-package qualification tests. No production fence exists.
 	localLifecycle lifecycleEvidence
+	Evidence       *ProductionEvidence
 	Collector      capacityCollector
 	now            func() time.Time
 }
@@ -241,6 +242,17 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, reason, me
 
 			if op := j.Operation; op != nil {
 				f.Status.Lifecycle = fleet.LifecycleStatus{OperationID: op.ID, Phase: op.Phase, From: op.From, To: op.To, TargetPod: op.TargetPod, TargetUID: op.TargetUID, TargetGeneration: op.TargetGeneration, PossibleLoss: j.Loss}
+			}
+			f.Status.Lifecycle.EvidenceBlocker = j.Inventory.Blocker
+			f.Status.Lifecycle.SessionCount = int32(len(j.Inventory.Sessions))
+			if !j.Inventory.CheckedAt.IsZero() {
+				f.Status.Lifecycle.EvidenceCheckedAt = j.Inventory.CheckedAt.UTC().Format(time.RFC3339)
+			}
+			if j.Operation != nil {
+				f.Status.Lifecycle.Stalled = j.Operation.Stalled
+				if !j.Operation.Deadline.IsZero() {
+					f.Status.Lifecycle.Deadline = j.Operation.Deadline.UTC().Format(time.RFC3339)
+				}
 			}
 			if request := j.Request; request != nil {
 				f.Status.Lifecycle.RequestKind = request.Kind

@@ -369,13 +369,13 @@ func TestMaintenanceLegacyJournalUpgradePreservesIdentity(t *testing.T) {
 	f = editMaintenance(t, r, f, func(f *fleet.CelldFleet) { f.Spec.Maintenance = &fleet.MaintenanceSpec{Paused: true} })
 	reconcile(t, r, f)
 	got := getJournal(t, r, f)
-	if got.Version != 3 || got.RuntimeImage != Image || got.Applied != j.Applied || len(got.Claims) != len(j.Claims) {
+	if got.Version != 4 || got.RuntimeImage != Image || got.Applied != j.Applied || len(got.Claims) != len(j.Claims) {
 		t.Fatal("legacy identity lost")
 	}
 	if err := r.Get(t.Context(), types.NamespacedName{Name: reservationName(f)}, res); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(res.Annotations[journalKey], `"Version":3`) {
+	if !strings.Contains(res.Annotations[journalKey], `"Version":4`) {
 		t.Fatal("old binaries can still accept maintenance journal")
 	}
 }

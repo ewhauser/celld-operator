@@ -73,6 +73,10 @@ func run() error {
 		return err
 	}
 	reconciler := &controller.Reconciler{Collector: collector, Client: direct, Options: controller.Options{OperatorNamespace: *namespace, LocalTest: *localTest}, NetworkPolicyEnforced: *enforced}
+	// Local disposable mode never falls through to AWS credentials or endpoints.
+	if !*localTest {
+		reconciler.Evidence = controller.NewProductionEvidence(direct)
+	}
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		return err
 	}

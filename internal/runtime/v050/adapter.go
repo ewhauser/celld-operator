@@ -149,6 +149,8 @@ func (*Adapter) ParseState(status int, data []byte, received, now time.Time, age
 
 type Node struct {
 	Name, Generation, LogState string
+	Address                    string
+	SampledMS                  int64
 	ExpiresMS, Epoch, Tiered   uint64
 	Ensemble                   []string
 }
@@ -171,6 +173,20 @@ func (*Adapter) ParseNode(key string, data []byte) (Node, error) {
 	}
 	if err := required(m, "expires_ms", &n.ExpiresMS); err != nil {
 		return n, err
+	}
+	if raw, ok := m["addr"]; ok {
+		if err := json.Unmarshal(raw, &n.Address); err != nil {
+			return n, err
+		}
+	}
+	if raw, ok := m["load"]; ok {
+		var load struct {
+			SampledMS int64 `json:"sampled_ms"`
+		}
+		if err := json.Unmarshal(raw, &load); err != nil {
+			return n, err
+		}
+		n.SampledMS = load.SampledMS
 	}
 	var protocol uint16
 	if err := required(m, "peer_protocol", &protocol); err != nil {
@@ -305,6 +321,9 @@ func (a *Adapter) assess(ctx context.Context, r Reader, req Request, now func() 
 		if !ok || s.Generation != n.Generation {
 			return Evidence{}, errors.New("unknown node or generation replacement")
 		}
+		if n.Epoch < s.Epoch {
+			return Evidence{}, errors.New("recovery epoch rewound or log missing")
+		}
 		if !s.Stopped && (now().UnixMilli() < 0 || n.ExpiresMS <= uint64(now().UnixMilli())) {
 			return Evidence{}, errors.New("unresolved unavailable session")
 		}
@@ -319,14 +338,14 @@ func (a *Adapter) assess(ctx context.Context, r Reader, req Request, now func() 
 		return Evidence{}, errors.New("no stopped session")
 	}
 	// Ordering is intentional: completion reads precede the full historical scan.
-	keys, err = list(ctx, r, "log/", &budget)
+	_, err = listEach(ctx, r, "log/", &budget, func(key string) error {
+		if strings.HasSuffix(key, ".loss.json") {
+			return &LossError{Key: key}
+		}
+		return nil
+	})
 	if err != nil {
 		return Evidence{}, err
-	}
-	for _, key := range keys {
-		if strings.HasSuffix(key, ".loss.json") {
-			return Evidence{}, &LossError{Key: key}
-		}
 	}
 	result.ObservedAt = now()
 	if err := ctx.Err(); err != nil {
@@ -339,6 +358,9 @@ func (a *Adapter) assess(ctx context.Context, r Reader, req Request, now func() 
 	return result, nil
 }
 func list(ctx context.Context, r Reader, prefix string, budget *int) ([]string, error) {
+	return listEach(ctx, r, prefix, budget, nil)
+}
+func listEach(ctx context.Context, r Reader, prefix string, budget *int, visit func(string) error) ([]string, error) {
 	var keys []string
 	seenTokens, seenKeys := map[string]bool{}, map[string]bool{}
 	token := ""
@@ -354,12 +376,21 @@ func list(ctx context.Context, r Reader, prefix string, budget *int) ([]string, 
 		if err != nil {
 			return nil, err
 		}
+		if len(page.Keys) > 1000 || len(seenKeys)+len(page.Keys) > 100000 {
+			return nil, errors.New("listing key budget exceeded")
+		}
 		for _, key := range page.Keys {
 			if !strings.HasPrefix(key, prefix) || seenKeys[key] {
 				return nil, errors.New("invalid or duplicate listing key")
 			}
 			seenKeys[key] = true
-			keys = append(keys, key)
+			if visit != nil {
+				if err := visit(key); err != nil {
+					return nil, err
+				}
+			} else {
+				keys = append(keys, key)
+			}
 		}
 		if page.Complete {
 			if page.Next != "" {

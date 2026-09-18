@@ -17,6 +17,7 @@ import (
 type Sample struct {
 	Identity                                               string
 	Ready, Pressured, Backlog                              bool
+	RuntimeMemoryMiB                                       int64
 	CPU, MemoryMiB                                         int64
 	RuntimeAt, RuntimeReceived, MetricsAt, MetricsReceived time.Time
 	Window                                                 time.Duration
