@@ -23,8 +23,8 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: CelldFleet supports journaled manual capacity changes. No scale
-          subresource is exposed.
+        description: CelldFleet supports journaled capacity and maintenance requests.
+          No scale subresource is exposed.
         properties:
           apiVersion:
             description: |-
@@ -167,6 +167,19 @@ spec:
                 - message: invalid sampling windows
                   rule: self.minWindowSeconds <= self.maxWindowSeconds && self.sampleIntervalSeconds
                     <= self.maxAgeSeconds
+              maintenance:
+                description: Maintenance requests share the retained lifecycle journal.
+                properties:
+                  paused:
+                    description: Pause new actions and unissued operations; continue
+                      recovery of issued actions.
+                    type: boolean
+                  restartToken:
+                    description: Change this token to request a planned restart. No
+                      restart is qualified yet.
+                    maxLength: 128
+                    type: string
+                type: object
               placement:
                 properties:
                   azCount:
@@ -214,6 +227,12 @@ spec:
                 maximum: 100
                 minimum: 1
                 type: integer
+              runtimeImage:
+                description: |-
+                  Requested immutable runtime digest. Omission selects the original v0.5.0 pin.
+                  Unsupported transitions are durably blocked, including rollback.
+                pattern: ^ghcr.io/denoland/celld@sha256:[a-f0-9]{64}$
+                type: string
               serviceAccountName:
                 maxLength: 253
                 minLength: 1
@@ -260,7 +279,7 @@ spec:
             - storage
             type: object
             x-kubernetes-validations:
-            - message: only replicas and capacity may change
+            - message: only replicas, capacity, runtimeImage and maintenance may change
               rule: self.qualification == oldSelf.qualification && self.profile ==
                 oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName
                 && self.storage == oldSelf.storage && self.placement == oldSelf.placement
@@ -372,7 +391,13 @@ spec:
                     type: string
                   possibleLoss:
                     type: string
+                  requestID:
+                    type: string
+                  requestKind:
+                    type: string
                   targetGeneration:
+                    type: string
+                  targetImage:
                     type: string
                   targetPod:
                     type: string

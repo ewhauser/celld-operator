@@ -25,3 +25,5 @@ Future decisions should receive a new numbered record. Material changes should i
 - [ADR 0012: restart-safe manual lifecycle](0012-restart-safe-manual-lifecycle.md)
 
 Step 4: [ADR 0013: capacity collection and policy](0013-capacity-policy.md).
+
+Step 5: [ADR 0014: coordinated maintenance and retained deletion](0014-coordinated-maintenance.md).

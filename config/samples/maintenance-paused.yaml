@@ -1,0 +1,22 @@
+apiVersion: celld.example.com/v1alpha1
+kind: CelldFleet
+metadata:
+  name: maintenance-example
+  namespace: fleets
+spec:
+  qualification: Experimental
+  profile: PersistentFleet
+  replicas: 3
+  maintenance:
+    paused: true
+    # Nonempty restartToken requests a restart, currently blocked as unqualified.
+    # restartToken: maintenance-2026-09
+  # Omission of runtimeImage selects the original immutable v0.5.0 pin.
+  serviceAccountName: runtime
+  storage:
+    bucket: replace-with-dedicated-bucket
+    region: us-east-1
+    storageClassName: retained-ebs
+  placement:
+    azCount: 3
+    zones: [us-east-1a, us-east-1b, us-east-1c]

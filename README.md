@@ -32,3 +32,8 @@ profiles. See [API, examples and safety boundaries](docs/fleet-api.md). Producti
 qualification and live contraction remain blocked. Step 3 adds a durable operation
 journal and fault-tested contraction engine behind explicit qualification gates;
 see [lifecycle validation](docs/qualification/lifecycle/README.md).
+
+Step 4 adds [optional capacity policy](docs/capacity-policy.md). Step 5 adds
+[coordinated maintenance](docs/decisions/0014-coordinated-maintenance.md): durable
+blocked upgrade/restart requests, pause/resume fencing and retained deletion.
+No runtime transition, rollback, planned restart or final shutdown is qualified.

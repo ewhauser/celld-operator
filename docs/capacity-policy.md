@@ -68,3 +68,9 @@ edit reservation annotations to reset it. See [ADR 0013](decisions/0013-capacity
 for field ownership, timestamps and concurrency rules.
 
 [Validation and remaining limitations](qualification/capacity/README.md).
+
+Maintenance pause freezes new decisions and unissued operations, invalidates
+positive demand windows and cached actionability, and leaves issued recovery
+running. Resume preserves the original operation target and requires fresh
+evidence. Blocked upgrade/restart requests take precedence over new capacity
+operations after the current one completes. See [ADR 0014](decisions/0014-coordinated-maintenance.md).

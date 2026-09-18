@@ -43,6 +43,8 @@ func digest(data []byte) string { h := sha256.Sum256(data); return hex.EncodeToS
 func specHash(f *fleet.CelldFleet) string {
 	spec := f.Spec
 	spec.Capacity = nil
+	spec.RuntimeImage = ""
+	spec.Maintenance = nil
 	b, _ := json.Marshal(spec)
 	return digest(b)
 }
@@ -57,7 +59,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 	f.Default()
 	if !f.DeletionTimestamp.IsZero() {
-		return r.report(ctx, f, "DeletionBlocked", "Deletion requires the future lifecycle gate; workloads, reservations and PVCs are retained", 0, false)
+		return r.deleteFleet(ctx, f)
 	}
 	if err := f.Validate(); err != nil {
 		return r.report(ctx, f, "InvalidConfiguration", err.Error(), 0, false)
@@ -68,6 +70,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		if err := r.Patch(ctx, f, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil {
 			return ctrl.Result{}, err
 		}
+	}
+	if paused(f) {
+		return r.pauseFleet(ctx, f)
 	}
 	if !r.NetworkPolicyEnforced {
 		return r.report(ctx, f, "IsolationUnverified", "Administrator must verify a NetworkPolicy enforcing CNI and enable --network-policy-enforced before provisioning", 0, false)
@@ -101,7 +106,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			return ctrl.Result{}, err
 		}
 	}
-	if !r.reservationMatches(ctx, f, reservation, expected) {
+	if len(reservation.OwnerReferences) != 0 || !reservation.DeletionTimestamp.IsZero() || !r.reservationMatches(ctx, f, reservation, expected) {
 		return r.report(ctx, f, "StorageScopeConflict", "Bucket is permanently reserved to another fleet UID or immutable configuration; no resources adopted", 0, false)
 	}
 
@@ -114,6 +119,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	actual := emptyObject(desired)
 	err := r.Get(ctx, client.ObjectKeyFromObject(desired), actual)
 	if apierrors.IsNotFound(err) {
+		if f.Spec.RuntimeImage != "" && f.Spec.RuntimeImage != Image {
+			return r.report(ctx, f, "UnsupportedTransition", "Initial runtime must use the qualified adapter pin; no alternate image is supported", 0, false)
+		}
 		if reservation.Annotations[attemptAnnotation] != "" {
 			return r.report(ctx, f, "LifecycleBlocked", "Workload is missing after a recorded creation attempt; automatic recreation could reuse an unsafe identity or disk", 0, false)
 		}
@@ -229,8 +237,14 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, reason, me
 			if j.Capacity != nil && f.Spec.Capacity != nil {
 				f.Status.Capacity = j.Capacity.Decision
 			}
+
 			if op := j.Operation; op != nil {
 				f.Status.Lifecycle = fleet.LifecycleStatus{OperationID: op.ID, Phase: op.Phase, From: op.From, To: op.To, TargetPod: op.TargetPod, TargetUID: op.TargetUID, TargetGeneration: op.TargetGeneration, PossibleLoss: j.Loss}
+			}
+			if request := j.Request; request != nil {
+				f.Status.Lifecycle.RequestKind = request.Kind
+				f.Status.Lifecycle.RequestID = request.ID
+				f.Status.Lifecycle.TargetImage = request.TargetImage
 			}
 		}
 	}
@@ -252,6 +266,8 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, reason, me
 			expectedReady = j.Applied
 		}
 	}
+	set("MaintenancePaused", paused(f), reason, message)
+	set("Deleting", !f.DeletionTimestamp.IsZero(), reason, message)
 	set("Ready", provisioned && ready == expectedReady, reason, message)
 	set("InfrastructureReady", provisioned || reason == "LifecycleProgress", reason, message)
 	set("Progressing", reason == "LifecycleProgress" || reason == "Provisioning", reason, message)

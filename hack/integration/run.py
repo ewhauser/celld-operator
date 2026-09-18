@@ -247,6 +247,18 @@ nodes:
                 wait_for(lambda:get('celldfleet',fleet_name).get('status',{}).get('capacity',{}).get('reason') in ('PendingCapacity','IncompleteMetrics'),'missing metrics block automatic capacity: '+fleet_name)
                 assert get(kind,fleet_name)['spec']==before['spec']
             print('PASS: shadow and opt-in automatic modes preserve capacity with missing metrics; API policy edits/defaults validated',flush=True)
+            for fleet_name, kind in (('alpha','deployment'),('beta','statefulset')):
+                before=get(kind,fleet_name)
+                k('-n','fleets','patch','celldfleet',fleet_name,'--type=merge','-p',json.dumps({'spec':{'maintenance':{'paused':True}}}))
+                wait_for(lambda:get(kind,fleet_name)['metadata'].get('annotations',{}).get('celld.example.com/maintenance-fence')=='paused','pause fence acknowledged: '+fleet_name)
+                assert get(kind,fleet_name)['spec']==before['spec']
+                k('-n','fleets','patch','celldfleet',fleet_name,'--type=merge','-p',json.dumps({'spec':{'maintenance':{'paused':False,'restartToken':'integration-restart'}}}))
+                wait_for(lambda:any(c['reason']=='DisruptionUnqualified' for c in get('celldfleet',fleet_name).get('status',{}).get('conditions',[])),'restart request blocked: '+fleet_name)
+                assert get(kind,fleet_name)['spec']==before['spec']
+                k('-n','fleets','patch','celldfleet',fleet_name,'--type=merge','-p',json.dumps({'spec':{'runtimeImage':'ghcr.io/denoland/celld@sha256:'+'a'*64}}))
+                wait_for(lambda:any(c['reason']=='UnsupportedTransition' for c in get('celldfleet',fleet_name).get('status',{}).get('conditions',[])),'unqualified image transition blocked: '+fleet_name)
+                assert get(kind,fleet_name)['spec']==before['spec']
+                k('-n','fleets','patch','celldfleet',fleet_name,'--type=merge','-p',json.dumps({'spec':{'runtimeImage':None,'maintenance':None}}))
             sts=get('statefulset','beta')
             assert sts['spec']['persistentVolumeClaimRetentionPolicy']=={'whenDeleted':'Retain','whenScaled':'Retain'}
             assert sts['spec']['updateStrategy']['type']=='OnDelete'

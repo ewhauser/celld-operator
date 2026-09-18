@@ -1,6 +1,7 @@
 # Experimental fleet provisioning
 
-Step 4 adds optional [capacity policy](capacity-policy.md) and metrics collection to
+Step 5 adds [coordinated maintenance](decisions/0014-coordinated-maintenance.md)
+and durably blocked runtime/restart/deletion requests. Step 4 adds optional [capacity policy](capacity-policy.md) and metrics collection to
 journaled manual scale-out. It does not enable production scaling,
 upgrades, automatic recovery operations, or deletion. Read
 [ADR 0011](decisions/0011-initial-fleet-api.md) and the
@@ -39,6 +40,9 @@ a separate read-only identity and is not connected in step 2.
 | `qualification` | Required literal `Experimental`; no production setting |
 | `profile` | Required `Bucket` or `PersistentFleet` |
 | `replicas` | Manual target/override, 1–100; default 3; at least AZ count |
+| `runtimeImage` | Optional requested celld digest; only the original pin can run; all transitions blocked |
+| `maintenance.paused` | False by default; suspend new and unissued actions, continue issued recovery |
+| `maintenance.restartToken` | Nonempty token requests a restart; currently blocked as unqualified |
 | `capacity` | Optional shadow/automatic policy; see [capacity policy](capacity-policy.md) |
 | `serviceAccountName` | Existing account in the fleet namespace |
 | `storage.bucket` | Dedicated canonical bucket, lowercase letters/digits/hyphens |
@@ -49,7 +53,7 @@ a separate read-only identity and is not connected in step 2.
 | `placement.azCount` | Must equal number of zones, 1–6 |
 | `placement.mode` | Strict (default) or Relaxed; same allowlist in either mode |
 
-Fleet names must be DNS labels up to 40 characters. Only `replicas` and `capacity` are mutable.
+Fleet names must be DNS labels up to 40 characters. Only `replicas`, `capacity`, `runtimeImage` and `maintenance` are mutable.
 Invalid cross-field combinations fail admission; name/dependency errors also
 produce clear controller conditions. No `/scale` API is exposed. Production image
 updates, resize, storage changes and placement changes require a
@@ -124,3 +128,20 @@ engine; it is not connected to the manager, even with `--local-test`.
 Step 2 PersistentFleet reservations without recorded creation PVC UIDs now block
 for review. The operator does not infer identity from matching labels or offer an
 automatic migration. See [step 3 validation](qualification/lifecycle/README.md).
+
+## Maintenance
+
+See [the pause example](../config/samples/maintenance-paused.yaml) and
+[ADR 0014](decisions/0014-coordinated-maintenance.md) for exact pause, resume,
+request precedence, finalizer and garbage collection semantics.
+`MaintenancePaused` and `Deleting` conditions expose the control state;
+`status.lifecycle.requestKind`, `requestID` and `targetImage` project the retained
+blocked request. The original workload pin remains unchanged. No upgrade or
+rollback transition is qualified, including a same-version planned restart.
+
+Pause is asynchronous: inspect the condition and workload maintenance fence.
+Already-issued effects continue recovery; uncertain completion and loss remain
+blockers. Deletion retains its finalizer and all identities; it is not a supported
+cleanup operation. Never delete a reservation to reuse a bucket or retained disk.
+
+Step 5 [validation and limitations](qualification/maintenance/README.md).

@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -27,6 +28,9 @@ func TestDefaultsAndValidation(t *testing.T) {
 		t.Fatal("incorrect defaults")
 	}
 	tests := map[string]func(*CelldFleet){
+		"mutable tag":     func(f *CelldFleet) { f.Spec.RuntimeImage = "ghcr.io/denoland/celld:v0.5.0" },
+		"foreign image":   func(f *CelldFleet) { f.Spec.RuntimeImage = "example.org/celld@sha256:abc" },
+		"long token":      func(f *CelldFleet) { f.Spec.Maintenance = &MaintenanceSpec{RestartToken: strings.Repeat("a", 129)} },
 		"production":      func(f *CelldFleet) { f.Spec.Qualification = "Production" },
 		"prefix":          func(f *CelldFleet) { f.Spec.Storage.Bucket = "example-bucket/shared" },
 		"alias":           func(f *CelldFleet) { f.Spec.Storage.Bucket = "EXAMPLE-bucket" },

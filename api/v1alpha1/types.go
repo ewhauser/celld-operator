@@ -17,7 +17,7 @@ var SchemeBuilder = runtime.NewSchemeBuilder(func(s *runtime.Scheme) error {
 })
 var AddToScheme = SchemeBuilder.AddToScheme
 
-// CelldFleet supports journaled manual capacity changes. No scale subresource is exposed.
+// CelldFleet supports journaled capacity and maintenance requests. No scale subresource is exposed.
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=cf
@@ -26,7 +26,7 @@ var AddToScheme = SchemeBuilder.AddToScheme
 type CelldFleet struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	// +kubebuilder:validation:XValidation:rule="self.qualification == oldSelf.qualification && self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement",message="only replicas and capacity may change"
+	// +kubebuilder:validation:XValidation:rule="self.qualification == oldSelf.qualification && self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement",message="only replicas, capacity, runtimeImage and maintenance may change"
 	Spec   CelldFleetSpec   `json:"spec"`
 	Status CelldFleetStatus `json:"status,omitempty"`
 }
@@ -37,6 +37,14 @@ type CelldFleet struct {
 // +kubebuilder:validation:XValidation:rule="self.placement.zones.all(z, z.startsWith(self.storage.region) && size(z) == size(self.storage.region) + 1 && z.matches('.*[a-z]$'))",message="zones must be standard AZ names in storage.region"
 // +kubebuilder:validation:XValidation:rule="!has(self.capacity) || self.capacity.minReplicas >= self.placement.azCount",message="capacity minimum must cover requested AZs"
 type CelldFleetSpec struct {
+	// Requested immutable runtime digest. Omission selects the original v0.5.0 pin.
+	// Unsupported transitions are durably blocked, including rollback.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^ghcr.io/denoland/celld@sha256:[a-f0-9]{64}$`
+	RuntimeImage string `json:"runtimeImage,omitempty"`
+	// Maintenance requests share the retained lifecycle journal.
+	Maintenance *MaintenanceSpec `json:"maintenance,omitempty"`
+
 	// A required acknowledgment of the qualification boundary; production is unavailable.
 	// +kubebuilder:validation:Enum=Experimental
 	Qualification string `json:"qualification"`
@@ -54,6 +62,15 @@ type CelldFleetSpec struct {
 	ServiceAccountName string        `json:"serviceAccountName"`
 	Storage            StorageSpec   `json:"storage"`
 	Placement          PlacementSpec `json:"placement"`
+}
+
+// MaintenanceSpec requests suspension or a qualified planned restart.
+type MaintenanceSpec struct {
+	// Pause new actions and unissued operations; continue recovery of issued actions.
+	Paused bool `json:"paused,omitempty"`
+	// Change this token to request a planned restart. No restart is qualified yet.
+	// +kubebuilder:validation:MaxLength=128
+	RestartToken string `json:"restartToken,omitempty"`
 }
 
 // One entire bucket is reserved, including all runtime metadata and peer keys.
@@ -99,6 +116,9 @@ type PlacementSpec struct {
 // LifecycleStatus is an informational projection of the retained reservation journal.
 // Clearing status never cancels an operation or removes recovery evidence.
 type LifecycleStatus struct {
+	RequestKind      string `json:"requestKind,omitempty"`
+	RequestID        string `json:"requestID,omitempty"`
+	TargetImage      string `json:"targetImage,omitempty"`
 	OperationID      string `json:"operationID,omitempty"`
 	Phase            string `json:"phase,omitempty"`
 	From             int32  `json:"from,omitempty"`
