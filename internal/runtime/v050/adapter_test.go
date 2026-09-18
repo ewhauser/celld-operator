@@ -316,3 +316,27 @@ func (r *cancelFinalReader) List(ctx context.Context, prefix, token string) (Pag
 	}
 	return page, err
 }
+
+func TestInspectLivePreflightStillChecksHistory(t *testing.T) {
+	a, _ := New(Image)
+	b := fixture(t, "node-open")
+	n, err := a.ParseNode("nodes/a.json", b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.UnixMilli(int64(n.ExpiresMS) - 1)
+	req := Request{OperationID: "preflight", Sessions: []Session{{Node: n.Name, Generation: n.Generation, Epoch: n.Epoch}}, InventoryComplete: true, CapturedAt: now, MaxAge: time.Second, PageBudget: 10}
+	r := &reader{data: b, pages: map[string]Page{"nodes/": {Keys: []string{"nodes/a.json"}, Complete: true}, "log/": {Complete: true}}}
+	if _, err := a.Inspect(t.Context(), r, req, func() time.Time { return now }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Assess(t.Context(), r, req, func() time.Time { return now }); err == nil {
+		t.Fatal("live preflight counted as stopped completion")
+	}
+	r.pages["log/"] = Page{Keys: []string{"log/old/previous.e1.loss.json"}, Complete: true}
+	if _, err := a.Inspect(t.Context(), r, req, func() time.Time { return now }); err == nil {
+		t.Fatal("preflight ignored historical loss")
+	} else if _, ok := errors.AsType[*LossError](err); !ok {
+		t.Fatalf("loss not classified: %v", err)
+	}
+}

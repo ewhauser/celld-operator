@@ -259,6 +259,15 @@ type Evidence struct {
 // and qualify the failure model before using it. Generation replacement and
 // absent logs deliberately remain blocked even when source suggests recovery.
 func (a *Adapter) Assess(ctx context.Context, r Reader, req Request, now func() time.Time) (Evidence, error) {
+	return a.assess(ctx, r, req, now, true)
+}
+
+// Inspect checks pre-removal inventory and all historical recovery/loss evidence.
+func (a *Adapter) Inspect(ctx context.Context, r Reader, req Request, now func() time.Time) (Evidence, error) {
+	return a.assess(ctx, r, req, now, false)
+}
+
+func (a *Adapter) assess(ctx context.Context, r Reader, req Request, now func() time.Time, requireStopped bool) (Evidence, error) {
 	var result Evidence
 	if req.OperationID == "" || !req.InventoryComplete || len(req.Sessions) == 0 || req.PageBudget <= 0 || !fresh(req.CapturedAt, now(), req.MaxAge) {
 		return Evidence{}, errors.New("incomplete lifecycle evidence")
@@ -306,7 +315,7 @@ func (a *Adapter) Assess(ctx context.Context, r Reader, req Request, now func() 
 			result.Completed = append(result.Completed, s)
 		}
 	}
-	if len(result.Completed) == 0 {
+	if requireStopped && len(result.Completed) == 0 {
 		return Evidence{}, errors.New("no stopped session")
 	}
 	// Ordering is intentional: completion reads precede the full historical scan.
@@ -316,7 +325,7 @@ func (a *Adapter) Assess(ctx context.Context, r Reader, req Request, now func() 
 	}
 	for _, key := range keys {
 		if strings.HasSuffix(key, ".loss.json") {
-			return Evidence{}, errors.New("possible loss declaration: " + key)
+			return Evidence{}, &LossError{Key: key}
 		}
 	}
 	result.ObservedAt = now()
@@ -368,3 +377,8 @@ func list(ctx context.Context, r Reader, prefix string, budget *int) ([]string, 
 		token = page.Next
 	}
 }
+
+// LossError is sticky lifecycle evidence, even if the object later disappears.
+type LossError struct{ Key string }
+
+func (e *LossError) Error() string { return "possible loss declaration: " + e.Key }

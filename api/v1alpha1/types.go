@@ -17,7 +17,7 @@ var SchemeBuilder = runtime.NewSchemeBuilder(func(s *runtime.Scheme) error {
 })
 var AddToScheme = SchemeBuilder.AddToScheme
 
-// CelldFleet is initial provisioning only. No scale subresource is exposed.
+// CelldFleet supports journaled manual capacity changes. No scale subresource is exposed.
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=cf
@@ -26,7 +26,7 @@ var AddToScheme = SchemeBuilder.AddToScheme
 type CelldFleet struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec is immutable until the lifecycle gate is implemented"
+	// +kubebuilder:validation:XValidation:rule="self.qualification == oldSelf.qualification && self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement",message="only replicas may change"
 	Spec   CelldFleetSpec   `json:"spec"`
 	Status CelldFleetStatus `json:"status,omitempty"`
 }
@@ -93,10 +93,24 @@ type PlacementSpec struct {
 	Mode string `json:"mode,omitempty"`
 }
 
+// LifecycleStatus is an informational projection of the retained reservation journal.
+// Clearing status never cancels an operation or removes recovery evidence.
+type LifecycleStatus struct {
+	OperationID      string `json:"operationID,omitempty"`
+	Phase            string `json:"phase,omitempty"`
+	From             int32  `json:"from,omitempty"`
+	To               int32  `json:"to,omitempty"`
+	TargetPod        string `json:"targetPod,omitempty"`
+	TargetUID        string `json:"targetUID,omitempty"`
+	TargetGeneration string `json:"targetGeneration,omitempty"`
+	PossibleLoss     string `json:"possibleLoss,omitempty"`
+}
+
 type CelldFleetStatus struct {
-	ObservedGeneration int64  `json:"observedGeneration,omitempty"`
-	ReadyReplicas      int32  `json:"readyReplicas,omitempty"`
-	Reservation        string `json:"reservation,omitempty"`
+	Lifecycle          LifecycleStatus `json:"lifecycle,omitempty"`
+	ObservedGeneration int64           `json:"observedGeneration,omitempty"`
+	ReadyReplicas      int32           `json:"readyReplicas,omitempty"`
+	Reservation        string          `json:"reservation,omitempty"`
 	// +listType=map
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
@@ -119,11 +133,17 @@ type CelldStorageReservation struct {
 	Spec ReservationSpec `json:"spec"`
 }
 type ReservationSpec struct {
-	Bucket         string `json:"bucket"`
-	FleetNamespace string `json:"fleetNamespace"`
-	FleetName      string `json:"fleetName"`
-	FleetUID       string `json:"fleetUID"`
-	SpecHash       string `json:"specHash"`
+	// InitialReplicas binds the replica component of SpecHash before provisioning.
+	// Optional only for reservations created before this field existed.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=100
+	InitialReplicas int32  `json:"initialReplicas,omitempty"`
+	Bucket          string `json:"bucket"`
+	FleetNamespace  string `json:"fleetNamespace"`
+	FleetName       string `json:"fleetName"`
+	FleetUID        string `json:"fleetUID"`
+	SpecHash        string `json:"specHash"`
 }
 
 // +kubebuilder:object:root=true

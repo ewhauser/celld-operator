@@ -1,6 +1,6 @@
 # Experimental fleet provisioning
 
-Step 2 creates initial infrastructure. It does not enable production scaling,
+Step 3 adds journaled manual scale-out to the initial infrastructure. It does not enable production scaling,
 upgrades, automatic recovery operations, or deletion. Read
 [ADR 0011](decisions/0011-initial-fleet-api.md) and the
 [remaining qualification gates](qualification/README.md) first.
@@ -37,7 +37,7 @@ a separate read-only identity and is not connected in step 2.
 | --- | --- |
 | `qualification` | Required literal `Experimental`; no production setting |
 | `profile` | Required `Bucket` or `PersistentFleet` |
-| `replicas` | Initial count, 1–100; default 3; at least AZ count |
+| `replicas` | Desired count, 1–100; default 3; at least AZ count |
 | `serviceAccountName` | Existing account in the fleet namespace |
 | `storage.bucket` | Dedicated canonical bucket, lowercase letters/digits/hyphens |
 | `storage.region` | Explicit AWS region; immutable |
@@ -47,11 +47,11 @@ a separate read-only identity and is not connected in step 2.
 | `placement.azCount` | Must equal number of zones, 1–6 |
 | `placement.mode` | Strict (default) or Relaxed; same allowlist in either mode |
 
-Fleet names must be DNS labels up to 40 characters. All spec fields are immutable.
+Fleet names must be DNS labels up to 40 characters. Only `replicas` is mutable.
 Invalid cross-field combinations fail admission; name/dependency errors also
 produce clear controller conditions. No `/scale` API is exposed. Production image
-updates, resize, replica changes, storage changes and placement changes require a
-future qualified lifecycle implementation.
+updates, resize, storage changes and placement changes require a
+future qualified lifecycle implementation. Manual scale-out is journaled; reductions are accepted by admission but explicitly blocked by the unqualified contraction gates. See [ADR 0012](decisions/0012-restart-safe-manual-lifecycle.md).
 
 The application Service is `<fleet>:8080`; label authorized client/ingress pods
 in that namespace `celld.example.com/client-of: <fleet>`. Internal port 8081 is
@@ -102,3 +102,23 @@ memory for a Kubernetes node and four runtime pods. No AWS qualification follows
 from this local test, and local-path disk recovery is not EBS recovery.
 
 Recorded results and remaining limits: [step 2 evidence](qualification/infrastructure/README.md).
+
+## Manual lifecycle status
+
+Edit `spec.replicas` to request additive capacity. Both profiles preserve the
+workload UID and template. `status.lifecycle` exposes the operation ID, phase,
+from/to counts, selected target/session (when present) and sticky loss finding.
+The retained reservation journal is authoritative; clearing status does not cancel
+an operation. `LifecycleProgress` means a durable transition is in progress.
+`ScaleOutBlocked` identifies uncertain PVC allocation or replica update conflicts.
+`StorageIdentityConflict` identifies missing/replaced retained disks.
+
+`BucketCompletionUnqualified` and `FencingUnqualified` are explicit unavailable
+contraction paths, not temporary readiness failures. The installed manager cannot
+remove a replica. No timeout or administrative attestation bypasses these gates.
+A local, injected-evidence test seam exercises the one-at-a-time contraction
+engine; it is not connected to the manager, even with `--local-test`.
+
+Step 2 PersistentFleet reservations without recorded creation PVC UIDs now block
+for review. The operator does not infer identity from matching labels or offer an
+automatic migration. See [step 3 validation](qualification/lifecycle/README.md).

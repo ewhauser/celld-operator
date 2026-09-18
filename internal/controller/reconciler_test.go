@@ -167,7 +167,7 @@ func TestConcurrentReservation(t *testing.T) {
 	}
 }
 func TestNoUnsafeMutationsOrRecreation(t *testing.T) {
-	for _, change := range []string{"scale-in", "scale-out", "profile", "missing", "drift", "delete"} {
+	for _, change := range []string{"scale-in", "profile", "missing", "drift", "delete"} {
 		t.Run(change, func(t *testing.T) {
 			f := fixture("alpha", "bucket-alpha", "Bucket")
 			r := setup(t, f)

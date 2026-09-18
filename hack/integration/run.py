@@ -190,7 +190,7 @@ nodes:
             print('PASS: same-fleet/operator peer access, cross-fleet/untrusted/client peer denial, ClusterIP health routing',flush=True)
             apply(fleet('conflict','bucket-alpha',namespace='other'))
             wait_for(lambda:any(c['reason']=='StorageScopeConflict' for c in get('celldfleet','conflict','other').get('status',{}).get('conditions',[])),'cross-namespace storage conflict blocked')
-            for mutate in ('scale-in','upgrade','invalid-az','invalid-storage'):
+            for mutate in ('upgrade','invalid-az','invalid-storage'):
                 bad=copy.deepcopy(alpha)
                 if mutate=='scale-in':bad['spec']['replicas']=1
                 if mutate=='upgrade':bad['spec']['storage']['sizeGiB']=2
@@ -210,13 +210,31 @@ nodes:
             assert [get('pod','beta-'+str(i))['metadata']['uid'] for i in range(2)]==beta_pod_uids
             k('-n','fleets','patch','statefulset','beta','--type=json','-p',json.dumps([{'op':'replace','path':'/spec/template','value':original_template}]))
             wait_for(lambda:ready('beta'),'restored original template matches normalized API defaults')
+            # Manual additive capacity uses the durable journal, across a leader restart.
+            for fleet_name, kind in (('alpha','deployment'),('beta','statefulset')):
+                before=get(kind,fleet_name)
+                before_template=before['spec']['template']
+                k('-n','fleets','patch','celldfleet',fleet_name,'--type=merge','-p',json.dumps({'spec':{'replicas':3}}))
+                process.terminate();process.wait(timeout=20)
+                process=subprocess.Popen([str(ROOT/'bin/celld-operator'),'--network-policy-enforced','--local-test'],env={**env,'KUBECONFIG':str(operator_path)},stdout=log,stderr=subprocess.STDOUT)
+                wait_for(lambda: get(kind,fleet_name)['spec']['replicas']==3 and ready(fleet_name),'journaled scale-out after controller restart: '+fleet_name,timeout=300)
+                after=get(kind,fleet_name)
+                assert after['metadata']['uid']==before['metadata']['uid']
+                assert after['spec']['template']==before_template
+                k('-n','fleets','patch','celldfleet',fleet_name,'--type=merge','-p',json.dumps({'spec':{'replicas':1}}))
+                why='BucketCompletionUnqualified' if fleet_name=='alpha' else 'FencingUnqualified'
+                wait_for(lambda:any(c['reason']==why for c in get('celldfleet',fleet_name)['status']['conditions']),'unqualified contraction blocked: '+fleet_name)
+                assert get(kind,fleet_name)['spec']['replicas']==3
+                k('-n','fleets','patch','celldfleet',fleet_name,'--type=merge','-p',json.dumps({'spec':{'replicas':3}}))
+                wait_for(lambda:ready(fleet_name),'restored desired capacity: '+fleet_name)
+            print('PASS: both profiles scale out without template changes; contraction gates persist',flush=True)
             sts=get('statefulset','beta')
             assert sts['spec']['persistentVolumeClaimRetentionPolicy']=={'whenDeleted':'Retain','whenScaled':'Retain'}
             assert sts['spec']['updateStrategy']['type']=='OnDelete'
             k('-n','fleets','delete','celldfleet','beta','--wait=false')
             wait_for(lambda:any(c['reason']=='DeletionBlocked' for c in get('celldfleet','beta').get('status',{}).get('conditions',[])),'deletion blocked without touching StatefulSet or PVCs')
             assert get('statefulset','beta')['metadata']['uid']==sts['metadata']['uid']
-            assert len(json.loads(k('-n','fleets','get','pvc','-l','celld.example.com/fleet-uid='+get('celldfleet','beta')['metadata']['uid'],'-o','json'))['items'])==2
+            assert len(json.loads(k('-n','fleets','get','pvc','-l','celld.example.com/fleet-uid='+get('celldfleet','beta')['metadata']['uid'],'-o','json'))['items'])==3
             # Controller restart must preserve reservation/journal and workload UIDs.
             dep_uid=get('deployment','alpha')['metadata']['uid']
             process.terminate();process.wait(timeout=20)
@@ -225,6 +243,22 @@ nodes:
             wait_for(lambda:ready('alpha'),'restarted controller reconciles readiness from durable reservation',timeout=90)
             assert get('deployment','alpha')['metadata']['uid']==dep_uid
             assert process.poll() is None
+            # Reservation baseline survives a replica edit before any workload exists.
+            apply({'apiVersion':'networking.k8s.io/v1','kind':'NetworkPolicy','metadata':{'name':'delayed','namespace':'fleets'},'spec':{'podSelector':{'matchLabels':{'integration.example.com/unused':'true'}},'policyTypes':['Ingress']}})
+            delayed=fleet('delayed','bucket-delayed')
+            delayed['spec']['replicas']=1
+            apply(delayed)
+            wait_for(lambda:any(c['reason']=='InfrastructureBlocked' for c in get('celldfleet','delayed').get('status',{}).get('conditions',[])),'reservation persists before blocked initial provisioning')
+            k('-n','fleets','patch','celldfleet','delayed','--type=merge','-p',json.dumps({'spec':{'replicas':2}}))
+            # This policy was created by this invocation and selects no runtime Pods.
+            k('-n','fleets','delete','networkpolicy','delayed')
+            def baseline_recovered():
+                reservations=json.loads(k('get','celldstoragereservations','-o','json'))['items']
+                reservation=next(x for x in reservations if x['spec']['fleetName']=='delayed')
+                journal=json.loads(reservation['metadata'].get('annotations',{}).get('celld.example.com/lifecycle-journal','null'))
+                return reservation['spec']['initialReplicas']==1 and journal is not None and journal['Initial']==1 and journal['Applied']==2
+            wait_for(baseline_recovered,'replica edit before workload creation preserves reservation baseline')
+            assert get('deployment','delayed')['spec']['replicas']==2
             print('PASS: controller restart preserves initial workload; all integration assertions passed',flush=True)
         except BaseException:
             if config.exists():

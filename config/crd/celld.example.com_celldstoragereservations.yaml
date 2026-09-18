@@ -47,6 +47,14 @@ spec:
                 type: string
               fleetUID:
                 type: string
+              initialReplicas:
+                description: |-
+                  InitialReplicas binds the replica component of SpecHash before provisioning.
+                  Optional only for reservations created before this field existed.
+                format: int32
+                maximum: 100
+                minimum: 1
+                type: integer
               specHash:
                 type: string
             required:

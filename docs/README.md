@@ -14,3 +14,6 @@ Step 1 implementation and measured local results: [qualification findings](quali
 
 Step 2: [experimental fleet API and usage](fleet-api.md), including local integration
 commands and explicit lifecycle restrictions.
+
+Step 3: [manual lifecycle design](decisions/0012-restart-safe-manual-lifecycle.md)
+and [validation results](qualification/lifecycle/README.md).

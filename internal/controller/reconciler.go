@@ -1,4 +1,4 @@
-// Package controller provisions experimental fleet infrastructure without executing lifecycle changes.
+// Package controller provisions experimental fleet infrastructure with durable manual lifecycle intent.
 package controller
 
 import (
@@ -33,6 +33,8 @@ type Reconciler struct {
 	client.Client
 	Options               Options
 	NetworkPolicyEnforced bool
+	// localLifecycle is only supplied by in-package qualification tests. No production fence exists.
+	localLifecycle lifecycleEvidence
 }
 
 func digest(data []byte) string           { h := sha256.Sum256(data); return hex.EncodeToString(h[:]) }
@@ -82,7 +84,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			return r.report(ctx, f, "InvalidStorageClass", "Requires EBS CSI, Retain reclaim policy and WaitForFirstConsumer binding (local test permits a different provisioner)", 0, false)
 		}
 	}
-	reservation := &fleet.CelldStorageReservation{Name: reservationName(f), Spec: fleet.ReservationSpec{Bucket: f.Spec.Storage.Bucket, FleetNamespace: f.Namespace, FleetName: f.Name, FleetUID: string(f.UID), SpecHash: specHash(f)}}
+	reservation := &fleet.CelldStorageReservation{Name: reservationName(f), Spec: fleet.ReservationSpec{InitialReplicas: f.Spec.Replicas, Bucket: f.Spec.Storage.Bucket, FleetNamespace: f.Namespace, FleetName: f.Name, FleetUID: string(f.UID), SpecHash: specHash(f)}}
 	expected := reservation.Spec
 	if err := r.Create(ctx, reservation); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
@@ -92,7 +94,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			return ctrl.Result{}, err
 		}
 	}
-	if reservation.Spec != expected {
+	if !r.reservationMatches(ctx, f, reservation, expected) {
 		return r.report(ctx, f, "StorageScopeConflict", "Bucket is permanently reserved to another fleet UID or immutable configuration; no resources adopted", 0, false)
 	}
 
@@ -120,10 +122,20 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		if err := r.Update(ctx, reservation); err != nil {
 			return ctrl.Result{}, err
 		}
+		createdClaims := map[string]types.UID{}
 		for _, claim := range claims {
 			if err := r.Create(ctx, claim); err != nil {
 				return r.report(ctx, f, "StorageIdentityConflict", fmt.Sprintf("Cannot exclusively create PVC %s: %v; retained claims require manual review", claim.Name, err), 0, false)
 			}
+			createdClaims[claim.Name] = claim.UID
+		}
+		claimIDs, err := json.Marshal(createdClaims)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		reservation.Annotations[creationClaimsKey] = string(claimIDs)
+		if err := r.Update(ctx, reservation); err != nil {
+			return ctrl.Result{}, err
 		}
 		if err := r.Create(ctx, desired); err != nil {
 			return ctrl.Result{}, err
@@ -133,8 +145,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	if result, handled, err := r.lifecycle(ctx, f, reservation, actual); handled || err != nil {
+		return result, err
+	}
 	if !matches(desired, actual) {
-		return r.report(ctx, f, "LifecycleBlocked", "Existing workload differs from the initial spec; no scaling, rollout, adoption or drift repair is authorized", 0, false)
+		return r.report(ctx, f, "LifecycleBlocked", "Existing workload differs from the journaled spec; no rollout, adoption or drift repair is authorized", 0, false)
 	}
 	if reservation.Annotations[attemptAnnotation] == "" {
 		return r.report(ctx, f, "LifecycleBlocked", "Existing workload has no creation journal; refusing adoption", 0, false)
@@ -194,6 +209,15 @@ func emptyObject(obj client.Object) client.Object {
 
 func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, reason, message string, ready int32, provisioned bool) (ctrl.Result, error) {
 	before := f.DeepCopy()
+	res := &fleet.CelldStorageReservation{}
+	if err := r.Get(ctx, types.NamespacedName{Name: reservationName(f)}, res); err == nil {
+		if j, err := readJournal(res); err == nil && j != nil && res.Spec.FleetUID == string(f.UID) {
+			f.Status.Lifecycle = fleet.LifecycleStatus{PossibleLoss: j.Loss}
+			if op := j.Operation; op != nil {
+				f.Status.Lifecycle = fleet.LifecycleStatus{OperationID: op.ID, Phase: op.Phase, From: op.From, To: op.To, TargetPod: op.TargetPod, TargetUID: op.TargetUID, TargetGeneration: op.TargetGeneration, PossibleLoss: j.Loss}
+			}
+		}
+	}
 	if provisioned {
 		f.Status.Reservation = reservationName(f)
 	}
@@ -207,12 +231,13 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, reason, me
 		meta.SetStatusCondition(&f.Status.Conditions, metav1.Condition{Type: kind, Status: status, Reason: why, Message: msg, ObservedGeneration: f.Generation})
 	}
 	set("Ready", provisioned && ready == f.Spec.Replicas, reason, message)
-	set("InfrastructureReady", provisioned, reason, message)
-	set("Blocked", !provisioned, reason, message)
-	set("LifecycleBlocked", true, "NotImplemented", "Controlled scale-in, upgrades, restarts and deletion require the future restart-safe lifecycle gate")
+	set("InfrastructureReady", provisioned || reason == "LifecycleProgress", reason, message)
+	set("Progressing", reason == "LifecycleProgress" || reason == "Provisioning", reason, message)
+	set("Blocked", !provisioned && reason != "LifecycleProgress", reason, message)
+	set("LifecycleBlocked", true, "QualificationIncomplete", "Bucket no-log completion and real process fencing remain unqualified; upgrades, restarts and deletion are blocked")
 	set("ProductionQualified", false, "QualificationIncomplete", "Local prototype only; AWS, retained-EBS recovery, fencing, follower AZ diversity and restart safety remain unqualified")
 	if !equality.Semantic.DeepEqual(before.Status, f.Status) {
-		if err := r.Status().Patch(ctx, f, client.MergeFrom(before)); err != nil {
+		if err := r.Status().Patch(ctx, f, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); err != nil {
 			return ctrl.Result{}, err
 		}
 	}

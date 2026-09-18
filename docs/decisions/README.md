@@ -21,3 +21,5 @@ Read [runtime qualification](../runtime-qualification.md), [shutdown evidence](.
 The original proposal is `/Users/ewhauser/Downloads/Celld_Fleet_Operator_Design.docx`. This directory is the portable record of the decisions; the source document is not required to understand them.
 
 Future decisions should receive a new numbered record. Material changes should identify which earlier record they supersede. Do not rewrite a qualification hypothesis as a proven guarantee.
+
+- [ADR 0012: restart-safe manual lifecycle](0012-restart-safe-manual-lifecycle.md)

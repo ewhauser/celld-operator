@@ -23,8 +23,8 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: CelldFleet is initial provisioning only. No scale subresource
-          is exposed.
+        description: CelldFleet supports journaled manual capacity changes. No scale
+          subresource is exposed.
         properties:
           apiVersion:
             description: |-
@@ -138,8 +138,10 @@ spec:
             - storage
             type: object
             x-kubernetes-validations:
-            - message: spec is immutable until the lifecycle gate is implemented
-              rule: self == oldSelf
+            - message: only replicas may change
+              rule: self.qualification == oldSelf.qualification && self.profile ==
+                oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName
+                && self.storage == oldSelf.storage && self.placement == oldSelf.placement
             - message: azCount must equal the zones count
               rule: self.placement.azCount == size(self.placement.zones)
             - message: replicas must be at least azCount
@@ -211,6 +213,30 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              lifecycle:
+                description: |-
+                  LifecycleStatus is an informational projection of the retained reservation journal.
+                  Clearing status never cancels an operation or removes recovery evidence.
+                properties:
+                  from:
+                    format: int32
+                    type: integer
+                  operationID:
+                    type: string
+                  phase:
+                    type: string
+                  possibleLoss:
+                    type: string
+                  targetGeneration:
+                    type: string
+                  targetPod:
+                    type: string
+                  targetUID:
+                    type: string
+                  to:
+                    format: int32
+                    type: integer
+                type: object
               observedGeneration:
                 format: int64
                 type: integer

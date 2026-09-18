@@ -1,0 +1,56 @@
+=== RUN   TestConcurrentLossFencesReplicaIssuance
+=== RUN   TestConcurrentLossFencesReplicaIssuance/loss_journaled
+=== RUN   TestConcurrentLossFencesReplicaIssuance/crash_before_loss_journal
+--- PASS: TestConcurrentLossFencesReplicaIssuance (1.03s)
+    --- PASS: TestConcurrentLossFencesReplicaIssuance/loss_journaled (0.77s)
+    --- PASS: TestConcurrentLossFencesReplicaIssuance/crash_before_loss_journal (0.25s)
+=== RUN   TestReplicaChangeBeforeInitialWorkload
+=== RUN   TestReplicaChangeBeforeInitialWorkload/Bucket
+=== RUN   TestReplicaChangeBeforeInitialWorkload/PersistentFleet
+--- PASS: TestReplicaChangeBeforeInitialWorkload (0.49s)
+    --- PASS: TestReplicaChangeBeforeInitialWorkload/Bucket (0.23s)
+    --- PASS: TestReplicaChangeBeforeInitialWorkload/PersistentFleet (0.26s)
+=== RUN   TestLossFencePreservesAlreadyIssuedRemoval
+--- PASS: TestLossFencePreservesAlreadyIssuedRemoval (0.24s)
+=== RUN   TestLifecycleScaleOutRestartsAndStatusLoss
+=== RUN   TestLifecycleScaleOutRestartsAndStatusLoss/Bucket
+=== RUN   TestLifecycleScaleOutRestartsAndStatusLoss/PersistentFleet
+--- PASS: TestLifecycleScaleOutRestartsAndStatusLoss (0.47s)
+    --- PASS: TestLifecycleScaleOutRestartsAndStatusLoss/Bucket (0.21s)
+    --- PASS: TestLifecycleScaleOutRestartsAndStatusLoss/PersistentFleet (0.25s)
+=== RUN   TestLifecycleContractionQualificationBlocks
+=== RUN   TestLifecycleContractionQualificationBlocks/Bucket
+=== RUN   TestLifecycleContractionQualificationBlocks/PersistentFleet
+--- PASS: TestLifecycleContractionQualificationBlocks (0.24s)
+    --- PASS: TestLifecycleContractionQualificationBlocks/Bucket (0.11s)
+    --- PASS: TestLifecycleContractionQualificationBlocks/PersistentFleet (0.13s)
+=== RUN   TestLifecycleRepeatedContractionAndCrashAfterEffect
+--- PASS: TestLifecycleRepeatedContractionAndCrashAfterEffect (0.36s)
+=== RUN   TestLifecycleEvidenceFaultsRetainOperation
+=== RUN   TestLifecycleEvidenceFaultsRetainOperation/incomplete
+=== RUN   TestLifecycleEvidenceFaultsRetainOperation/generation
+=== RUN   TestLifecycleEvidenceFaultsRetainOperation/loss
+=== RUN   TestLifecycleEvidenceFaultsRetainOperation/unfenced
+=== RUN   TestLifecycleEvidenceFaultsRetainOperation/survivor
+--- PASS: TestLifecycleEvidenceFaultsRetainOperation (1.09s)
+    --- PASS: TestLifecycleEvidenceFaultsRetainOperation/incomplete (0.22s)
+    --- PASS: TestLifecycleEvidenceFaultsRetainOperation/generation (0.22s)
+    --- PASS: TestLifecycleEvidenceFaultsRetainOperation/loss (0.24s)
+    --- PASS: TestLifecycleEvidenceFaultsRetainOperation/unfenced (0.21s)
+    --- PASS: TestLifecycleEvidenceFaultsRetainOperation/survivor (0.20s)
+=== RUN   TestLifecycleRetainedPVCReplacementBlocks
+--- PASS: TestLifecycleRetainedPVCReplacementBlocks (0.12s)
+=== RUN   TestLifecycleConcurrentIntentAndReplicaCAS
+--- PASS: TestLifecycleConcurrentIntentAndReplicaCAS (0.18s)
+=== RUN   TestLifecycleDesiredChangesKeepRecordedIntent
+--- PASS: TestLifecycleDesiredChangesKeepRecordedIntent (0.20s)
+=== RUN   TestLifecycleCrashDuringPVCAllocationRetainsUnknownDisk
+--- PASS: TestLifecycleCrashDuringPVCAllocationRetainsUnknownDisk (0.17s)
+=== RUN   TestLifecycleSettlementUncertaintyRestartsWindow
+--- PASS: TestLifecycleSettlementUncertaintyRestartsWindow (0.24s)
+=== RUN   TestLifecycleMissingHistoricalSessionBlocksNextRemoval
+--- PASS: TestLifecycleMissingHistoricalSessionBlocksNextRemoval (0.23s)
+=== RUN   TestLifecycleSlowMembershipCheckExpiresPreflight
+--- PASS: TestLifecycleSlowMembershipCheckExpiresPreflight (0.16s)
+PASS
+ok  	github.com/ewhauser/celld-operator/internal/controller	6.270s

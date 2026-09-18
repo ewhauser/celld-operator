@@ -3,7 +3,7 @@
 Kubernetes fleet operator for celld, targeting AWS EKS with S3 and EBS.
 
 This repository includes an experimental namespaced fleet API, initial infrastructure
-reconciliation, and a version-pinned runtime evidence adapter. Production lifecycle
+reconciliation, journaled manual scale-out, and a version-pinned runtime evidence adapter. Production lifecycle
 automation remains blocked pending qualification.
 
 ## Development
@@ -29,4 +29,6 @@ Runtime qualification: [measured findings and release gates](docs/qualification/
 
 Step 2 defines the namespaced CelldFleet API and initial provisioning for both
 profiles. See [API, examples and safety boundaries](docs/fleet-api.md). Production
-qualification and controlled lifecycle operations remain blocked.
+qualification and live contraction remain blocked. Step 3 adds a durable operation
+journal and fault-tested contraction engine behind explicit qualification gates;
+see [lifecycle validation](docs/qualification/lifecycle/README.md).
