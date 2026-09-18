@@ -7,6 +7,7 @@ import (
 	"time"
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
+	v050 "github.com/ewhauser/celld-operator/internal/runtime/v050"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -97,11 +98,19 @@ func (r *Reconciler) productionRemovalBlock(ctx context.Context, f *fleet.CelldF
 	if j.Inventory.CheckedAt.IsZero() || j.Inventory.CheckedAt.After(r.capacityNow()) || r.capacityNow().Sub(j.Inventory.CheckedAt) > 5*time.Second {
 		return "RecoveryInventoryUnavailable", "Metadata expired during survivor revalidation"
 	}
+	if f.Spec.Profile == "Bucket" {
+		if err := r.Evidence.inspectBucket(ctx, f, j, r.Options); err != nil {
+			if _, ok := errors.AsType[*v050.LossError](err); ok {
+				return "PossibleDataLoss", err.Error()
+			}
+			return "BucketPreflightBlocked", err.Error()
+		}
+	}
 	if j.Inventory.Blocker != "" {
 		return j.Inventory.Blocker, "Runtime session observations retained; exact authenticated binding and historical recovery remain required"
 	}
 	if f.Spec.Profile == "Bucket" {
-		return "BucketCompletionUnqualified", "Bucket removal executor and mode-specific completion evidence remain unqualified"
+		return "BucketCompletionUnqualified", "All candidate no-peer-log preflight passed, but no qualified exact process-completion authority or Bucket removal executor is installed"
 	}
 	_, err := r.Evidence.Stopped(ctx, f, j.Operation)
 	return "FencingUnqualified", err.Error()

@@ -56,7 +56,7 @@ there is no history pruning or age-based permission to forget recovery evidence.
 ## Contraction and evidence
 
 **The shipped manager cannot execute contraction in either profile.** Bucket
-no-log completion and deterministic Deployment victim control are unqualified.
+completion remains unqualified. Deterministic Deployment victim control is not required when every possible victim passes admission; see [ADR 0016](0016-bucket-preflight-and-completion-boundary.md).
 PersistentFleet needs a qualified process fence, live runtime membership collector,
 and independently provisioned read-only S3 transport. None is installed by this
 change. `--local-test` alone cannot bypass the gate. There is no administrator

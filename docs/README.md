@@ -19,3 +19,6 @@ Step 3: [manual lifecycle design](decisions/0012-restart-safe-manual-lifecycle.m
 and [validation results](qualification/lifecycle/README.md).
 
 Step 4: [capacity collection and policy](capacity-policy.md).
+
+Bucket contraction follow-up: [all-candidate preflight and remaining completion
+boundary](bucket-scale-in.md). Both manual and automatic removal remain blocked.

@@ -147,3 +147,8 @@ acknowledged-write preservation, upgrades and deletion are not qualified.
 See [local validation](qualification/shared-lifecycle/README.md). Whole-bucket
 isolation, external worker/bucket/IAM/ingress provisioning, strict configurable
 placement, unmodified image pin and optional Prometheus are unchanged.
+
+Bucket-specific follow-up: [all-candidate admission and completion boundary](bucket-scale-in.md)
+separates the Bucket acknowledgement rule from peer-log recovery without weakening
+the process-completion contract above. Its metadata observation does not enable
+contraction.

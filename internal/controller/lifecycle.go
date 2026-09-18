@@ -353,11 +353,14 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 				return ctrl.Result{}, true, err
 			}
 			reason, message := r.productionRemovalBlock(ctx, f, j)
+			if reason == "PossibleDataLoss" && j.Loss == "" {
+				return r.recordLoss(ctx, f, w, res, j, message)
+			}
 			return block(reason, message)
 		}
 		if op.To < op.From {
 			if f.Spec.Profile == "Bucket" {
-				return block("BucketCompletionUnqualified", "No qualified no-log completion rule or deterministic Deployment victim; contraction is unavailable")
+				return block("BucketCompletionUnqualified", "Bucket completion authority is unqualified; every possible Deployment victim must pass preflight")
 			}
 			if !r.Options.LocalTest || r.localLifecycle == nil {
 				return block("FencingUnqualified", "Real process fencing and AWS recovery are unqualified; PersistentFleet contraction is unavailable")
@@ -431,6 +434,9 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 			return block("OperationStalled", "Removal deadline exceeded; authority and evidence retained; compatible additions can supersede this unissued request")
 		}
 		reason, message := r.productionRemovalBlock(ctx, f, j)
+		if reason == "PossibleDataLoss" && j.Loss == "" {
+			return r.recordLoss(ctx, f, w, res, j, message)
+		}
 		return block(reason, message)
 	}
 	// Expiration never certifies recovery or cancels an issued operation. Prevent

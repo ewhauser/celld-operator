@@ -1,0 +1,110 @@
+{
+  "source_run": "bucket-preflight-20260918",
+  "files": {
+    "after-abrupt-metadata.json": {
+      "source_sha256": "033a68e06d2eb4ea591a1ccd4d872b87b15f3e243c10e6a63d9d6d1d2868f35d",
+      "export_sha256": "033a68e06d2eb4ea591a1ccd4d872b87b15f3e243c10e6a63d9d6d1d2868f35d",
+      "removed_fields": []
+    },
+    "after-deadline-metadata.json": {
+      "source_sha256": "adf78620381f42525d699d7a5863bb82d94865fe00b84729b26f6e4fe8e01bc4",
+      "export_sha256": "adf78620381f42525d699d7a5863bb82d94865fe00b84729b26f6e4fe8e01bc4",
+      "removed_fields": []
+    },
+    "after-graceful-metadata.json": {
+      "source_sha256": "78f260279e6b1b70c251bbd62a5a203ff765a88afd47488a7818612ddcab7e82",
+      "export_sha256": "78f260279e6b1b70c251bbd62a5a203ff765a88afd47488a7818612ddcab7e82",
+      "removed_fields": []
+    },
+    "before-abrupt-metadata.json": {
+      "source_sha256": "6ff056875edff161d131e7fd4a73fd1c6ad8be010b9086cb27b8798e84b5c0ca",
+      "export_sha256": "6ff056875edff161d131e7fd4a73fd1c6ad8be010b9086cb27b8798e84b5c0ca",
+      "removed_fields": []
+    },
+    "before-deadline-metadata.json": {
+      "source_sha256": "b83b834a1d94dd696493ab69d85a43375a6ee07d3b99bf51ce7a91285747017d",
+      "export_sha256": "b83b834a1d94dd696493ab69d85a43375a6ee07d3b99bf51ce7a91285747017d",
+      "removed_fields": []
+    },
+    "before-graceful-metadata.json": {
+      "source_sha256": "e035491e579c43e7df204c77824734eab52d7e9176e8eb8a54bd9ab783b62bbb",
+      "export_sha256": "e035491e579c43e7df204c77824734eab52d7e9176e8eb8a54bd9ab783b62bbb",
+      "removed_fields": []
+    },
+    "immediate-deadline-metadata.json": {
+      "source_sha256": "9d51c2bbf9ac3a011a419d2c44207646aa973cc1a141eab265dd19caaa680e82",
+      "export_sha256": "9d51c2bbf9ac3a011a419d2c44207646aa973cc1a141eab265dd19caaa680e82",
+      "removed_fields": []
+    },
+    "immediate-graceful-metadata.json": {
+      "source_sha256": "b2c2b6c386f6ed1bd5b35e757e07f966a8638179fb03beb6176dc2d36c694547",
+      "export_sha256": "b2c2b6c386f6ed1bd5b35e757e07f966a8638179fb03beb6176dc2d36c694547",
+      "removed_fields": []
+    },
+    "immediate-second-removal-metadata.json": {
+      "source_sha256": "00d02229a1ffee98aee7d377d9ab73774d053525045d7bf7af1a04fa43b81fb9",
+      "export_sha256": "00d02229a1ffee98aee7d377d9ab73774d053525045d7bf7af1a04fa43b81fb9",
+      "removed_fields": []
+    },
+    "before-graceful-state.json": {
+      "source_sha256": "6a2dd0ffe36f3fedea7889d953f8a2ea416b4933c821858a184dc7e80c9d7f46",
+      "export_sha256": "d3d67f16156d6b25d66db60ecaf6a8811e6f6382e28ffadc6abc0830c179443f",
+      "removed_fields": [
+        "deployment",
+        "residents",
+        "published"
+      ]
+    },
+    "a-health-1.json": {
+      "source_sha256": "fb51dc969eea26014f5079d1cd1f2cfba53cca966ba67bc5e95dbaf66ba18f0f",
+      "export_sha256": "fb51dc969eea26014f5079d1cd1f2cfba53cca966ba67bc5e95dbaf66ba18f0f",
+      "removed_fields": []
+    },
+    "b-health-2.json": {
+      "source_sha256": "3274501438b407ce82eeb8f1ee779192693d6d84d1f64a55b497a76cc38e9426",
+      "export_sha256": "3274501438b407ce82eeb8f1ee779192693d6d84d1f64a55b497a76cc38e9426",
+      "removed_fields": []
+    },
+    "b-health-4.json": {
+      "source_sha256": "849674eb134edd7c15330112a97790f6a8c081eb1778a8b3482234daedbc7a86",
+      "export_sha256": "849674eb134edd7c15330112a97790f6a8c081eb1778a8b3482234daedbc7a86",
+      "removed_fields": []
+    },
+    "c-health-3.json": {
+      "source_sha256": "2867db4b9d790651a8ba503ed9f68f06f20ae9b7811b45cc3ef91b04ffc55bd4",
+      "export_sha256": "2867db4b9d790651a8ba503ed9f68f06f20ae9b7811b45cc3ef91b04ffc55bd4",
+      "removed_fields": []
+    },
+    "results.json": {
+      "source_sha256": "2170321ab8edbe714a302ebf39c6f7f270a6b1e017912e4e7f102bebb450af07",
+      "export_sha256": "2170321ab8edbe714a302ebf39c6f7f270a6b1e017912e4e7f102bebb450af07",
+      "removed_fields": []
+    },
+    "version.json": {
+      "source_sha256": "f702dacfb7fc43b9fa6857be3b66e12cc8d4272018f79d60ce98533bda942533",
+      "export_sha256": "f702dacfb7fc43b9fa6857be3b66e12cc8d4272018f79d60ce98533bda942533",
+      "removed_fields": []
+    },
+    "acknowledged-ledger.json": {
+      "source_sha256": "5e2fb00eeca2e9a421c81a492dcaf4deaf0fa85703376465d5a4bf756c5f3357",
+      "export_sha256": "5e2fb00eeca2e9a421c81a492dcaf4deaf0fa85703376465d5a4bf756c5f3357",
+      "removed_fields": []
+    },
+    "harness.json": {
+      "source_sha256": "a260c83a867f16e92e28227843b2eba3952b3dfd2bd6f7e6327471dbb9714da2",
+      "export_sha256": "a260c83a867f16e92e28227843b2eba3952b3dfd2bd6f7e6327471dbb9714da2",
+      "removed_fields": []
+    }
+  },
+  "runtime": {
+    "architecture": "arm64",
+    "labels": {
+      "org.opencontainers.image.revision": "12d5b6333fe52717325addcfe1e99e9fd4f77bcd",
+      "org.opencontainers.image.title": "celld",
+      "org.opencontainers.image.version": "0.5.0"
+    },
+    "repo_digests": [
+      "ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8"
+    ]
+  }
+}
