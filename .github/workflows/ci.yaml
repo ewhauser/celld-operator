@@ -20,8 +20,7 @@ jobs:
       - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
         with:
           go-version-file: go.mod
-          # Enable module caching when runtime dependencies introduce go.sum.
-          cache: false
+          cache: true
       - run: make build
 
   test:
@@ -31,8 +30,9 @@ jobs:
       - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
         with:
           go-version-file: go.mod
-          cache: false
+          cache: true
       - run: make test
+      - run: make manifests-check
       - run: make qualification-replay
       - name: Prepare qualification collector tests
         run: |
@@ -47,5 +47,5 @@ jobs:
       - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
         with:
           go-version-file: go.mod
-          cache: false
+          cache: true
       - run: make lint

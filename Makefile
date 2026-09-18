@@ -46,3 +46,14 @@ qualification-local:
 .PHONY: qualification-test
 qualification-test:
 	.qualification-venv/bin/python -m unittest discover -s hack/qualification -p 'test_*.py'
+
+CONTROLLER_GEN := go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.20.1
+.PHONY: generate manifests-check integration
+generate:
+	$(CONTROLLER_GEN) object crd paths=./api/... output:crd:artifacts:config=config/crd
+
+manifests-check:
+	python3 hack/check-generated.py
+
+integration: build
+	python3 hack/integration/run.py

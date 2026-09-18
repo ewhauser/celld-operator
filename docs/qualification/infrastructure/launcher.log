@@ -1,0 +1,8 @@
+=== RUN   TestLauncher
+=== RUN   TestLauncher/full-ttl-before-exec
+=== RUN   TestLauncher/termination-before-exec
+--- PASS: TestLauncher (11.43s)
+    --- PASS: TestLauncher/full-ttl-before-exec (10.16s)
+    --- PASS: TestLauncher/termination-before-exec (1.27s)
+PASS
+ok  	github.com/ewhauser/celld-operator/internal/controller	12.497s

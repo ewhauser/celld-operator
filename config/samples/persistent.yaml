@@ -1,0 +1,19 @@
+apiVersion: celld.example.com/v1alpha1
+kind: CelldFleet
+metadata:
+  name: persistent-example
+  namespace: default
+spec:
+  qualification: Experimental
+  profile: PersistentFleet
+  replicas: 3
+  serviceAccountName: celld-runtime
+  storage:
+    bucket: replace-with-another-dedicated-bucket
+    region: us-east-1
+    storageClassName: ebs-retain
+    sizeGiB: 10
+  placement:
+    azCount: 3
+    zones: [us-east-1a, us-east-1b, us-east-1c]
+    mode: Strict

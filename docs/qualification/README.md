@@ -166,3 +166,7 @@ Then qualify, separately for each mode:
    follower selection. Upgrades/rollback need their own version transition tests.
 
 No AWS resource was created or modified, and no default cluster was used.
+
+Step 2 follow-up: [local infrastructure and isolation evidence](infrastructure/README.md).
+These checks add Kubernetes API, provisioning and network coverage; they do not
+remove the production gates above.

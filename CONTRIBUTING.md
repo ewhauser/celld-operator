@@ -63,8 +63,10 @@ GitHub Actions are pinned to immutable commits and workflow permissions are
 read-only. Renovate follows the source project's security-only update policy,
 three-day release cooldown, and grouped, digest-pinned GitHub Actions updates.
 
-The module currently uses only the standard library, so it has no `go.sum` and
-CI module caching is disabled. Enable caching when dependencies are added.
+The module pins controller-runtime and Kubernetes dependencies in `go.mod` and
+`go.sum`. CI module caching is enabled. Run `make manifests-check` for generated
+CRD/deepcopy reproducibility and `make integration` for a disposable kind cluster
+with real runtime startup and enforced isolation; see [fleet API](docs/fleet-api.md).
 Helm checks, local and kind integration suites, and gated image/release
 publication should be added alongside the corresponding deployable operator.
 Describe exactly which local, cluster, and AWS checks ran; a passing baseline

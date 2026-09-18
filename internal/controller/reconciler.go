@@ -1,0 +1,224 @@
+// Package controller provisions experimental fleet infrastructure without executing lifecycle changes.
+package controller
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
+	policyv1 "k8s.io/api/policy/v1"
+	storagev1 "k8s.io/api/storage/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+)
+
+const attemptAnnotation = "celld.example.com/workload-creation-attempted"
+
+// Reconciler uses an uncached client for the durable reservation and creation journal.
+// Kubernetes Create is the cross-controller arbitration point; leader election is not the safety proof.
+type Reconciler struct {
+	client.Client
+	Options               Options
+	NetworkPolicyEnforced bool
+}
+
+func digest(data []byte) string           { h := sha256.Sum256(data); return hex.EncodeToString(h[:]) }
+func specHash(f *fleet.CelldFleet) string { b, _ := json.Marshal(f.Spec); return digest(b) }
+func reservationName(f *fleet.CelldFleet) string {
+	return "s3-" + digest([]byte(f.Spec.Storage.Bucket))[:56]
+}
+
+func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	f := &fleet.CelldFleet{}
+	if err := r.Get(ctx, req.NamespacedName, f); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	f.Default()
+	if !f.DeletionTimestamp.IsZero() {
+		return r.report(ctx, f, "DeletionBlocked", "Deletion requires the future lifecycle gate; workloads, reservations and PVCs are retained", 0, false)
+	}
+	if err := f.Validate(); err != nil {
+		return r.report(ctx, f, "InvalidConfiguration", err.Error(), 0, false)
+	}
+	if !controllerutil.ContainsFinalizer(f, Finalizer) {
+		base := f.DeepCopy()
+		controllerutil.AddFinalizer(f, Finalizer)
+		if err := r.Patch(ctx, f, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+	if !r.NetworkPolicyEnforced {
+		return r.report(ctx, f, "IsolationUnverified", "Administrator must verify a NetworkPolicy enforcing CNI and enable --network-policy-enforced before provisioning", 0, false)
+	}
+	sa := &corev1.ServiceAccount{}
+	if err := r.Get(ctx, types.NamespacedName{Namespace: f.Namespace, Name: f.Spec.ServiceAccountName}, sa); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, err
+		}
+		return r.report(ctx, f, "ServiceAccountMissing", "Referenced ServiceAccount does not exist in the fleet namespace", 0, false)
+	}
+	if f.Spec.Profile == "PersistentFleet" {
+		sc := &storagev1.StorageClass{}
+		if err := r.Get(ctx, types.NamespacedName{Name: f.Spec.Storage.StorageClassName}, sc); err != nil {
+			if !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, err
+			}
+			return r.report(ctx, f, "StorageClassMissing", "Referenced StorageClass does not exist", 0, false)
+		}
+		if sc.ReclaimPolicy == nil || *sc.ReclaimPolicy != corev1.PersistentVolumeReclaimRetain || sc.VolumeBindingMode == nil || *sc.VolumeBindingMode != storagev1.VolumeBindingWaitForFirstConsumer || (!r.Options.LocalTest && sc.Provisioner != "ebs.csi.aws.com") {
+			return r.report(ctx, f, "InvalidStorageClass", "Requires EBS CSI, Retain reclaim policy and WaitForFirstConsumer binding (local test permits a different provisioner)", 0, false)
+		}
+	}
+	reservation := &fleet.CelldStorageReservation{Name: reservationName(f), Spec: fleet.ReservationSpec{Bucket: f.Spec.Storage.Bucket, FleetNamespace: f.Namespace, FleetName: f.Name, FleetUID: string(f.UID), SpecHash: specHash(f)}}
+	expected := reservation.Spec
+	if err := r.Create(ctx, reservation); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return ctrl.Result{}, err
+		}
+		if err := r.Get(ctx, types.NamespacedName{Name: reservation.Name}, reservation); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+	if reservation.Spec != expected {
+		return r.report(ctx, f, "StorageScopeConflict", "Bucket is permanently reserved to another fleet UID or immutable configuration; no resources adopted", 0, false)
+	}
+
+	for _, obj := range prerequisites(f, r.Options) {
+		if err := r.ensure(ctx, obj); err != nil {
+			return r.report(ctx, f, "InfrastructureBlocked", err.Error(), 0, false)
+		}
+	}
+	desired := workload(f, r.Options)
+	actual := emptyObject(desired)
+	err := r.Get(ctx, client.ObjectKeyFromObject(desired), actual)
+	if apierrors.IsNotFound(err) {
+		if reservation.Annotations[attemptAnnotation] != "" {
+			return r.report(ctx, f, "LifecycleBlocked", "Workload is missing after a recorded creation attempt; automatic recreation could reuse an unsafe identity or disk", 0, false)
+		}
+		claims := initialClaims(f, desired)
+		if err := r.checkInitialClaims(ctx, claims); err != nil {
+			return r.report(ctx, f, "StorageIdentityConflict", err.Error(), 0, false)
+		}
+		// Persist intent BEFORE Create. A crash in this window intentionally blocks for review.
+		if reservation.Annotations == nil {
+			reservation.Annotations = make(map[string]string)
+		}
+		reservation.Annotations[attemptAnnotation] = "true"
+		if err := r.Update(ctx, reservation); err != nil {
+			return ctrl.Result{}, err
+		}
+		for _, claim := range claims {
+			if err := r.Create(ctx, claim); err != nil {
+				return r.report(ctx, f, "StorageIdentityConflict", fmt.Sprintf("Cannot exclusively create PVC %s: %v; retained claims require manual review", claim.Name, err), 0, false)
+			}
+		}
+		if err := r.Create(ctx, desired); err != nil {
+			return ctrl.Result{}, err
+		}
+		return r.report(ctx, f, "Provisioning", "Initial workload created; waiting for runtime readiness and placement", 0, true)
+	}
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if !matches(desired, actual) {
+		return r.report(ctx, f, "LifecycleBlocked", "Existing workload differs from the initial spec; no scaling, rollout, adoption or drift repair is authorized", 0, false)
+	}
+	if reservation.Annotations[attemptAnnotation] == "" {
+		return r.report(ctx, f, "LifecycleBlocked", "Existing workload has no creation journal; refusing adoption", 0, false)
+	}
+	var ready int32
+	var observed int64
+	switch w := actual.(type) {
+	case *appsv1.Deployment:
+		ready = w.Status.ReadyReplicas
+		observed = w.Status.ObservedGeneration
+	case *appsv1.StatefulSet:
+		ready = w.Status.ReadyReplicas
+		observed = w.Status.ObservedGeneration
+	}
+	if observed < actual.GetGeneration() {
+		ready = 0
+	}
+	if ready != f.Spec.Replicas {
+		return r.report(ctx, f, "Provisioning", "Waiting for ready replicas; inspect Pod scheduling, PVC binding and runtime readiness. Capacity is externally provisioned", ready, true)
+	}
+	return r.report(ctx, f, "Provisioned", "Initial infrastructure and runtime readiness observed; this is not production or durability qualification", ready, true)
+}
+
+func (r *Reconciler) ensure(ctx context.Context, desired client.Object) error {
+	actual := emptyObject(desired)
+	err := r.Get(ctx, client.ObjectKeyFromObject(desired), actual)
+	if apierrors.IsNotFound(err) {
+		return r.Create(ctx, desired)
+	}
+	if err != nil {
+		return err
+	}
+	if !matches(desired, actual) {
+		return fmt.Errorf("%T %s conflicts with required isolation/infrastructure; refusing adoption or mutation", actual, actual.GetName())
+	}
+	return nil
+}
+
+// Get must decode into an empty object: pre-populating it with desired fields can
+// hide absent fields because JSON decoding may preserve fields missing on the wire.
+func emptyObject(obj client.Object) client.Object {
+	switch obj.(type) {
+	case *appsv1.Deployment:
+		return &appsv1.Deployment{}
+	case *appsv1.StatefulSet:
+		return &appsv1.StatefulSet{}
+	case *corev1.Service:
+		return &corev1.Service{}
+	case *networkingv1.NetworkPolicy:
+		return &networkingv1.NetworkPolicy{}
+	case *policyv1.PodDisruptionBudget:
+		return &policyv1.PodDisruptionBudget{}
+	default:
+		panic("unsupported managed resource type")
+	}
+}
+
+func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, reason, message string, ready int32, provisioned bool) (ctrl.Result, error) {
+	before := f.DeepCopy()
+	if provisioned {
+		f.Status.Reservation = reservationName(f)
+	}
+	f.Status.ObservedGeneration = f.Generation
+	f.Status.ReadyReplicas = ready
+	set := func(kind string, yes bool, why, msg string) {
+		status := metav1.ConditionFalse
+		if yes {
+			status = metav1.ConditionTrue
+		}
+		meta.SetStatusCondition(&f.Status.Conditions, metav1.Condition{Type: kind, Status: status, Reason: why, Message: msg, ObservedGeneration: f.Generation})
+	}
+	set("Ready", provisioned && ready == f.Spec.Replicas, reason, message)
+	set("InfrastructureReady", provisioned, reason, message)
+	set("Blocked", !provisioned, reason, message)
+	set("LifecycleBlocked", true, "NotImplemented", "Controlled scale-in, upgrades, restarts and deletion require the future restart-safe lifecycle gate")
+	set("ProductionQualified", false, "QualificationIncomplete", "Local prototype only; AWS, retained-EBS recovery, fencing, follower AZ diversity and restart safety remain unqualified")
+	if !equality.Semantic.DeepEqual(before.Status, f.Status) {
+		if err := r.Status().Patch(ctx, f, client.MergeFrom(before)); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+}
+
+func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).For(&fleet.CelldFleet{}).Complete(r)
+}

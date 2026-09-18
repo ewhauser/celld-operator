@@ -1,0 +1,104 @@
+# Experimental fleet provisioning
+
+Step 2 creates initial infrastructure. It does not enable production scaling,
+upgrades, automatic recovery operations, or deletion. Read
+[ADR 0011](decisions/0011-initial-fleet-api.md) and the
+[remaining qualification gates](qualification/README.md) first.
+
+Use Kubernetes 1.31 or newer with IPv4 Pod networking for this prototype. Before installation, externally provide:
+
+- A verified NetworkPolicy-capable CNI and capacity in the chosen AZs.
+- One dedicated S3 bucket per fleet, with no external writers or evidence expiry.
+- A ServiceAccount in each fleet namespace, wired to an externally managed runtime
+  IAM role (EKS Pod Identity or qualified IRSA). No credentials are stored in the CR.
+- For PersistentFleet, EBS CSI and a StorageClass using `ebs.csi.aws.com`,
+  `reclaimPolicy: Retain`, and `volumeBindingMode: WaitForFirstConsumer`.
+
+Use an **explicit context** when installing. Build and load/publish the operator
+image yourself; the development manifest references an unpublished `:dev` image.
+The operator has no AWS access, writes no S3 metadata, and creates no AWS resources
+itself. On EKS, externally installed CSI provisions volumes for requested PVCs.
+
+```sh
+kubectl --context YOUR_EXPLICIT_CONTEXT apply -f config/crd/
+kubectl --context YOUR_EXPLICIT_CONTEXT apply -f config/manager/operator.yaml
+# Only after verifying CNI enforcement, add --network-policy-enforced to operator args.
+# Customize the examples' namespaces, ServiceAccounts, buckets, region, AZs and class.
+kubectl --context YOUR_EXPLICIT_CONTEXT apply -f config/samples/bucket.yaml
+kubectl --context YOUR_EXPLICIT_CONTEXT apply -f config/samples/persistent.yaml
+```
+
+Samples are not immediately deployable infrastructure: replace their bucket names
+and provision the referenced ServiceAccounts. The existing workload identity must
+have the runtime's necessary bucket permissions; the future evidence reader needs
+a separate read-only identity and is not connected in step 2.
+
+| Field | Meaning |
+| --- | --- |
+| `qualification` | Required literal `Experimental`; no production setting |
+| `profile` | Required `Bucket` or `PersistentFleet` |
+| `replicas` | Initial count, 1–100; default 3; at least AZ count |
+| `serviceAccountName` | Existing account in the fleet namespace |
+| `storage.bucket` | Dedicated canonical bucket, lowercase letters/digits/hyphens |
+| `storage.region` | Explicit AWS region; immutable |
+| `storage.sizeGiB` | Disk limit/PVC size, default 10 GiB |
+| `storage.storageClassName` | Required only for PersistentFleet |
+| `placement.zones` | Explicit distinct standard AZ names in the storage region |
+| `placement.azCount` | Must equal number of zones, 1–6 |
+| `placement.mode` | Strict (default) or Relaxed; same allowlist in either mode |
+
+Fleet names must be DNS labels up to 40 characters. All spec fields are immutable.
+Invalid cross-field combinations fail admission; name/dependency errors also
+produce clear controller conditions. No `/scale` API is exposed. Production image
+updates, resize, replica changes, storage changes and placement changes require a
+future qualified lifecycle implementation.
+
+The application Service is `<fleet>:8080`; label authorized client/ingress pods
+in that namespace `celld.example.com/client-of: <fleet>`. Internal port 8081 is
+private to same-fleet peers and the operator namespace's pods labeled
+`app.kubernetes.io/name: celld-operator`. Do not route the peer Service through
+external ingress. Public ingress, TLS and DNS remain user-managed. Runtime peer
+addresses are individual Pod IPs; headless `<fleet>-peers` also enables DNS discovery.
+
+`Ready` means the current workload reports the requested number of runtime-ready
+replicas. It is not evidence of durable writes or follower placement.
+`InfrastructureReady` means the required objects match, even while Pods are
+Pending. `Blocked` identifies invalid configuration, missing dependencies,
+isolation verification, conflicting reservations, drift or missing workloads.
+`LifecycleBlocked=True` and `ProductionQualified=False` remain explicit throughout.
+Use Pod events to distinguish insufficient nodes, AZ constraints, PVC binding and
+runtime health 503. Metrics serving is optional through `--metrics-bind-address`;
+Prometheus is never a provisioning prerequisite.
+
+Deletion remains visibly pending behind a finalizer and retains the workload,
+PVCs and reservation. Do not remove that finalizer as a routine cleanup procedure.
+Initial PersistentFleet provisioning rejects pre-existing ordinal PVCs, including
+claims carrying matching labels. It exclusively creates new claims before the
+StatefulSet can consume them. A claim-name race or partial allocation preserves
+all claims and blocks the workload. A failed creation attempt can require review
+even if no workload exists; that is
+a deliberate response to uncertain history. The prototype never frees a bucket
+reservation or attaches another fleet UID to it. Administrative cleanup must first
+establish runtime fencing, preserve recovery evidence/disks and exclude external
+writers; a supported automated cleanup procedure is future lifecycle work.
+
+`--local-test` is exclusively for the disposable integration harness: it selects
+local MinIO, synthetic credentials and a test storage provisioner. Never enable
+it on EKS. It does not accept or infer AWS credentials or a default cluster.
+
+## Validation
+
+`make check` runs build, race tests and lint.
+`CELLD_DOCKER_TEST=1 go test -race ./internal/controller -run TestLauncher -v`
+checks the pinned image's full startup delay and termination during that delay
+in network-disabled Docker containers. `make generate` updates deepcopy and
+CRD artifacts; `make manifests-check` verifies reproducibility without rewriting
+them. `make integration` creates a unique kind cluster and dedicated kubeconfig,
+installs SHA-checked Calico, local MinIO and local-path persistent volumes, runs the
+real pinned runtime and operator with its ServiceAccount RBAC, tests strict missing-zone blocking, then deletes only
+that invocation's cluster. It never uses a pre-existing cluster. Docker images and
+build caches may remain. Tests need Docker, kind, kubectl, network access and enough
+memory for a Kubernetes node and four runtime pods. No AWS qualification follows
+from this local test, and local-path disk recovery is not EBS recovery.
+
+Recorded results and remaining limits: [step 2 evidence](qualification/infrastructure/README.md).

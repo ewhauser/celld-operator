@@ -2,8 +2,9 @@
 
 Kubernetes fleet operator for celld, targeting AWS EKS with S3 and EBS.
 
-This repository currently contains architecture decisions, runtime investigations,
-and the Go development baseline. Fleet reconciliation is not implemented.
+This repository includes an experimental namespaced fleet API, initial infrastructure
+reconciliation, and a version-pinned runtime evidence adapter. Production lifecycle
+automation remains blocked pending qualification.
 
 ## Development
 
@@ -14,12 +15,18 @@ make check
 ```
 
 This builds all packages and `bin/celld-operator`, runs `go test -race`, and runs
-the pinned golangci-lint suite. The command currently supports `--help` and
-`--version`; starting it without either flag reports that reconciliation is not
-implemented. A versioned runtime adapter, fixture tests, and an isolated local
-qualification harness are available; they do not enable production scaling.
+the pinned golangci-lint suite. The command supports `--help` and `--version`; starting it runs the controller
+against the explicitly configured Kubernetes environment. Provisioning is blocked
+until CNI enforcement is attested. Isolated local integration and qualification
+harnesses are available; they do not enable production scaling.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for formatting, linting, hooks, and container
 builds, and [docs/](docs/README.md) for the architecture and qualification work.
 
 Runtime qualification: [measured findings and release gates](docs/qualification/README.md), [local harness](hack/qualification/README.md).
+
+## Experimental infrastructure controller
+
+Step 2 defines the namespaced CelldFleet API and initial provisioning for both
+profiles. See [API, examples and safety boundaries](docs/fleet-api.md). Production
+qualification and controlled lifecycle operations remain blocked.

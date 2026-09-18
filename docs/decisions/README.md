@@ -13,6 +13,7 @@ These records capture the celld operator decisions agreed on 18 September 2026. 
 | [0007](0007-runtime-compatibility.md) | Use an existing, unmodified celld release | Accepted |
 | [0008](0008-recovery-evidence-and-conservative-removal.md) | Require read-only S3 evidence for peer-disk automatic contraction | Accepted |
 | [0009](0009-service-and-ingress-boundary.md) | Expose ClusterIP Services; keep ingress, TLS, and DNS external | Accepted |
+| [0011](0011-initial-fleet-api.md) | Experimental API, reservations and initial provisioning gate | Implemented locally |
 | [0010](0010-production-qualification.md) | Qualify runtime-dependent behavior before production enablement | Accepted |
 
 Read [runtime qualification](../runtime-qualification.md), [shutdown evidence](../shutdown-evidence.md), and [S3 recovery evidence](../s3-recovery-evidence.md) for implementation evidence and unresolved gates. The later S3 investigation corrects the earlier interpretation of sealed logs: sealing alone does not establish lossless recovery.

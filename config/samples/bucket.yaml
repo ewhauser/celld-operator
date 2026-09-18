@@ -1,0 +1,17 @@
+apiVersion: celld.example.com/v1alpha1
+kind: CelldFleet
+metadata:
+  name: bucket-example
+  namespace: default
+spec:
+  qualification: Experimental
+  profile: Bucket
+  replicas: 3
+  serviceAccountName: celld-runtime
+  storage:
+    bucket: replace-with-dedicated-bucket
+    region: us-east-1
+    sizeGiB: 10
+  placement:
+    azCount: 3
+    zones: [us-east-1a, us-east-1b, us-east-1c]
