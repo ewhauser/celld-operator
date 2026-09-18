@@ -20,7 +20,8 @@ import (
 // deletion order. A matching label is not proof of ownership or bucket posture.
 // This is observational admission only; it never certifies process termination.
 type bucketCandidate struct {
-	Container, Host, IP string
+	Container, Host, IP     string
+	HostUID, Hostname, Zone string
 }
 
 func (p *ProductionEvidence) bucketCandidates(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal, opts Options) (map[types.UID]bucketCandidate, error) {
@@ -34,8 +35,23 @@ func (p *ProductionEvidence) bucketCandidates(ctx context.Context, f *fleet.Cell
 	base := podTemplate(f, opts).Spec
 	normalizePod(&base)
 	identities := map[types.UID]bucketCandidate{}
+	nodes := map[string]*corev1.Node{}
 	for i := range pods {
 		pod := &pods[i]
+		node := nodes[pod.Spec.NodeName]
+		if node == nil {
+			node = &corev1.Node{}
+			if pod.Spec.NodeName == "" {
+				return nil, errors.New("bucket candidate is unscheduled")
+			}
+			if err := p.client.Get(ctx, client.ObjectKey{Name: pod.Spec.NodeName}, node); err != nil {
+				return nil, err
+			}
+			if node.UID == "" || !node.DeletionTimestamp.IsZero() {
+				return nil, errors.New("bucket candidate host identity unavailable")
+			}
+			nodes[pod.Spec.NodeName] = node
+		}
 		id, _ := podIdentity(pod)
 		owner := metav1.GetControllerOf(pod)
 		if id == "" || !podReady(pod) || owner == nil || owner.APIVersion != "apps/v1" || owner.Kind != "ReplicaSet" || owner.UID == "" {
@@ -57,8 +73,28 @@ func (p *ProductionEvidence) bucketCandidates(ctx context.Context, f *fleet.Cell
 		// runtime configuration, while allowing externally injected AWS credentials.
 		actual := pod.Spec.Containers[0]
 		expected := base.Containers[0]
-		if len(pod.Spec.InitContainers) != 0 || len(pod.Spec.EphemeralContainers) != 0 || len(actual.EnvFrom) != 0 || !slices.Equal(actual.Command, expected.Command) || !slices.Equal(actual.Args, expected.Args) {
+		if pod.Spec.ServiceAccountName != base.ServiceAccountName || pod.Spec.HostNetwork || pod.Spec.HostPID || actual.WorkingDir != expected.WorkingDir || len(pod.Spec.InitContainers) != 0 || len(pod.Spec.EphemeralContainers) != 0 || len(actual.EnvFrom) != 0 || !slices.Equal(actual.Command, expected.Command) || !slices.Equal(actual.Args, expected.Args) {
 			return nil, errors.New("bucket candidate runtime invocation differs")
+		}
+		for _, volume := range base.Volumes {
+			if !slices.ContainsFunc(pod.Spec.Volumes, func(got corev1.Volume) bool { return equality.Semantic.DeepEqual(volume, got) }) {
+				return nil, errors.New("bucket candidate runtime volume differs")
+			}
+		}
+		for _, mount := range expected.VolumeMounts {
+			if !slices.ContainsFunc(actual.VolumeMounts, func(got corev1.VolumeMount) bool { return equality.Semantic.DeepEqual(mount, got) }) {
+				return nil, errors.New("bucket candidate runtime mount missing")
+			}
+		}
+		paths := map[string]bool{}
+		for _, mount := range actual.VolumeMounts {
+			if paths[mount.MountPath] {
+				return nil, errors.New("bucket candidate duplicate mount")
+			}
+			paths[mount.MountPath] = true
+			if !slices.ContainsFunc(expected.VolumeMounts, func(want corev1.VolumeMount) bool { return equality.Semantic.DeepEqual(want, mount) }) && (!mount.ReadOnly || (mount.MountPath != "/var/run/secrets/eks.amazonaws.com/serviceaccount" && mount.MountPath != "/var/run/secrets/pods.eks.amazonaws.com/serviceaccount")) {
+				return nil, errors.New("bucket candidate unqualified mount")
+			}
 		}
 		seen := map[string]bool{}
 		for _, env := range actual.Env {
@@ -95,7 +131,7 @@ func (p *ProductionEvidence) bucketCandidates(ctx context.Context, f *fleet.Cell
 				return nil, errors.New("bucket candidate runtime configuration missing")
 			}
 		}
-		identities[pod.UID] = bucketCandidate{Container: id, Host: pod.Spec.NodeName, IP: pod.Status.PodIP}
+		identities[pod.UID] = bucketCandidate{Container: id, Host: pod.Spec.NodeName, IP: pod.Status.PodIP, HostUID: string(node.UID), Hostname: node.Labels[corev1.LabelHostname], Zone: node.Labels[corev1.LabelTopologyZone]}
 	}
 	return identities, nil
 }

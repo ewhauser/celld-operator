@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
@@ -244,6 +245,27 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, reason, me
 				f.Status.Lifecycle = fleet.LifecycleStatus{OperationID: op.ID, Phase: op.Phase, From: op.From, To: op.To, TargetPod: op.TargetPod, TargetUID: op.TargetUID, TargetGeneration: op.TargetGeneration, PossibleLoss: j.Loss}
 			}
 			f.Status.Lifecycle.EvidenceBlocker = j.Inventory.Blocker
+			// The shared observer's cryptographic/process-fencing diagnosis is
+			// not a Bucket completion requirement. Previously admitted Bucket
+			// generations remain accounted for; unknown history still warns.
+			if f.Spec.Profile == "Bucket" && len(j.BucketHistory) > 0 && (j.Inventory.Blocker == "HistoricalSessionUnresolved" || j.Inventory.Blocker == "SessionBindingUnqualified") {
+				covered := true
+				for _, observed := range j.Inventory.Sessions {
+					if !slices.ContainsFunc(j.BucketHistory, func(s bucketSession) bool {
+						return s.Node == observed.Node && s.Generation == observed.Generation && observed.Epoch == 0
+					}) {
+						covered = false
+					}
+				}
+				if covered {
+					f.Status.Lifecycle.EvidenceBlocker = ""
+				}
+			}
+			for _, session := range j.BucketHistory {
+				if session.Retired {
+					f.Status.Lifecycle.RetiredBucketSessions++
+				}
+			}
 			f.Status.Lifecycle.SessionCount = int32(len(j.Inventory.Sessions))
 			if !j.Inventory.CheckedAt.IsZero() {
 				f.Status.Lifecycle.EvidenceCheckedAt = j.Inventory.CheckedAt.UTC().Format(time.RFC3339)
@@ -298,7 +320,7 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, reason, me
 	set("InfrastructureReady", provisioned || reason == "LifecycleProgress", reason, message)
 	set("Progressing", reason == "LifecycleProgress" || reason == "Provisioning", reason, message)
 	set("Blocked", !provisioned && reason != "LifecycleProgress", reason, message)
-	set("LifecycleBlocked", true, "QualificationIncomplete", "Bucket no-log completion and real process fencing remain unqualified; upgrades, restarts and deletion are blocked")
+	set("LifecycleBlocked", true, "QualificationIncomplete", "PersistentFleet fencing and production automatic Bucket contraction remain unqualified; upgrades, restarts and deletion are blocked")
 	set("ProductionQualified", false, "QualificationIncomplete", "Local prototype only; AWS, retained-EBS recovery, fencing, follower AZ diversity and restart safety remain unqualified")
 	if !equality.Semantic.DeepEqual(before.Status, f.Status) {
 		if err := r.Status().Patch(ctx, f, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); err != nil {

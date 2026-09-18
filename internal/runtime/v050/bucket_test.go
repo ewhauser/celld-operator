@@ -3,6 +3,7 @@ package v050
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -76,6 +77,47 @@ func TestBucketPreflightIsNotPeerRecovery(t *testing.T) {
 				if _, ok := errors.AsType[*LossError](err); !ok {
 					t.Fatalf("loss masked: %v", err)
 				}
+			}
+		})
+	}
+}
+
+func TestBucketRetiredLeaseIsMembershipEvidenceNotTermination(t *testing.T) {
+	a, _ := New(Image)
+	raw := fixture(t, "node-bucket")
+	node, _ := a.ParseNode("nodes/a.json", raw)
+	now := time.UnixMilli(int64(node.ExpiresMS)).Add(time.Second)
+	for _, name := range []string{"expired", "live", "missing", "resolved missing", "resolved live", "resolved replacement", "resolved unreadable", "replacement", "log", "loss", "missing page"} {
+		t.Run(name, func(t *testing.T) {
+			r := &reader{data: raw, pages: map[string]Page{"nodes/": {Keys: []string{"nodes/a.json"}, Complete: true}, "log/": {Complete: true}}}
+			members := []BucketMember{{Node: "a", Generation: node.Generation, Retired: true}}
+			switch name {
+			case "live", "resolved live":
+				r.data = mutate(t, raw, func(m map[string]any) { m["expires_ms"] = now.Add(time.Minute).UnixMilli() })
+			case "missing", "resolved missing":
+				r.pages["nodes/"] = Page{Complete: true}
+			case "replacement", "resolved replacement":
+				members[0].Generation = "replaced"
+			case "log":
+				r.pages["log/"] = Page{Keys: []string{"log/old/peer.json"}, Complete: true}
+			case "loss":
+				r.pages["log/"] = Page{Keys: []string{"log/old/peer.loss.json"}, Complete: true}
+			case "missing page":
+				r.pages["log/"] = Page{Next: "missing"}
+			}
+			if strings.HasPrefix(name, "resolved") {
+				members[0].Resolved = true
+			}
+			if name == "resolved unreadable" {
+				r.fail = "get"
+			}
+			result, err := a.InspectBucketMembership(t.Context(), r, members, func() time.Time { return now })
+			if name == "expired" || name == "resolved missing" {
+				if err != nil || result.ObservedAt.IsZero() {
+					t.Fatalf("%+v %v", result, err)
+				}
+			} else if err == nil {
+				t.Fatal("uncertainty became membership completion")
 			}
 		})
 	}

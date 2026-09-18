@@ -2,6 +2,7 @@
 """Disposable kind + Calico + MinIO test. Never reads the default kubeconfig.
 All created infrastructure is local and removed in finally, even on assertion failure.
 """
+import argparse
 import base64
 import io
 import tarfile
@@ -34,6 +35,9 @@ def run(args, **kwargs):
 
 
 def main():
+    parser=argparse.ArgumentParser()
+    parser.add_argument('--bucket-lifecycle',action='store_true')
+    bucket_lifecycle=parser.parse_args().bucket_lifecycle
     name = 'celld-step2-' + uuid.uuid4().hex[:8]
     process = None
     created = False
@@ -132,7 +136,32 @@ nodes:
             operator_path=tmp/'operator-kubeconfig'
             operator_path.write_text(json.dumps(operator_config))
             log = open(tmp/'operator.log','w')
-            process=subprocess.Popen([str(ROOT/'bin/celld-operator'),'--network-policy-enforced','--local-test'],env={**env,'KUBECONFIG':str(operator_path)},stdout=log,stderr=subprocess.STDOUT)
+            if bucket_lifecycle:
+                # Run the actual manager under its in-cluster ServiceAccount so
+                # direct Pod IP state collection and Metrics Server are real.
+                run(['go','build','-o',str(tmp/'operator'),'./cmd/celld-operator'],cwd=ROOT,env={**env,'GOOS':'linux','GOARCH':arch,'CGO_ENABLED':'0'},timeout=300)
+                (tmp/'operator').chmod(0o755)
+                run(['docker','cp',str(tmp/'operator'),name+'-control-plane:/opt/celld-test-operator'],timeout=30)
+                patch={'spec':{'replicas':1,'template':{'spec':{'nodeName':name+'-control-plane','securityContext':{'runAsUser':65532},'containers':[{'name':'operator','image':IMAGE,'command':['/operator'],'args':['--operator-namespace=celld-system','--network-policy-enforced','--local-test','--local-evidence'],'volumeMounts':[{'name':'operator-binary','mountPath':'/operator','readOnly':True}]}],'volumes':[{'name':'operator-binary','hostPath':{'path':'/opt/celld-test-operator','type':'File'}}]}}}}
+                k('-n','celld-system','patch','deployment','celld-operator','--type=strategic','-p',json.dumps(patch))
+                k('-n','celld-system','rollout','status','deployment/celld-operator','--timeout=120s')
+                with urllib.request.urlopen('https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.8.0/components.yaml',timeout=60) as response:
+                    metrics=response.read()
+                assert hashlib.sha256(metrics).hexdigest()=='ff64d1a13b9ac3b0635f0dd985815fb44c23eed4706c04e5db1daadf6bc0a83b'
+                (tmp/'metrics.yaml').write_bytes(metrics)
+                k('apply','-f',str(tmp/'metrics.yaml'))
+                k('-n','kube-system','patch','deployment','metrics-server','--type=json','-p',json.dumps([{'op':'add','path':'/spec/template/spec/containers/0/args/-','value':'--kubelet-insecure-tls'}]))
+                k('-n','kube-system','rollout','status','deployment/metrics-server','--timeout=180s')
+            else:
+                process=subprocess.Popen([str(ROOT/'bin/celld-operator'),'--network-policy-enforced','--local-test'],env={**env,'KUBECONFIG':str(operator_path)},stdout=log,stderr=subprocess.STDOUT)
+            def restart_operator():
+                nonlocal process
+                if bucket_lifecycle:
+                    k('-n','celld-system','rollout','restart','deployment/celld-operator')
+                    k('-n','celld-system','rollout','status','deployment/celld-operator','--timeout=120s')
+                else:
+                    process.terminate();process.wait(timeout=20)
+                    process=subprocess.Popen([str(ROOT/'bin/celld-operator'),'--network-policy-enforced','--local-test'],env={**env,'KUBECONFIG':str(operator_path)},stdout=log,stderr=subprocess.STDOUT)
             def fleet(name,bucket,profile='Bucket',namespace='fleets'):
                 storage={'bucket':bucket,'region':'us-east-1','sizeGiB':1}
                 if profile=='PersistentFleet': storage['storageClassName']='retained'
@@ -148,7 +177,12 @@ nodes:
             assert get('pvc','data-collision-0')['metadata']['uid']==old_claim_uid
             apply(alpha);apply(beta)
             def ready(n):
-                return any(c['type']=='Ready' and c['status']=='True' for c in get('celldfleet',n).get('status',{}).get('conditions',[]))
+                current=get('celldfleet',n)
+                kind='deployment' if current['spec']['profile']=='Bucket' else 'statefulset'
+                observed=get(kind,n)
+                return (any(c['type']=='Ready' and c['status']=='True' for c in current.get('status',{}).get('conditions',[]))
+                        and observed.get('status',{}).get('observedGeneration',0)>=observed['metadata'].get('generation',1)
+                        and observed.get('status',{}).get('readyReplicas',0)==observed['spec']['replicas'])
             wait_for(lambda: ready('alpha') and ready('beta'),'both runtime profiles ready through operator reconciliation',timeout=300)
             pods=json.loads(k('-n','fleets','get','pods','-o','json'))['items']
             addresses={}
@@ -224,8 +258,7 @@ nodes:
                 before=get(kind,fleet_name)
                 before_template=before['spec']['template']
                 k('-n','fleets','patch','celldfleet',fleet_name,'--type=merge','-p',json.dumps({'spec':{'replicas':3}}))
-                process.terminate();process.wait(timeout=20)
-                process=subprocess.Popen([str(ROOT/'bin/celld-operator'),'--network-policy-enforced','--local-test'],env={**env,'KUBECONFIG':str(operator_path)},stdout=log,stderr=subprocess.STDOUT)
+                restart_operator()
                 wait_for(lambda: get(kind,fleet_name)['spec']['replicas']==3 and ready(fleet_name),'journaled scale-out after controller restart: '+fleet_name,timeout=300)
                 after=get(kind,fleet_name)
                 uid=get('celldfleet',fleet_name)['metadata']['uid']
@@ -234,12 +267,41 @@ nodes:
                 assert after['metadata']['uid']==before['metadata']['uid']
                 assert after['spec']['template']==before_template
                 k('-n','fleets','patch','celldfleet',fleet_name,'--type=merge','-p',json.dumps({'spec':{'replicas':1}}))
+                if bucket_lifecycle and fleet_name=='alpha':
+                    wait_for(lambda:get(kind,fleet_name)['spec']['replicas']==1 and ready(fleet_name) and not get('celldfleet',fleet_name).get('status',{}).get('lifecycle',{}).get('operationID'),'two actual Bucket decrements completed',timeout=300)
+                    assert json.loads(curl('client','alpha','/?cell=integration&id=ack',8080))['stored'] is True
+                    k('-n','fleets','patch','celldfleet',fleet_name,'--type=merge','-p',json.dumps({'spec':{'replicas':3}}))
+                    wait_for(lambda:get(kind,fleet_name)['spec']['replicas']==3 and ready(fleet_name),'Bucket shrink/grow with retained generation history',timeout=240)
+                    continue
                 why='BucketCompletionUnqualified' if fleet_name=='alpha' else 'FencingUnqualified'
-                wait_for(lambda:any(c['reason']==why for c in get('celldfleet',fleet_name)['status']['conditions']),'unqualified contraction blocked: '+fleet_name)
+                reasons={why}
+                if bucket_lifecycle and fleet_name=='beta':
+                    reasons.update({'SessionBindingUnqualified','HistoricalSessionUnresolved','CapacityUncertain','RecoveryInventoryUnavailable'})
+                wait_for(lambda:any(c['reason'] in reasons for c in get('celldfleet',fleet_name)['status']['conditions']),'unqualified contraction blocked: '+fleet_name)
                 assert get(kind,fleet_name)['spec']['replicas']==3
                 k('-n','fleets','patch','celldfleet',fleet_name,'--type=merge','-p',json.dumps({'spec':{'replicas':3}}))
                 wait_for(lambda:ready(fleet_name),'restored desired capacity: '+fleet_name)
             print('PASS: both profiles scale out without template changes; contraction gates persist',flush=True)
+            if bucket_lifecycle:
+                # A paused unissued removal cannot change replicas. Its later
+                # completion uses the same recorded membership checks.
+                k('-n','fleets','patch','celldfleet','alpha','--type=merge','-p',json.dumps({'spec':{'maintenance':{'paused':True},'replicas':2}}))
+                wait_for(lambda:get('deployment','alpha')['metadata'].get('annotations',{}).get('celld.example.com/maintenance-fence')=='paused','Bucket pause fence installed')
+                time.sleep(12)
+                assert get('deployment','alpha')['spec']['replicas']==3
+                k('-n','fleets','patch','celldfleet','alpha','--type=merge','-p',json.dumps({'spec':{'maintenance':None}}))
+                restart_operator()
+                wait_for(lambda:get('deployment','alpha')['spec']['replicas']==2 and ready('alpha') and not get('celldfleet','alpha').get('status',{}).get('lifecycle',{}).get('operationID'),'Bucket resume and manager restart completes removal',timeout=240)
+                k('-n','fleets','patch','celldfleet','alpha','--type=merge','-p',json.dumps({'spec':{'replicas':3}}))
+                wait_for(lambda:get('deployment','alpha')['spec']['replicas']==3 and ready('alpha'),'second Bucket growth',timeout=240)
+                k('-n','fleets','patch','celldfleet','alpha','--type=merge','-p',json.dumps({'spec':{'capacity':{'mode':'Automatic','minReplicas':1,'maxReplicas':3,'minSamples':2,'sampleIntervalSeconds':30,'scaleInStabilizationSeconds':60,'scaleInCooldownSeconds':60,'cpuLowMillicores':200,'cpuHighMillicores':500,'memoryLowMiB':700,'memoryHighMiB':1000}}}))
+                wait_for(lambda:get('deployment','alpha')['spec']['replicas']==1 and ready('alpha') and not get('celldfleet','alpha').get('status',{}).get('lifecycle',{}).get('operationID'),'live Metrics Server automatic Bucket 3-to-1 contraction',timeout=420)
+                assert json.loads(curl('client','alpha','/?cell=integration&id=ack',8080))['stored'] is True
+                retired=get('celldfleet','alpha')['status']['lifecycle']['retiredBucketSessions']
+                assert retired>=5
+                print('PASS: acknowledged write preserved through repeated manual/automatic Bucket shrink-grow; retired sessions report unknown physical liveness:',retired,flush=True)
+                print(k('get','celldstoragereservations','-o','json'),flush=True)
+                return
             # No Metrics Server is installed in this isolated cluster. Verify the
             # real API defaults/validation, exact metrics RBAC, and conservative
             # missing-data path in both profiles. Native HTTP fixture tests cover
@@ -309,6 +371,9 @@ nodes:
                     try: print(k(*args),flush=True)
                     except RuntimeError as err: print(err,flush=True)
             if (tmp/'operator.log').exists():print((tmp/'operator.log').read_text(),flush=True)
+            if bucket_lifecycle and config.exists():
+                try: print(k('-n','celld-system','logs','deployment/celld-operator'),flush=True)
+                except RuntimeError: pass
             raise
         finally:
             try:

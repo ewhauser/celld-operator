@@ -2,7 +2,7 @@
 
 Step 5 adds [coordinated maintenance](decisions/0014-coordinated-maintenance.md)
 and durably blocked runtime/restart/deletion requests. Step 4 adds optional [capacity policy](capacity-policy.md) and metrics collection to
-journaled manual scale-out. It does not enable production scaling,
+journaled manual scale-out. [Bucket scale-in](bucket-scale-in.md) now implements experimental manual logical membership contraction. It does not establish production qualification,
 upgrades, automatic recovery operations, or deletion. Read
 [ADR 0011](decisions/0011-initial-fleet-api.md) and the
 [remaining qualification gates](qualification/README.md) first.
@@ -18,8 +18,7 @@ Use Kubernetes 1.31 or newer with IPv4 Pod networking for this prototype. Before
 
 Use an **explicit context** when installing. Build and load/publish the operator
 image yourself; the development manifest references an unpublished `:dev` image.
-The operator has no AWS access, writes no S3 metadata, and creates no AWS resources
-itself. On EKS, externally installed CSI provisions volumes for requested PVCs.
+The operator requires a separate narrowly scoped read-only AWS identity for `nodes/`/`log/` evidence. It writes no S3 metadata and creates no AWS resources itself. On EKS, externally installed CSI provisions volumes for requested PVCs.
 
 ```sh
 kubectl --context YOUR_EXPLICIT_CONTEXT apply -f config/crd/
@@ -32,8 +31,7 @@ kubectl --context YOUR_EXPLICIT_CONTEXT apply -f config/samples/persistent.yaml
 
 Samples are not immediately deployable infrastructure: replace their bucket names
 and provision the referenced ServiceAccounts. The existing workload identity must
-have the runtime's necessary bucket permissions; the future evidence reader needs
-a separate read-only identity and is not connected in step 2.
+have the runtime's necessary bucket permissions; the production evidence reader needs a separate read-only identity. See [shared lifecycle safety](shared-lifecycle-safety.md).
 
 | Field | Meaning |
 | --- | --- |
@@ -57,7 +55,7 @@ Fleet names must be DNS labels up to 40 characters. Only `replicas`, `capacity`,
 Invalid cross-field combinations fail admission; name/dependency errors also
 produce clear controller conditions. No `/scale` API is exposed. Production image
 updates, resize, storage changes and placement changes require a
-future qualified lifecycle implementation. Manual scale-out is journaled; reductions are accepted by admission but explicitly blocked by the unqualified contraction gates. See [ADR 0012](decisions/0012-restart-safe-manual-lifecycle.md).
+future qualified lifecycle implementation. Manual scale-out is journaled. Bucket reductions execute under [logical membership completion](bucket-scale-in.md); PersistentFleet reductions remain blocked by its fencing and recovery gates. See [ADR 0012](decisions/0012-restart-safe-manual-lifecycle.md).
 
 The application Service is `<fleet>:8080`; label authorized client/ingress pods
 in that namespace `celld.example.com/client-of: <fleet>`. Internal port 8081 is
@@ -90,7 +88,7 @@ writers; a supported automated cleanup procedure is future lifecycle work.
 
 `--local-test` is exclusively for the disposable integration harness: it selects
 local MinIO, synthetic credentials and a test storage provisioner. Never enable
-it on EKS. It does not accept or infer AWS credentials or a default cluster.
+it on EKS. It does not accept or infer AWS credentials or a default cluster. With `--local-evidence`, the in-cluster fixture installs the fixed MinIO evidence transport; this flag requires `--local-test`.
 
 ## Validation
 
@@ -170,3 +168,5 @@ older binary silently ignoring them. Versions 1 and 2 are read conservatively;
 older binaries reject version 3. Downgrading after journal advancement is not a
 supported rollback procedure. All contraction and maintenance qualification gates
 remain unchanged.
+
+`status.lifecycle.retiredBucketSessions` counts retained Bucket generations outside observed membership whose physical process liveness remains unknown. It is not a count of fenced processes. Journal version 5 preserves these admissions and cannot be read by prior operator binaries.

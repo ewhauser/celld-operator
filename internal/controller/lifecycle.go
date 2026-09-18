@@ -41,6 +41,7 @@ type lifecycleJournal struct {
 	Loss             string
 	History          []lifecycleCompletion
 	Capacity         *capacity.State
+	BucketHistory    []bucketSession
 }
 type lifecycleCompletion struct {
 	ID, TargetPod, TargetUID, TargetGeneration string
@@ -59,6 +60,7 @@ type lifecycleOperation struct {
 	From, To                               int32
 	TargetPod, TargetUID, TargetGeneration string
 	Sessions                               []v050.Session
+	BucketCandidates                       []bucketSession
 	SettledAt                              time.Time
 }
 
@@ -115,11 +117,11 @@ func readJournal(res *fleet.CelldStorageReservation) (*lifecycleJournal, error) 
 	if j.RuntimeImage != Image {
 		return nil, errors.New("unsupported journal runtime image")
 	}
-	if (j.Version != 1 && j.Version != 2 && j.Version != 3 && j.Version != 4) || j.Initial < 1 || j.Initial > 100 || j.Applied < 1 || j.Applied > 100 {
+	if (j.Version != 1 && j.Version != 2 && j.Version != 3 && j.Version != 4 && j.Version != 5) || j.Initial < 1 || j.Initial > 100 || j.Applied < 1 || j.Applied > 100 {
 		return nil, errors.New("invalid lifecycle journal")
 	}
-	// Older binaries reject version 4 instead of ignoring lifecycle safety state.
-	j.Version = 4
+	// Older binaries reject version 5 instead of ignoring lifecycle safety state.
+	j.Version = 5
 	if req := j.Request; req != nil {
 		if req.ID == "" || req.SourceImage != j.RuntimeImage || req.WorkloadUID != j.WorkloadUID || (req.Kind != "Upgrade" && req.Kind != "Restart" && req.Kind != "Delete") {
 			return nil, errors.New("invalid disruption request")
@@ -211,7 +213,7 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 		if initial == 0 {
 			initial = replicas(w)
 		}
-		j = &lifecycleJournal{Version: 4, RuntimeImage: Image, Initial: initial, Applied: replicas(w), WorkloadUID: w.GetUID(), Claims: map[string]types.UID{}}
+		j = &lifecycleJournal{Version: 5, RuntimeImage: Image, Initial: initial, Applied: replicas(w), WorkloadUID: w.GetUID(), Claims: map[string]types.UID{}}
 		// Creation records claim UIDs before workload creation. Verify those bindings;
 		// missing or replaced claims can never be adopted.
 		var created map[string]types.UID
@@ -337,6 +339,16 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 			}
 		}
 		op = &lifecycleOperation{ID: string(uuid.NewUUID()), Phase: "Intent", StartedAt: r.capacityNow(), Deadline: r.capacityNow().Add(operationBudget), From: j.Applied, To: target, WorkloadVersion: w.GetResourceVersion(), Automatic: automatic}
+		if op.To < op.From && f.Spec.Profile == "Bucket" && r.Evidence != nil {
+			op.To = op.From - 1
+			op.Phase = "Blocked"
+			if automatic {
+				op.PolicyHash = j.Capacity.Config
+				op.ManualBaseline = f.Spec.Replicas
+			}
+			j.Operation = op
+			return save(j)
+		}
 		if op.To < op.From && (!r.Options.LocalTest || r.localLifecycle == nil) {
 			// Record blocked authority without pretending target/session evidence is
 			// qualified. No production execution path accepts this phase.
@@ -428,6 +440,17 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 	if !r.capacityNow().Before(op.Deadline) && !op.Stalled {
 		op.Stalled = true
 		return save(j)
+	}
+	if f.Spec.Profile == "Bucket" && op.To < op.From && r.Evidence != nil {
+		// capacityTarget above refreshes an unissued removal's stabilization
+		// history. Persist negative observations too, before any executor return;
+		// a restart must not revive the earlier qualified low-demand window.
+		if j.Capacity != nil {
+			if err := r.saveJournal(ctx, res, j); err != nil {
+				return ctrl.Result{}, true, err
+			}
+		}
+		return r.contractBucket(ctx, f, res, j, w)
 	}
 	if op.Phase == "Blocked" {
 		if op.Stalled {

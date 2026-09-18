@@ -172,3 +172,5 @@ No AWS resource was created or modified, and no default cluster was used.
 Step 2 follow-up: [local infrastructure and isolation evidence](infrastructure/README.md).
 These checks add Kubernetes API, provisioning and network coverage; they do not
 remove the production gates above.
+
+Bucket follow-up: [logical membership contract and executor](../bucket-scale-in.md) and [new runtime/operator evidence](bucket-lifecycle/README.md) supersede the earlier blanket no-log completion blocker. The historical measurements above remain unchanged.

@@ -113,3 +113,17 @@ func (r *S3Reader) List(ctx context.Context, prefix, continuation string) (v050.
 	}
 	return page, nil
 }
+
+// LocalReader is restricted to the disposable in-cluster MinIO fixture. It never
+// loads host/environment credentials and cannot be pointed at an AWS endpoint.
+func LocalReader(bucket string) *S3Reader {
+	cfg := aws.Config{Region: "us-east-1", Credentials: aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
+		return aws.Credentials{AccessKeyID: "qualification", SecretAccessKey: "qualification-only"}, nil
+	}), HTTPClient: &http.Client{Timeout: 3 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	api := s3.NewFromConfig(cfg, func(o *s3.Options) {
+		o.BaseEndpoint = aws.String("http://minio.celld-test-store.svc:9000")
+		o.UsePathStyle = true
+		o.RetryMaxAttempts = 2
+	})
+	return &S3Reader{API: api, Bucket: bucket}
+}

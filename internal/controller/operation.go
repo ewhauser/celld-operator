@@ -44,6 +44,13 @@ func (r *Reconciler) cancelRemoval(ctx context.Context, res *fleet.CelldStorageR
 	done := completion(op, time.Time{})
 	done.Outcome = "CanceledBeforeIssue"
 	j.History = append(j.History, done)
+	for _, candidate := range op.BucketCandidates {
+		if !slices.ContainsFunc(j.BucketHistory, func(s bucketSession) bool { return s.Node == candidate.Node }) {
+			// Cancellation preserves admission, never completed retirement.
+			candidate.Retired = false
+			j.BucketHistory = append(j.BucketHistory, candidate)
+		}
+	}
 	j.Operation = nil
 	resetMaintenanceCapacity(j)
 	return ctrl.Result{RequeueAfter: time.Second}, true, r.saveJournal(ctx, res, j)

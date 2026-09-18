@@ -1,0 +1,35 @@
+[
+  {
+    "scenario": "paused-owner-takeover",
+    "old_process_running": true,
+    "old_process_paused": true,
+    "acknowledged": 11,
+    "distinct_sequences": 11,
+    "missing": []
+  },
+  {
+    "scenario": "resumed-old-owner",
+    "old_process_running": false,
+    "in_flight": {
+      "ambiguous_response": "TimeoutError"
+    },
+    "acknowledged": 21,
+    "distinct_sequences": 21,
+    "missing": []
+  },
+  {
+    "scenario": "peer-partition-retains-s3",
+    "process_running": true,
+    "lease_renewed": true,
+    "logical_removal_must_block": true,
+    "acknowledged": 26,
+    "distinct_sequences": 26,
+    "missing": []
+  },
+  {
+    "scenario": "peer-reconnect",
+    "acknowledged": 36,
+    "distinct_sequences": 36,
+    "missing": []
+  }
+]

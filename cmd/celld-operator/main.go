@@ -34,6 +34,7 @@ func run() error {
 	namespace := fs.String("operator-namespace", "celld-system", "Namespace of trusted operator pods and leader election")
 	enforced := fs.Bool("network-policy-enforced", false, "Administrator attests NetworkPolicy enforcement has been verified on this cluster")
 	localTest := fs.Bool("local-test", false, "Use disposable local MinIO test configuration; never enable on EKS")
+	localEvidence := fs.Bool("local-evidence", false, "Enable fixed disposable MinIO evidence transport; requires --local-test")
 	metrics := fs.String("metrics-bind-address", "0", "Optional metrics listener (0 disables)")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -47,6 +48,9 @@ func run() error {
 	if *showVersion {
 		fmt.Println(version)
 		return nil
+	}
+	if *localEvidence && !*localTest {
+		return errors.New("--local-evidence requires --local-test")
 	}
 	ctrl.SetLogger(logr.FromSlogHandler(slog.NewJSONHandler(os.Stderr, nil)))
 	scheme := runtime.NewScheme()
@@ -76,6 +80,8 @@ func run() error {
 	// Local disposable mode never falls through to AWS credentials or endpoints.
 	if !*localTest {
 		reconciler.Evidence = controller.NewProductionEvidence(direct)
+	} else if *localEvidence {
+		reconciler.Evidence = controller.NewLocalEvidence(direct)
 	}
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		return err

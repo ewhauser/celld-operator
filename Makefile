@@ -57,3 +57,7 @@ manifests-check:
 
 integration: build
 	python3 hack/integration/run.py
+
+.PHONY: integration-bucket
+integration-bucket:
+	python3 hack/integration/run.py --bucket-lifecycle

@@ -80,3 +80,89 @@ func (a *Adapter) InspectBucket(ctx context.Context, r Reader, req Request, now 
 	}
 	return BucketObservation{ObservedAt: at}, nil
 }
+
+// BucketMember describes an operator-configured Bucket generation. Retired means
+// absent from desired Kubernetes membership, NOT physically stopped.
+type BucketMember struct {
+	Node, Generation string
+	Retired          bool
+	// Resolved records previously completed positive expiry and settling.
+	Resolved bool
+}
+
+// InspectBucketMembership supports repeated removals without erasing historical
+// sessions. New retired generations need positively read expired leases. Only
+// durably resolved historical records may subsequently disappear through GC.
+func (a *Adapter) InspectBucketMembership(ctx context.Context, r Reader, members []BucketMember, now func() time.Time) (BucketObservation, error) {
+	started := now()
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	expected := map[string]BucketMember{}
+	for _, s := range members {
+		if !validID(s.Node) || !validID(s.Generation) || expected[s.Node].Node != "" {
+			return BucketObservation{}, errors.New("ambiguous bucket membership")
+		}
+		expected[s.Node] = s
+	}
+	if len(expected) == 0 {
+		return BucketObservation{}, errors.New("empty bucket membership")
+	}
+	budget := 1000
+	keys, err := list(ctx, r, "nodes/", &budget)
+	if err != nil {
+		return BucketObservation{}, err
+	}
+	seen := map[string]bool{}
+	for _, key := range keys {
+		body, err := r.Get(ctx, key)
+		if err != nil {
+			return BucketObservation{}, err
+		}
+		node, err := a.ParseNode(key, body)
+		if err != nil {
+			return BucketObservation{}, err
+		}
+		seen[node.Name] = true
+		s, ok := expected[node.Name]
+		if !ok || node.Generation != s.Generation || node.Epoch != 0 || node.LogState != "" {
+			return BucketObservation{}, errors.New("unknown bucket generation or peer recovery obligation")
+		}
+		if now().UnixMilli() < 0 {
+			return BucketObservation{}, errors.New("invalid observation clock")
+		}
+		live := node.ExpiresMS > uint64(now().UnixMilli())
+		if s.Retired && live {
+			return BucketObservation{}, errors.New("retired bucket process still has a live lease")
+		}
+		if !s.Retired && (!live || !fresh(time.UnixMilli(node.SampledMS), now(), 5*time.Second)) {
+			return BucketObservation{}, errors.New("current bucket lease or sample unavailable")
+		}
+	}
+	for node, member := range expected {
+		if !seen[node] && (!member.Retired || !member.Resolved) {
+			return BucketObservation{}, errors.New("unresolved bucket writer record missing")
+		}
+	}
+	hasLog := false
+	_, err = listEach(ctx, r, "log/", &budget, func(key string) error {
+		hasLog = true
+		if strings.HasSuffix(key, ".loss.json") {
+			return &LossError{Key: key}
+		}
+		return nil
+	})
+	if err != nil {
+		return BucketObservation{}, err
+	}
+	if hasLog {
+		return BucketObservation{}, errors.New("bucket peer-log history unresolved")
+	}
+	if err := ctx.Err(); err != nil {
+		return BucketObservation{}, err
+	}
+	at := now()
+	if !fresh(started, at, 5*time.Second) {
+		return BucketObservation{}, errors.New("bucket assessment expired")
+	}
+	return BucketObservation{ObservedAt: at}, nil
+}

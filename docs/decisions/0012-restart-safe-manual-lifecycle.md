@@ -1,6 +1,6 @@
 # ADR 0012 Journaled manual lifecycle and explicit contraction gates
 
-The production read-only transport, observational history, deadlines and cancellation authority below are updated by [ADR 0015](0015-shared-lifecycle-safety.md). Mode-specific contraction remains blocked.
+The production read-only transport, observational history, deadlines and cancellation authority below are updated by [ADR 0015](0015-shared-lifecycle-safety.md). Bucket contraction is subsequently implemented by [ADR 0016](0016-bucket-preflight-and-completion-boundary.md); PersistentFleet remains blocked.
 
 Status: Implemented experimental scale-out; contraction engine tested with injected evidence only
 
@@ -55,7 +55,7 @@ there is no history pruning or age-based permission to forget recovery evidence.
 
 ## Contraction and evidence
 
-**The shipped manager cannot execute contraction in either profile.** Bucket
+**The original step-3 manager could not execute contraction in either profile.** The current Bucket executor follows ADR 0016; the section below records the original qualification boundary. Bucket
 completion remains unqualified. Deterministic Deployment victim control is not required when every possible victim passes admission; see [ADR 0016](0016-bucket-preflight-and-completion-boundary.md).
 PersistentFleet needs a qualified process fence, live runtime membership collector,
 and independently provisioned read-only S3 transport. None is installed by this

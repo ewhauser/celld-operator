@@ -1,8 +1,7 @@
 # Shared lifecycle safety implementation
 
 18 September 2026. This implements shared prerequisites, not either profile's
-removal executor or production qualification. Both Bucket and PersistentFleet
-remain in scope, and both remain unable to contract in the runnable operator.
+removal executor or production qualification. Both profiles remain in scope. This document records the shared-prerequisite baseline; [the subsequent Bucket contract](bucket-scale-in.md) implements logical membership contraction. PersistentFleet remains unable to contract in the runnable operator.
 
 ## Production collection and authority
 
@@ -63,7 +62,7 @@ or pretend address matching is an authenticated probe. See the pinned
 [probe handler](https://github.com/denoland/celld/blob/12d5b6333fe52717325addcfe1e99e9fd4f77bcd/crates/celld/main.rs#L2577-L2619)
 and [probe protocol](https://github.com/denoland/celld/blob/12d5b6333fe52717325addcfe1e99e9fd4f77bcd/crates/celld/peer_probe.rs).
 
-The process fencing contract requires independently verified, irreversible
+The PersistentFleet process fencing contract requires independently verified, irreversible
 termination of the exact pod UID/container invocation and prevention of that
 invocation's restart, or fencing of the exact host incarnation plus a guarantee
 that it cannot resume storage/network access. Evidence must bind fleet,
@@ -149,6 +148,4 @@ isolation, external worker/bucket/IAM/ingress provisioning, strict configurable
 placement, unmodified image pin and optional Prometheus are unchanged.
 
 Bucket-specific follow-up: [all-candidate admission and completion boundary](bucket-scale-in.md)
-separates the Bucket acknowledgement rule from peer-log recovery without weakening
-the process-completion contract above. Its metadata observation does not enable
-contraction.
+adopts logical membership completion for Bucket and enables experimental manual contraction. It leaves the stronger PersistentFleet process-completion contract above unchanged.

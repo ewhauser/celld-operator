@@ -409,6 +409,11 @@ spec:
                     type: string
                   requestKind:
                     type: string
+                  retiredBucketSessions:
+                    description: RetiredBucketSessions left logical membership; physical
+                      liveness is unknown.
+                    format: int32
+                    type: integer
                   sessionCount:
                     format: int32
                     type: integer

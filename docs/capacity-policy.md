@@ -100,3 +100,5 @@ positive demand windows and cached actionability, and leaves issued recovery
 running. Resume preserves the original operation target and requires fresh
 evidence. Blocked upgrade/restart requests take precedence over new capacity
 operations after the current one completes. See [ADR 0014](decisions/0014-coordinated-maintenance.md).
+
+Bucket update: the shared executor now supports manual logical membership contraction and automatic execution in the fixed local qualification environment. Production automatic Bucket requests remain `BucketAutomaticUnqualified` until EKS/S3 release qualification. See [Bucket lifecycle](bucket-scale-in.md) for the full gates and history rules.

@@ -80,3 +80,27 @@ without making the experiment itself fail. Setup/transport/ledger-read failures
 fail the command; inspect `results.json` rather than treating exit 0 as runtime
 qualification. The final client `missing` list must be empty, and positive
 recovery observations require exact generation matches and no listed loss keys.
+
+## Bucket logical ownership fencing
+
+```sh
+.qualification-venv/bin/python hack/qualification/bucket_fencing.py --output .qualification-runs/bucket-fencing-new
+python3 hack/integration/run.py --bucket-lifecycle
+```
+
+The first command uses a synthetic idempotent sequence counter to distinguish
+conflicting successful writes from ambiguous responses. It pauses the actual
+owner during a delayed response, takes over through a survivor while the old
+process still exists, resumes the old process, and verifies all acknowledged
+sequence assignments. A separate peer partition preserves a dedicated S3 network;
+the still-running owner must renew its lease and may acknowledge writes. That
+lease prevents operator completion. Both Docker networks and owned containers
+are cleaned on exit. A failed/absent response is never treated as a nonexistent
+write. No peer secret or object-store mutation is used to force ownership.
+
+The second command runs the real operator in its disposable kind cluster with
+fixed local evidence and Metrics Server v0.8.0 (SHA-checked manifest). Kubelet TLS
+verification is disabled only for this local Metrics Server fixture. It exercises
+manual and automatic Bucket removals, repeated growth, pause/resume, manager
+restart and acknowledged-write readback. It uses an explicit generated kubeconfig
+and never touches an existing cluster or AWS account.

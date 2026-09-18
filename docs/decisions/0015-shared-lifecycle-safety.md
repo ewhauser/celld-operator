@@ -1,6 +1,6 @@
 # ADR 0015 Shared evidence, deadlines and cancellation authority
 
-Status: Implemented shared prerequisites; identity/fencing and mode-specific executors blocked
+Status: Implemented shared prerequisites; Bucket completion amended by ADR 0016; PersistentFleet fencing remains blocked
 
 Use the production read-only primary S3 transport and persist observational
 session history without promoting observations into fencing certificates.
@@ -17,3 +17,5 @@ status inference authorizes production contraction.
 
 See [the implementation contract and exact external dependencies](../shared-lifecycle-safety.md)
 for evidence semantics, scope, interleavings and qualification limits.
+
+[ADR 0016](0016-bucket-preflight-and-completion-boundary.md) adopts Bucket logical membership completion, replaces its physical-process-termination requirement, and advances the journal to version 5. The stronger peer-log and fencing contract above continues to apply to PersistentFleet.

@@ -191,3 +191,11 @@ func ValidateSurvivors(p fleet.CapacityPolicy, o capacity.Observation, identitie
 func (*ProductionEvidence) Stopped(context.Context, *fleet.CelldFleet, *lifecycleOperation) (bool, error) {
 	return false, errors.New("FencingUnqualified: require independently verified exact process termination and prevention of restart, or infrastructure node fencing; Kubernetes status and S3 leases are insufficient")
 }
+
+// NewLocalEvidence uses only the fixed disposable MinIO fixture; runtime
+// workload templates must also use LocalTest. No live AWS credentials are read.
+func NewLocalEvidence(c client.Client) *ProductionEvidence {
+	return &ProductionEvidence{client: c, now: time.Now, reader: func(_ context.Context, f *fleet.CelldFleet) (v050.Reader, error) {
+		return recovery.LocalReader(f.Spec.Storage.Bucket), nil
+	}}
+}

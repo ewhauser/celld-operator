@@ -1,17 +1,23 @@
-# ADR 0016 Bucket preflight and the process-completion boundary
+# ADR 0016 Bucket logical membership completion
 
-Status: Implemented admission prerequisites; Bucket executor remains blocked
+Status: Accepted and implemented experimental manual execution; production automatic release-gated
 
-Treat the pinned Bucket acknowledgement rule separately from PersistentFleet
-peer-log recovery. Inspect every possible Deployment victim and require complete,
-fresh no-peer-log metadata for the narrow Bucket-only admission case. An absent
-log is not proof of process termination, historical recovery, or Bucket runtime
-configuration. Return a distinct preflight observation rather than a completed
-peer recovery certificate.
+For Bucket, complete an operation when the requested Kubernetes membership change
+has converged, current survivors pass fresh health/capacity checks, and every
+previously admitted generation outside current membership has a positively read
+expired lease with no peer-log obligation. Repeat the exact observed membership
+through settling. Later runtime GC may remove an already durably resolved record; absence never completes a new retirement. Report physical process liveness as unknown.
 
-Preserve ADR 0015's stronger completion and identity contract. Do not enable a
-removal executor until that authority is qualified or a different Bucket
-completion contract is explicitly adopted and validated. Deterministic Deployment
-victim selection is unnecessary when every candidate can be admitted safely.
+This supersedes ADR 0015's physical-process-fencing requirement **for Bucket only**.
+The pinned runtime requires S3 durability plus an ownership check before Bucket
+acknowledgement, so peer-disk preservation is not its durability basis. Preserve
+configuration, observed generation, exclusive storage scope and historical checks;
+missing logs alone do not establish those facts. PersistentFleet is unchanged.
 
-See [the implementation and outstanding work](../bucket-scale-in.md).
+Journal every possible Deployment candidate before one CAS decrement. Retain
+historical Bucket admissions through repeated shrink/grow. Journal version 5
+prevents older binaries from ignoring this state. Manual execution is experimental;
+automatic execution remains disabled against AWS until release qualification,
+while the fixed local fixture tests the same automatic path.
+
+See [the contract, source argument, execution and remaining gates](../bucket-scale-in.md).

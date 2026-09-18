@@ -19,9 +19,10 @@ import (
 )
 
 type bucketReader struct {
-	now   time.Time
-	nodes []string
-	hook  func()
+	now     time.Time
+	nodes   []string
+	hook    func()
+	expired map[string]bool
 }
 
 func (r *bucketReader) List(_ context.Context, prefix, _ string) (v050.Page, error) {
@@ -40,12 +41,18 @@ func (r *bucketReader) List(_ context.Context, prefix, _ string) (v050.Page, err
 }
 func (r *bucketReader) Get(_ context.Context, key string) ([]byte, error) {
 	node := strings.TrimSuffix(strings.TrimPrefix(key, "nodes/"), ".json")
-	return json.Marshal(map[string]any{"node": node, "ownership_index_generation": "generation", "peer_protocol": 5, "expires_ms": r.now.Add(time.Minute).UnixMilli(), "load": map[string]any{"sampled_ms": r.now.UnixMilli()}})
+	expires := r.now.Add(time.Minute).UnixMilli()
+	if r.expired[node] {
+		expires = r.now.Add(-time.Second).UnixMilli()
+	}
+	return json.Marshal(map[string]any{"node": node, "ownership_index_generation": "generation", "peer_protocol": 5, "expires_ms": expires, "load": map[string]any{"sampled_ms": r.now.UnixMilli()}})
 }
 
 func bucketPreflightSetup(t *testing.T) (*ProductionEvidence, *fleet.CelldFleet, *lifecycleJournal, Options, *bucketReader) {
 	t.Helper()
 	f := fixture("bucket", "bucket-data", "Bucket")
+	f.Spec.Placement.AZCount = 1
+	f.Spec.Placement.Zones = []string{"us-east-1a"}
 	now := time.Unix(10000, 0)
 	opts := Options{OperatorNamespace: "celld-system"}
 	rs := &appsv1.ReplicaSet{Name: "bucket-rs", Namespace: f.Namespace, UID: "rs-uid", OwnerReferences: []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "Deployment", Name: f.Name, UID: "deployment-uid", Controller: new(true)}}, Spec: appsv1.ReplicaSetSpec{Template: podTemplate(f, opts)}}
@@ -55,7 +62,8 @@ func bucketPreflightSetup(t *testing.T) (*ProductionEvidence, *fleet.CelldFleet,
 	for i := range 3 {
 		name := fmt.Sprintf("pod-%d", i)
 		pod := &corev1.Pod{Name: name, Namespace: f.Namespace, UID: types.UID(name), Labels: labels(f), OwnerReferences: []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: new(true)}}, Spec: *rs.Spec.Template.Spec.DeepCopy(), Status: corev1.PodStatus{Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}, ContainerStatuses: []corev1.ContainerStatus{{Name: "celld", ContainerID: "container", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: metav1.NewTime(now.Add(-time.Minute))}}}}}}
-		objects = append(objects, pod)
+		pod.Spec.NodeName = "host-" + name
+		objects = append(objects, pod, &corev1.Node{Name: pod.Spec.NodeName, UID: types.UID("node-" + name), Labels: map[string]string{corev1.LabelHostname: pod.Spec.NodeName, corev1.LabelTopologyZone: "us-east-1a"}})
 		id, _ := podIdentity(pod)
 		j.Inventory.Sessions = append(j.Inventory.Sessions, RuntimeSession{Node: name, Pod: name, PodUID: name, Container: id, Generation: "generation", Current: true, Association: "ObservedUnverified"})
 		reader.nodes = append(reader.nodes, name)
@@ -66,7 +74,7 @@ func bucketPreflightSetup(t *testing.T) (*ProductionEvidence, *fleet.CelldFleet,
 }
 
 func TestBucketEveryDeploymentCandidate(t *testing.T) {
-	for _, name := range []string{"complete", "foreign owner", "owner replacement", "wrong posture", "injected posture", "missing configuration", "extra runtime configuration", "duplicate environment", "unknown candidate", "replacement", "history", "stale", "membership race"} {
+	for _, name := range []string{"complete", "foreign owner", "owner replacement", "wrong posture", "injected posture", "missing configuration", "extra runtime configuration", "binary mount", "service account", "duplicate environment", "unknown candidate", "replacement", "history", "stale", "membership race"} {
 		t.Run(name, func(t *testing.T) {
 			p, f, j, opts, reader := bucketPreflightSetup(t)
 			pod := &corev1.Pod{}
@@ -90,6 +98,10 @@ func TestBucketEveryDeploymentCandidate(t *testing.T) {
 				pod.Spec.Containers[0].Env = pod.Spec.Containers[0].Env[:1]
 			case "extra runtime configuration":
 				pod.Spec.Containers[0].Env = append(pod.Spec.Containers[0].Env, corev1.EnvVar{Name: "CELLD_UNKNOWN", Value: "1"})
+			case "binary mount":
+				pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, corev1.VolumeMount{Name: "work", MountPath: "/usr/local/bin"})
+			case "service account":
+				pod.Spec.ServiceAccountName = "other"
 			case "duplicate environment":
 				pod.Spec.Containers[0].Env = append(pod.Spec.Containers[0].Env, pod.Spec.Containers[0].Env[0])
 			case "unknown candidate":
