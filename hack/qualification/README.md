@@ -104,3 +104,15 @@ verification is disabled only for this local Metrics Server fixture. It exercise
 manual and automatic Bucket removals, repeated growth, pause/resume, manager
 restart and acknowledged-write readback. It uses an explicit generated kubeconfig
 and never touches an existing cluster or AWS account.
+
+## Persistent retained-volume exclusion counterexample
+
+```sh
+.qualification-venv/bin/python hack/qualification/persistent_reuse.py --output .qualification-runs/persistent-reuse-new
+```
+
+This starts a replacement on a paused invocation's exact named volume and checks
+that the replacement gets a new S3 generation and becomes Ready while the old
+invocation still holds the same mounted filesystem. It does not resume concurrent
+writers or claim peer-only durability/data-loss qualification. See
+[the remaining implementation contract](../../docs/persistent-fleet-implementation-gap.md).

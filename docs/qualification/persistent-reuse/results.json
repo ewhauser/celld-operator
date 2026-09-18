@@ -1,0 +1,13 @@
+[
+  {
+    "scenario": "retained-volume-overlapping-invocations",
+    "same_named_volume": true,
+    "generation_replaced": true,
+    "old_process_running": true,
+    "old_process_paused": true,
+    "replacement_ready_seconds": 1.077,
+    "replacement_running": true,
+    "data_loss_tested": false,
+    "peer_only_acknowledgements_tested": false
+  }
+]

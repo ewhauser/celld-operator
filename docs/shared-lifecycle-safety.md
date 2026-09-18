@@ -51,6 +51,9 @@ session count, evidence blocker/freshness, operation deadline and stalled state.
 Status is never authority. Loss remains sticky on the workload CAS object and
 reservation; repeated loss reports do not starve compatible additions.
 
+For a real retained-volume overlap counterexample and the concrete missing
+component, see [PersistentFleet implementation gap](persistent-fleet-implementation-gap.md).
+
 ## Exact identity and fencing boundary
 
 `ObservedUnverified` explicitly does **not** prove a cryptographic runtime-to-
