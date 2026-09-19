@@ -76,10 +76,12 @@ func handoffPredecessor(j *lifecycleJournal, pod *corev1.Pod, state launcher.Sta
 		if p.Node != pod.Name {
 			continue
 		}
-		if !p.Stopped || !p.Retired || !p.RestartDenied {
+		// The immediate predecessor needs positive stop authority. Earlier
+		// invocations superseded on their own kernel are resolved by the lock
+		// their successor acquired; they never owe a receipt.
+		if p.Generation == predecessor.Generation && (!p.Stopped || !p.Retired || !p.RestartDenied) || !resolvedMember(p) {
 			return predecessor, errors.New("unresolved historical disk writer")
 		}
-
 	}
 	if !found || predecessor.DiskID == "" || predecessor.DiskID != state.DiskID || predecessor.Host+"\n"+predecessor.BootID != state.PreviousHost || predecessor.PodUID == string(pod.UID) || predecessor.Generation == state.Generation || predecessor.Zone == "" || predecessor.Zone != host.Labels[corev1.LabelTopologyZone] || !healthyHost(host) || state.BootID != host.Status.NodeInfo.BootID {
 		return predecessor, errors.New("handoff lacks exact retired disk, host or zone continuity")
@@ -134,7 +136,8 @@ func (r *Reconciler) authorizeVolumeHandoff(ctx context.Context, f *fleet.CelldF
 	maintenance := j.Maintenance
 	restarting := maintenance != nil && maintenance.Kind == "Restart" && maintenance.Phase == "Recovering" && maintenance.Index < len(maintenance.Targets) && maintenance.Targets[maintenance.Index].Name == pod.Name && maintenance.Targets[maintenance.Index].UID != pod.UID
 	coordinated := maintenance != nil && maintenance.Coordinated && maintenance.Phase == "Resuming" && reactivatedNode(f.Name, pod.Name, 0, maintenance.TargetReplicas)
-	if !reactivating && !restarting && !coordinated {
+	recovering := j.Recovery != nil && j.Recovery.Phase == "Reactivating" && j.Recovery.Member.Node == pod.Name && j.Recovery.Member.PodUID != string(pod.UID) && sameInvocation(j.Recovery.Member, previous)
+	if !reactivating && !restarting && !coordinated && !recovering {
 		return errors.New("handoff requires durable reactivation authority")
 	}
 	if j.Loss != "" || r.Evidence == nil {

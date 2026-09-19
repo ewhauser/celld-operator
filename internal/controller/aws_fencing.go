@@ -10,6 +10,7 @@ import (
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	"github.com/ewhauser/celld-operator/internal/fencing"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -69,15 +70,32 @@ func (r *Reconciler) ensureInfrastructureFence(ctx context.Context, f *fleet.Cel
 	if index >= 0 && j.InfrastructureFences[index].Binding != binding {
 		return false, errors.New("durable fencing scope changed")
 	}
+	// A recovery fences an admitted survivor outside any contraction. Its host
+	// may already be gone, so a positively terminated exact instance is accepted
+	// as the receipt even before intent: the immutable instance ID and the
+	// ownership tags name that VM, and a terminated VM cannot reach the volume.
+	recovery := j.Recovery != nil && j.Recovery.ID == operation
 	instance, err := r.Infrastructure.Describe(ctx, binding.Instance)
 	if err != nil {
 		return false, err
 	}
-	if err := fencing.Check(binding, instance, index >= 0); err != nil {
+	if err := fencing.Check(binding, instance, index >= 0 || (recovery && instance.State == "terminated")); err != nil {
 		return false, err
 	}
-	// After intent, positive EC2 termination survives Kubernetes Node cleanup.
-	if index >= 0 && instance.State == "terminated" {
+	if instance.State == "terminated" && (index >= 0 || recovery) {
+		if index < 0 {
+			if err := r.recoveryFenceAdmissible(ctx, f, j, member); err != nil {
+				return false, err
+			}
+			now := r.capacityNow()
+			j.InfrastructureFences = append(j.InfrastructureFences, infrastructureFence{Operation: operation, Member: member, Binding: binding, IntentAt: now, ConfirmedAt: now})
+			if err := r.saveJournal(ctx, res, j); err != nil {
+				j.InfrastructureFences = j.InfrastructureFences[:len(j.InfrastructureFences)-1]
+				return false, err
+			}
+			return true, nil
+		}
+		// After intent, positive EC2 termination survives Kubernetes Node cleanup.
 		receipt := &j.InfrastructureFences[index]
 		receipt.ConfirmedAt = r.capacityNow()
 		if err := r.saveJournal(ctx, res, j); err != nil {
@@ -87,30 +105,37 @@ func (r *Reconciler) ensureInfrastructureFence(ctx context.Context, f *fleet.Cel
 		return true, nil
 	}
 	node := &corev1.Node{}
-	if err := r.Get(ctx, client.ObjectKey{Name: member.Host}, node); err != nil {
+	err = r.Get(ctx, client.ObjectKey{Name: member.Host}, node)
+	switch {
+	case apierrors.IsNotFound(err) && recovery:
+		// The registration is gone; the instance is identified by ID and tags alone.
+		node = nil
+	case err != nil:
 		return false, err
-	}
-	if string(node.UID) != member.HostUID || node.Status.NodeInfo.BootID != member.BootID || node.Spec.ProviderID != member.ProviderID || node.Labels[corev1.LabelTopologyZone] != member.Zone {
+	case !recovery && (string(node.UID) != member.HostUID || node.Status.NodeInfo.BootID != member.BootID || node.Spec.ProviderID != member.ProviderID || node.Labels[corev1.LabelTopologyZone] != member.Zone):
 		return false, errors.New("kubernetes host incarnation changed before fencing")
 	}
 	// Isolation is necessary because TerminateInstances affects the entire VM.
-	// Only the admitted target and infrastructure DaemonSets may share this node.
-	pods := &corev1.PodList{}
-	if err := r.List(ctx, pods); err != nil {
-		return false, err
-	}
-	for _, pod := range pods.Items {
-		if pod.Spec.NodeName != member.Host {
-			continue
+	// Only the admitted target and infrastructure DaemonSets may share this node
+	// name, whichever registration currently carries it.
+	if node != nil {
+		pods := &corev1.PodList{}
+		if err := r.List(ctx, pods); err != nil {
+			return false, err
 		}
-		if pod.Namespace == f.Namespace && pod.Name == member.Node && string(pod.UID) == member.PodUID {
-			continue
+		for _, pod := range pods.Items {
+			if pod.Spec.NodeName != member.Host {
+				continue
+			}
+			if pod.Namespace == f.Namespace && pod.Name == member.Node && string(pod.UID) == member.PodUID {
+				continue
+			}
+			owner := metav1.GetControllerOf(&pod)
+			if pod.Namespace == "kube-system" && owner != nil && owner.Kind == "DaemonSet" {
+				continue
+			}
+			return false, errors.New("node hosts another workload; refusing whole-instance termination")
 		}
-		owner := metav1.GetControllerOf(&pod)
-		if pod.Namespace == "kube-system" && owner != nil && owner.Kind == "DaemonSet" {
-			continue
-		}
-		return false, errors.New("node hosts another workload; refusing whole-instance termination")
 	}
 	claim := &corev1.PersistentVolumeClaim{}
 	if err := r.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: "data-" + member.Node}, claim); err != nil {
@@ -122,6 +147,18 @@ func (r *Reconciler) ensureInfrastructureFence(ctx context.Context, f *fleet.Cel
 	}
 	if string(claim.UID) != member.ClaimUID || uid != member.VolumeUID || handle != member.VolumeHandle || string(j.Claims[claim.Name]) != member.ClaimUID || !slices.Equal(claim.Spec.AccessModes, []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOncePod}) || !claim.DeletionTimestamp.IsZero() {
 		return false, errors.New("retained volume changed before fencing")
+	}
+	if index < 0 && recovery {
+		if err := r.recoveryFenceAdmissible(ctx, f, j, member); err != nil {
+			return false, err
+		}
+		j.InfrastructureFences = append(j.InfrastructureFences, infrastructureFence{Operation: operation, Member: member, Binding: binding, IntentAt: r.capacityNow()})
+		// Persist before any termination call. A crash or rejected journal CAS issues nothing.
+		err := r.saveJournal(ctx, res, j)
+		if err != nil {
+			j.InfrastructureFences = j.InfrastructureFences[:len(j.InfrastructureFences)-1]
+		}
+		return false, err
 	}
 	if index < 0 {
 		if j.Operation == nil || j.Operation.ID != operation || j.Operation.Phase != "Stopping" || j.Operation.TargetPod != member.Node {
@@ -161,7 +198,9 @@ func (r *Reconciler) ensureInfrastructureFence(ctx context.Context, f *fleet.Cel
 		}
 		return false, err
 	}
-	if !node.Spec.Unschedulable && instance.State != "shutting-down" {
+	// Cordon only a registration of this exact instance; a different instance
+	// that reused the node name is not the termination target.
+	if node != nil && (string(node.UID) == member.HostUID || node.Spec.ProviderID == member.ProviderID) && !node.Spec.Unschedulable && instance.State != "shutting-down" {
 		before := node.DeepCopy()
 		node.Spec.Unschedulable = true
 		return false, r.Patch(ctx, node, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{}))

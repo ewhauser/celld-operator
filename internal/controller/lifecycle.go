@@ -31,6 +31,7 @@ const operationKey = "celld.eric.dev/lifecycle-operation"
 // history or PVC identities automatically. Large journals use immutable archives.
 type lifecycleJournal struct {
 	InfrastructureFences []infrastructureFence
+	Recovery             *persistentRecovery
 	BucketMigration      *bucketMigration
 	Maintenance          *maintenanceOperation
 	CompletedRestarts    []string
@@ -124,11 +125,12 @@ func readJournal(res *fleet.CelldStorageReservation) (*lifecycleJournal, error) 
 	if !knownRuntime(j.RuntimeImage) {
 		return nil, errors.New("unsupported journal runtime image")
 	}
-	if (j.Version != 1 && j.Version != 2 && j.Version != 3 && j.Version != 4 && j.Version != 5 && j.Version != 6 && j.Version != 7 && j.Version != 8) || j.Initial < 1 || j.Initial > 100 || j.Applied < 1 || j.Applied > 100 {
+	if j.Version < 1 || j.Version > 9 || j.Initial < 1 || j.Initial > 100 || j.Applied < 1 || j.Applied > 100 {
 		return nil, errors.New("invalid lifecycle journal")
 	}
-	// Older binaries reject version 8 instead of ignoring handoff, maintenance, and session succession authority.
-	j.Version = 8
+	// Older binaries reject version 9 instead of ignoring an in-flight uncertain
+	// member recovery, or the handoff, maintenance and succession authority before it.
+	j.Version = 9
 	if req := j.Request; req != nil {
 		if req.ID == "" || req.SourceImage != j.RuntimeImage || req.WorkloadUID != j.WorkloadUID || (req.Kind != "Upgrade" && req.Kind != "Restart" && req.Kind != "Delete") {
 			return nil, errors.New("invalid disruption request")
@@ -154,7 +156,27 @@ func readJournal(res *fleet.CelldStorageReservation) (*lifecycleJournal, error) 
 	if err := validatePersistentJournal(&j); err != nil {
 		return nil, err
 	}
+	if err := validatePersistentRecovery(&j); err != nil {
+		return nil, err
+	}
 	return &j, nil
+}
+
+// observeEvidence refreshes the shared session inventory and fences a newly
+// published loss declaration before any executor acts on stale evidence.
+func (r *Reconciler) observeEvidence(ctx context.Context, f *fleet.CelldFleet, w client.Object, res *fleet.CelldStorageReservation, j *lifecycleJournal) (ctrl.Result, bool, error) {
+	if r.Evidence == nil {
+		return ctrl.Result{}, false, nil
+	}
+	inventory, loss := r.Evidence.Observe(ctx, appliedRuntime(f, j), j.Inventory)
+	j.Inventory = inventory
+	if loss != "" && j.Loss == "" {
+		return r.recordLoss(ctx, f, w, res, j, "possible loss declaration: "+loss)
+	}
+	if err := r.saveJournal(ctx, res, j); err != nil {
+		return ctrl.Result{}, true, err
+	}
+	return ctrl.Result{}, false, nil
 }
 func (r *Reconciler) saveJournal(ctx context.Context, res *fleet.CelldStorageReservation, j *lifecycleJournal) error {
 	if err := ctx.Err(); err != nil {
@@ -235,7 +257,7 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 		if initial == 0 {
 			initial = replicas(w)
 		}
-		j = &lifecycleJournal{Version: 8, RuntimeImage: runtimeImage(f), Initial: initial, Applied: replicas(w), WorkloadUID: w.GetUID(), Claims: map[string]types.UID{}}
+		j = &lifecycleJournal{Version: 9, RuntimeImage: runtimeImage(f), Initial: initial, Applied: replicas(w), WorkloadUID: w.GetUID(), Claims: map[string]types.UID{}}
 		// Creation records claim UIDs before workload creation. Verify those bindings;
 		// missing or replaced claims can never be adopted.
 		var created map[string]types.UID
@@ -291,6 +313,13 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 	if !matches(workload(expected, r.Options), w) {
 		return block("LifecycleBlocked", "Workload differs from journaled infrastructure; no template mutation or replica drift repair is allowed")
 	}
+	if f.Spec.Profile == "PersistentFleet" && r.Options.LauncherImage != "" && r.Evidence != nil {
+		// Runs before scheduling: a replacement pinned to a lost host would
+		// otherwise block the reconcile and hide the unreachable member.
+		if result, handled, err := r.persistentRecovery(ctx, f, res, j, w); handled || err != nil {
+			return result, handled, err
+		}
+	}
 	if f.Spec.Profile == "PersistentFleet" && r.Options.LauncherImage != "" {
 		if err := r.schedulePersistent(ctx, appliedRuntime(f, j), res, j); err != nil {
 			if _, loss := errors.AsType[*v050.LossError](err); loss {
@@ -304,15 +333,8 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 			return block("BucketSchedulingBlocked", err.Error())
 		}
 	}
-	if r.Evidence != nil {
-		inventory, loss := r.Evidence.Observe(ctx, appliedRuntime(f, j), j.Inventory)
-		j.Inventory = inventory
-		if loss != "" && j.Loss == "" {
-			return r.recordLoss(ctx, f, w, res, j, "possible loss declaration: "+loss)
-		}
-		if err := r.saveJournal(ctx, res, j); err != nil {
-			return ctrl.Result{}, true, err
-		}
+	if result, handled, err := r.observeEvidence(ctx, f, w, res, j); handled || err != nil {
+		return result, handled, err
 	}
 	if maintenanceFence(f) == "" && w.GetAnnotations()[maintenanceFenceKey] != "" {
 		// A crash may have left only the workload fence. Reset history durably

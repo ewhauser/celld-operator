@@ -318,6 +318,14 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, reason, me
 					f.Status.Lifecycle.Deadline = j.Operation.Deadline.UTC().Format(time.RFC3339)
 				}
 			}
+			if rec := j.Recovery; rec != nil {
+				f.Status.Lifecycle.OperationID = rec.ID
+				f.Status.Lifecycle.Phase = rec.Phase
+				f.Status.Lifecycle.TargetPod = rec.Member.Node
+				f.Status.Lifecycle.TargetUID = rec.Member.PodUID
+				f.Status.Lifecycle.TargetGeneration = rec.Member.Generation
+				f.Status.Lifecycle.StartedAt = rec.StartedAt.UTC().Format(time.RFC3339)
+			}
 			if m := j.Maintenance; m != nil {
 				if m.Kind == "Delete" {
 					f.Status.DesiredReplicas = 0

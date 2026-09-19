@@ -84,6 +84,58 @@ replacement runtime generation. Cross-node activation still requires the exact
 retained disk, a fresh authenticated launcher challenge, and one healthy EBS CSI
 attachment on an eligible node in the same AZ.
 
+## Recovering an unreachable member
+
+The same fence recovers an admitted PersistentFleet member whose host
+disappeared outside any operation: the Node was deleted or re-registered, its
+boot ID changed, or it is NotReady and the member's launcher cannot be reached.
+A launcher that still answers with the admitted invocation is never uncertain,
+whatever Kubernetes reports, because the kernel holding the volume lock is alive.
+
+The operator admits every running invocation in steady state (journal v9), so
+the exact identity to fence exists before the failure. When such a member becomes
+unreachable the fleet reports `PersistentMemberUncertain`, names the invocation,
+the instance and the required annotation, and does nothing else: the retained
+disk stays bound, the recreated ordinal stays behind its scheduling gate, and
+survivors keep serving. The message ends with a value of the form
+`recover:<pod>:<launcher generation>`; set `celld.eric.dev/fence-operation` to
+exactly that value to authorize fencing that invocation. Authorizing it for a
+reachable member does nothing.
+
+Once authorized the controller records a durable recovery record, then runs the
+fence with the same identity checks as above: exact account, instance ID, zone,
+fleet/node/boot tags, retained data volume and no `DeleteOnTermination`. The
+ordinary sequence records intent, cordons any registration of that instance,
+issues one `TerminateInstances` for the exact ID, and waits for a positive
+`terminated`. Two differences apply to recovery only. An instance that
+`DescribeInstances` already reports `terminated` with matching tags is accepted
+as the receipt without a termination call, which is the common case after an
+Auto Scaling replacement. And a missing Node registration does not block: the
+instance is identified by ID and tags alone. Any other pod scheduled under that
+node name, a running instance whose data volume is no longer attached, a loss
+declaration, a paused or deleting fleet, or another operation in flight refuses
+the fence. Before intent is recorded, removing the annotation withdraws the
+request and a launcher that answers again refuses it; after intent, the request
+completes as for a contraction.
+
+With the receipt durable, the invocation is retired in history with the
+terminated instance as its stop and restart-denial authority, bound to the
+highest recovery epoch observed for its generation. The pod that belonged to the
+terminated instance is deleted with a UID precondition and no grace period so
+the StatefulSet can recreate the ordinal; it is the one pod removal the operator
+performs without a launcher receipt, and only after positive termination. The
+recreated pod is released with a zone selector, never a host selector, and its
+launcher waits for the signed handoff grant. That grant still requires the
+predecessor's lease to have expired and its log to be sealed by the surviving
+peers, an exclusive healthy EBS CSI attachment to the destination, and the
+unchanged disk nonce; a single-member fleet therefore cannot complete recovery
+because nothing remains to seal the lost log. A stale `VolumeAttachment` for the
+terminated node blocks until the attach/detach controller removes it, which
+follows Node deletion. Completion admits the replacement generation with the
+outcome `InfrastructureFencedMemberReactivated` and clears the record; while it
+is in flight `status.lifecycle` shows the record's ID and phase (`Fencing`,
+`Reactivating`) and no other lifecycle action starts.
+
 Tests use fake EC2 responses only. Real EKS/IAM/EC2/EBS failure qualification is
-still required before production use. Unsealed all-stopped recovery and failures
-before exact admission remain blocked.
+still required before production use, including recovery of a lost node. Unsealed
+all-stopped recovery and failures of members that were never admitted remain blocked.

@@ -70,6 +70,10 @@ Reasons appear on `Blocked` and, for lifecycle operations, in `status.lifecycle`
 | `UnsupportedTransition` | The requested `runtimeImage` has no qualified adapter pair from the current pin, including any rollback. The request is retained and never edits a Pod. |
 | `SessionBindingUnqualified`, `HistoricalSessionUnresolved` | Observed S3 sessions cannot be bound to admitted generations. Unknown historical writers are refused. |
 | `LauncherIdentityBlocked`, `ReactivationBlocked` | The launcher's identity, lock or restart-denial state does not match what was journaled. |
+| `PersistentMemberUncertain` | An admitted PersistentFleet member's host is gone, rebooted, re-registered or unreachable. Nothing is repaired; the message names the annotation that authorizes exact-instance fencing. See [infrastructure fencing](../../contracts/infrastructure-fencing/). |
+| `InfrastructureFencing` | A durable fencing request is waiting for EC2 to report the exact instance `terminated`. |
+| `PersistentRecoveryBlocked` | The recovery record cannot progress: the fence was refused, the replacement has not started, or its disk, zone, host or attachment evidence does not match. |
+| `PersistentAdmissionBlocked` | A running invocation follows an admitted writer that was never resolved; investigate before any lifecycle action. |
 | `MigrationBlocked` | Deployment-to-Ordered migration preconditions failed or evidence for a captured writer is missing. |
 
 ### Investigate before doing anything
