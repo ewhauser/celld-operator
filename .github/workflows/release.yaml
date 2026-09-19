@@ -33,13 +33,19 @@ jobs:
         # inside the pinned runtime image, which supplies /bin/sh for the fixtures.
         run: |
           set -euo pipefail
+          # Docker's classic image store cannot hold two platforms of one digest
+          # reference at once ("cannot overwrite digest"), so address each platform
+          # of the pinned celld index by its own manifest digest.
+          index=ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8
           for arch in amd64 arm64; do
+            manifest="$(docker buildx imagetools inspect "$index" --raw | jq -r --arg a "$arch" '.manifests[] | select(.platform.os=="linux" and .platform.architecture==$a) | .digest')"
+            test -n "$manifest"
             for pkg in launcher controller; do
               CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go test -c -o "bin/tests/${pkg}-${arch}.test" "./internal/${pkg}"
               docker run --rm --platform "linux/${arch}" \
                 -v "$PWD/bin/tests:/t:ro" -v "$PWD:/src:ro" -w "/src/internal/${pkg}" \
                 --entrypoint "/t/${pkg}-${arch}.test" \
-                ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8 -test.count=1
+                "ghcr.io/denoland/celld@${manifest}" -test.count=1
             done
           done
   publish:
@@ -97,12 +103,15 @@ jobs:
           RELEASE_VERSION: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          docker buildx imagetools inspect "$IMAGE@$DIGEST" --format '{{range .Manifest.Manifests}}{{.Platform.OS}}/{{.Platform.Architecture}}{{"\n"}}{{end}}' | tee platforms.txt
-          grep -qx linux/amd64 platforms.txt && grep -qx linux/arm64 platforms.txt
+          docker buildx imagetools inspect "$IMAGE@$DIGEST" --raw > index.json
           for arch in amd64 arm64; do
-            version="$(docker run --rm --platform "linux/${arch}" "$IMAGE@$DIGEST" --version)"
+            # Per-platform manifest digests: the classic image store refuses a
+            # second platform under the same index digest reference.
+            manifest="$(jq -r --arg a "$arch" '.manifests[] | select(.platform.os=="linux" and .platform.architecture==$a) | .digest' index.json)"
+            test -n "$manifest"
+            version="$(docker run --rm --platform "linux/${arch}" "$IMAGE@$manifest" --version)"
             test "$version" = "$RELEASE_VERSION"
-            docker run --rm --platform "linux/${arch}" --entrypoint /celld-launcher "$IMAGE@$DIGEST" install /home/nonroot/launcher/celld-launcher
+            docker run --rm --platform "linux/${arch}" --entrypoint /celld-launcher "$IMAGE@$manifest" install /home/nonroot/launcher/celld-launcher
           done
   # The pushed digest, not a rebuild, must pass the in-cluster kind suite before
   # any chart or GitHub release points at it. A failure here leaves a tagged
