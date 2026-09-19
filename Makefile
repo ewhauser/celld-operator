@@ -18,6 +18,15 @@ build:
 test:
 	go test $(RACE) $(GO_PACKAGES)
 
+# envtest runs the reconciler against a real kube-apiserver and etcd (no kubelet).
+# The suite skips when KUBEBUILDER_ASSETS is unset, so plain `make test` stays hermetic.
+ENVTEST_K8S_VERSION ?= 1.37.0
+SETUP_ENVTEST := go run sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.1
+
+.PHONY: test-envtest
+test-envtest:
+	KUBEBUILDER_ASSETS="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test $(RACE) ./internal/controller -run 'TestEnvtest' -count=1
+
 vet:
 	go vet $(GO_PACKAGES)
 

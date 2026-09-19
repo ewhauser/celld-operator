@@ -24,6 +24,10 @@ import (
 )
 
 const launcherGate = "celld.example.com/exclusive-volume"
+
+// launcherPort is the private launcher listener; tests point it at a local fake.
+var launcherPort = "8083"
+
 const launcherKeyDigest = "celld.example.com/launcher-key-digest"
 
 func launcherSecretName(f *fleet.CelldFleet) string { return f.Name + "-launcher" }
@@ -114,7 +118,7 @@ func (r *Reconciler) launcherRequest(ctx context.Context, f *fleet.CelldFleet, p
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+net.JoinHostPort(pod.Status.PodIP, "8083")+"/v1", bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+net.JoinHostPort(pod.Status.PodIP, launcherPort)+"/v1", bytes.NewReader(body))
 	if err != nil {
 		return zero, err
 	}

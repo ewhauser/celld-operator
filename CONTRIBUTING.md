@@ -11,6 +11,7 @@ local revision `bb37f8eb656f1622f170017464e990d88b855a5a` as the baseline.
 make check       # Build, race-enabled tests, and lint
 make build       # Build packages and bin/celld-operator
 make test        # go test -race ./...
+make test-envtest # Reconciler and journal tests against a real kube-apiserver/etcd (envtest)
 make vet         # Standalone go vet
 make fmt         # Apply goimports through the pinned lint tool
 make lint        # Full lint suite
@@ -26,6 +27,13 @@ error handling, HTTP body closure, modernization, static analysis, and its
 gocritic settings. Use standard-library `flag` for command options and return
 errors to `main`; use `log/slog` when runtime logging is introduced. Keep
 implementation packages under `internal/` as they are added.
+
+`make test-envtest` downloads pinned kube-apiserver and etcd binaries through
+`setup-envtest` on first use and runs the `TestEnvtest*` cases in
+`internal/controller`. Those tests cover what the fake client cannot: CRD CEL
+admission and defaulting, real resourceVersion conflicts on the journal and
+workload CAS, and optimistic-lock merge patches. They skip silently when
+`KUBEBUILDER_ASSETS` is unset, so `make test` needs no network.
 
 The optional pre-commit hook runs `make lint-new`:
 
