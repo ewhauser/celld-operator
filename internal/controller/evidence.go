@@ -8,6 +8,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/ewhauser/celld-operator/internal/runtime/catalog"
+
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	"github.com/ewhauser/celld-operator/internal/capacity"
 	"github.com/ewhauser/celld-operator/internal/recovery"
@@ -78,7 +80,7 @@ func (p *ProductionEvidence) Observe(ctx context.Context, f *fleet.CelldFleet, p
 	if err != nil {
 		return out, ""
 	}
-	adapter, err := v050.New(Image)
+	adapter, err := catalog.New(runtimeImage(f))
 	if err != nil {
 		return out, ""
 	}

@@ -6,6 +6,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/ewhauser/celld-operator/internal/runtime/catalog"
+
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	v050 "github.com/ewhauser/celld-operator/internal/runtime/v050"
 	corev1 "k8s.io/api/core/v1"
@@ -19,6 +21,13 @@ func (r *Reconciler) executePersistentMaintenance(ctx context.Context, f *fleet.
 	m := j.Maintenance
 	save := func() (ctrl.Result, bool, error) {
 		return r.saveMaintenance(ctx, f, res, j)
+	}
+	if !m.Coordinated && m.Kind == "Restart" && m.Phase == "Capture" && j.Applied < 3 && coordinatedDowntime(f) {
+		m.Coordinated, m.TargetReplicas = true, j.Applied
+		return save()
+	}
+	if m.Coordinated {
+		return r.executeCoordinatedPersistent(ctx, f, res, j, w, block)
 	}
 	if m.Kind == "Delete" {
 		return r.executePersistentShutdown(ctx, f, res, j, w, block)
@@ -162,7 +171,7 @@ func (r *Reconciler) executePersistentMaintenance(ctx context.Context, f *fleet.
 		if err != nil {
 			return block(err)
 		}
-		adapter, err := v050.New(Image)
+		adapter, err := catalog.New(runtimeImage(evidenceRuntime(f, j)))
 		if err != nil {
 			return block(err)
 		}
@@ -229,7 +238,7 @@ func (r *Reconciler) executePersistentShutdown(ctx context.Context, f *fleet.Cel
 	save := func() (ctrl.Result, bool, error) {
 		return r.saveMaintenance(ctx, f, res, j)
 	}
-	if f.DeletionTimestamp.IsZero() {
+	if f.DeletionTimestamp.IsZero() && !m.Coordinated {
 		return block(errors.New("shutdown requires deleting fleet"))
 	}
 	switch m.Phase {
@@ -253,6 +262,11 @@ func (r *Reconciler) executePersistentShutdown(ctx context.Context, f *fleet.Cel
 			}
 		}
 		m.Persistent = members
+		if m.Coordinated {
+			if err := r.authorizeMaintenanceAction(ctx, w, m); err != nil {
+				return block(err)
+			}
+		}
 		m.Phase = "Stopping"
 		return save()
 	case "Stopping":
@@ -288,7 +302,11 @@ func (r *Reconciler) executePersistentShutdown(ctx context.Context, f *fleet.Cel
 		if _, err := r.shutdownInventory(ctx, f, j, m.Persistent, true); err != nil {
 			return block(err)
 		}
-		m.Phase = "Authorized"
+		if m.Coordinated {
+			m.Phase = "Quiesced"
+		} else {
+			m.Phase = "Authorized"
+		}
 		return save()
 	case "Authorized":
 		if replicas(w) != 0 {
@@ -357,12 +375,15 @@ func (r *Reconciler) shutdownInventory(ctx context.Context, f *fleet.CelldFleet,
 	if err != nil {
 		return v050.Inventory{}, err
 	}
-	adapter, err := v050.New(Image)
+	adapter, err := catalog.New(runtimeImage(evidenceRuntime(f, j)))
 	if err != nil {
 		return v050.Inventory{}, err
 	}
 	inventory, err := adapter.Inventory(ctx, reader, r.capacityNow)
 	if err != nil {
+		return inventory, err
+	}
+	if err := observeShutdownEpochs(j, members, inventory); err != nil {
 		return inventory, err
 	}
 	for _, session := range j.Inventory.Sessions {
@@ -434,8 +455,50 @@ func (r *Reconciler) verifyShutdownStops(ctx context.Context, f *fleet.CelldFlee
 		if err != nil {
 			return err
 		}
-		if !old.RestartDenied || !state.RestartDenied || state.Phase != "Stopped" || state.Invocation != old.Invocation || state.Generation != old.Generation || state.Operation != m.ID {
+		if !old.RestartDenied || !state.RestartDenied || state.Phase != "Stopped" || state.Invocation != old.Invocation || state.Generation != old.Generation || state.Operation != m.ID || state.DiskID != old.DiskID {
 			return errors.New("shutdown stop authority no longer matches launcher")
+		}
+	}
+	return nil
+}
+
+// A shutdown scan may observe epochs newer than the initial capture, including
+// while a different member still prevents progress. Retain those observations
+// before returning a blocker so retry/replay cannot accept an older sealed log.
+func observeShutdownEpochs(j *lifecycleJournal, members []persistentMember, inventory v050.Inventory) error {
+	groups := [][]persistentMember{members, j.PersistentHistory}
+	if j.Maintenance != nil {
+		groups = append(groups, j.Maintenance.Persistent)
+	}
+	if j.Operation != nil {
+		groups = append(groups, j.Operation.PersistentMembers)
+	}
+	for _, node := range inventory.Nodes {
+		highest := uint64(0)
+		for _, session := range j.Inventory.Sessions {
+			if session.Node == node.Name && session.Generation == node.Generation {
+				highest = max(highest, session.Epoch)
+			}
+		}
+		for _, group := range groups {
+			for _, member := range group {
+				if member.Node == node.Name && member.Generation == node.Generation {
+					highest = max(highest, member.Epoch)
+				}
+			}
+		}
+		if node.Epoch < highest {
+			return errors.New("shutdown log epoch rewound below previously observed generation")
+		}
+		if node.Epoch > highest {
+			j.Inventory.Sessions = append(j.Inventory.Sessions, RuntimeSession{Node: node.Name, Generation: node.Generation, Epoch: node.Epoch, FirstSeen: inventory.ObservedAt, LastSeen: inventory.ObservedAt, Association: "ShutdownMetadataObservation"})
+		}
+		for _, group := range groups {
+			for i := range group {
+				if group[i].Node == node.Name && group[i].Generation == node.Generation {
+					group[i].Epoch = node.Epoch
+				}
+			}
 		}
 	}
 	return nil

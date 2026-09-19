@@ -19,6 +19,8 @@ import boto3
 from botocore.config import Config
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+APP = ROOT / 'hack/qualification/app'
+COMMIT = '12d5b6333fe52717325addcfe1e99e9fd4f77bcd'
 IMAGE = 'ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8'
 MINIO = 'quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e'
 
@@ -86,7 +88,7 @@ class Run:
         else:
             raise RuntimeError('local store did not start')
         image = json.loads(docker('image', 'inspect', IMAGE))
-        if image[0]['Config']['Labels'].get('org.opencontainers.image.revision') != '12d5b6333fe52717325addcfe1e99e9fd4f77bcd':
+        if image[0]['Config']['Labels'].get('org.opencontainers.image.revision') != COMMIT:
             raise RuntimeError('image revision mismatch')
         self.save('image', image)
         self.save('version', {'version': docker('run', '--rm', IMAGE, '--version')})
@@ -107,9 +109,11 @@ class Run:
         esbuild.chmod(0o755)
         deploy = self.name + '-deploy'
         self.containers.append(deploy)
-        output = docker('run', '--name', deploy, '--network', self.name, *self.env, '-v',
-               str(ROOT / 'hack/qualification/app') + ':/app:ro', '-v', str(esbuild) + ':/esbuild:ro',
+        docker('create', '--name', deploy, '--network', self.name, *self.env,
                '-e', 'CELLD_ESBUILD=/esbuild', IMAGE, 'deploy', '/app')
+        docker('cp', str(APP) + '/.', deploy + ':/app')
+        docker('cp', str(esbuild), deploy + ':/esbuild')
+        output = docker('start', '--attach', deploy)
         (self.out / 'deploy.log').write_text(output)
         docker('rm', deploy)
         self.containers.remove(deploy)

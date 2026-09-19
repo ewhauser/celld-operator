@@ -13,7 +13,7 @@ import (
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	"github.com/ewhauser/celld-operator/internal/capacity"
-	v050 "github.com/ewhauser/celld-operator/internal/runtime/v050"
+	"github.com/ewhauser/celld-operator/internal/runtime/catalog"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -46,7 +46,7 @@ func NewCollector(c client.Client, config *rest.Config) (*Collector, error) {
 	}}, nil
 }
 func podIdentity(p *corev1.Pod) (string, time.Time) {
-	if len(p.Spec.Containers) != 1 || p.Spec.Containers[0].Name != "celld" || p.Spec.Containers[0].Image != Image || !p.DeletionTimestamp.IsZero() {
+	if len(p.Spec.Containers) != 1 || p.Spec.Containers[0].Name != "celld" || !knownRuntime(p.Spec.Containers[0].Image) || !p.DeletionTimestamp.IsZero() {
 		return "", time.Time{}
 	}
 	for _, s := range p.Status.ContainerStatuses {
@@ -110,7 +110,7 @@ func (c *Collector) sample(ctx context.Context, f *fleet.CelldFleet, p *corev1.P
 			data, readErr := io.ReadAll(io.LimitReader(response.Body, 1024*1024+1))
 			closeErr := response.Body.Close()
 			received := c.now()
-			adapter, adapterErr := v050.New(Image)
+			adapter, adapterErr := catalog.New(p.Spec.Containers[0].Image)
 			if readErr == nil && closeErr == nil && adapterErr == nil && len(data) <= 1024*1024 {
 				state, parseErr := adapter.ParseState(response.StatusCode, data, received, received, capacity.Seconds(f.Spec.Capacity.MaxAgeSeconds))
 				if parseErr == nil && !state.SampledAt.Before(started) && state.RSSBytes <= 1<<50 && state.InUseBytes <= 1<<50 {

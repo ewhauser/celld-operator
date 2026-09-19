@@ -27,29 +27,44 @@ experimental until their documented external qualification gates pass.
   epoch-zero/no-log member is allowed only without contrary historical evidence.
 - [x] Never-provisioned deletion creates a permanent reservation tombstone without
   inventing process evidence. A prior creation attempt cannot use this shortcut.
-- [x] Journal v7, legacy reads, downgrade refusal, immutable integrity-checked
+- [x] Journal v8, legacy reads, downgrade refusal, immutable integrity-checked
   archive pages and 16 MiB hydrated authority budget. No history is pruned.
 - [x] Desired/applied/observed/ready/joining/terminating status, age/stall/loss
   metrics, blocker transition Events and per-fleet reconcile jitter.
 - [x] Two-replica operator manifests and Helm chart, optional monitoring resources,
   canonical CRD/RBAC parity tests and immutable image/chart release packaging.
 
+- [x] Opt-in EC2 termination for an exact, already-admitted PersistentFleet
+  contraction donor that becomes unreachable. Durable intent, dedicated-host and
+  retained-disk checks, and positive termination receipt; sealed logs and follower
+  retirement remain required. This is not general node repair.
+- [x] One-way v0.5.0 Bucket Deployment-to-Ordered migration with explicit downtime,
+  retained reservation/history, positive expiry and durable replacement identity.
+
+- [x] Manual PersistentFleet 2-to-1 contraction and small-fleet restart via explicit
+  coordinated downtime, all-child stop receipts, all-own-log seals, a zero-Pod
+  boundary and retained-disk successor admission. Live operation without downtime
+  still requires two survivors; automatic 2-to-1 remains unavailable.
+- [x] Exact released v0.4.1/v0.5.0 adapters and a directional PersistentFleet
+  upgrade with explicit whole-fleet downtime, sealed logs, retained disks and
+  a recoverable image-update CAS. See [runtime versions](runtime-versions.md).
+
 ## Remaining implementation dependencies
 
-- [ ] Cross-version celld upgrade and rollback: a second qualified runtime adapter
-  and directional compatibility contract. Requests remain `UnsupportedTransition`;
-  same-version restart is not advertised as upgrade support.
-- [ ] Uncertain-node death/partition recovery: trusted infrastructure fencing or a
-  runtime protocol that proves old filesystem access cannot resume. Missing Pods,
-  expired S3 leases and force detach do not supply that authority.
-- [ ] PersistentFleet 2-to-1 live contraction/restart: qualified follower retirement
-  with fewer than two survivors. The existing positive donor seal is insufficient.
+The released celld runtime must remain unmodified. Runtime-dependent gaps below
+remain explicit unsupported paths; proposed runtime changes are out of scope.
+
+- [ ] Runtime rollback and additional version pairs: no reverse storage-format
+  contract exists for v0.5.0 to v0.4.1. Unsupported directions remain blocked.
+- [ ] General uncertain-node recovery before authenticated identity admission, or
+  after required Pod identity disappears. The implemented EC2 contraction fence
+  covers only its explicitly captured donor; it does not infer unknown identities.
 - [ ] Recovery from an all-stopped PersistentFleet shutdown whose best-effort
   seals did not complete. Disks and authority stay retained; an automatic
   recovery/retry protocol is not implemented.
-- [ ] Legacy Deployment-to-Ordered and unwrapped/RWO-to-launcher/RWOP migrations:
-  explicit identity and storage migration protocols. Existing workloads are not
-  silently adopted or rewritten.
+- [ ] Legacy PersistentFleet unwrapped/RWO-to-launcher/RWOP conversion: explicit
+  source-host fencing, offline disk identity initialization and retained-PV claim
+  replacement protocol. Bucket layout migration is implemented separately.
 - [ ] Bucket GC-before-positive-proof: upstream node metadata GC can erase a record
   before expiry is positively observed. Missing metadata cannot resolve an unknown
   writer; delayed unconditional GC deletion also prevents broader safe adoption.
@@ -61,7 +76,8 @@ experimental until their documented external qualification gates pass.
 - [ ] EKS, real S3/EBS CSI handoff, node/host failure and partitions.
 - [ ] Production automatic contraction, real capacity-pool response and follower
   AZ diversity under failures. Local execution does not remove these gates.
-- [ ] Runtime transition qualification after additional adapters exist.
+- [ ] Kubernetes runtime-transition orchestration qualification; local process
+  compatibility experiments do not validate the full operator on EKS.
 - [ ] Owned API domain selection before a stable release (currently provisional
   `celld.example.com`).
 - [ ] Published image/chart and registry verification: the workflow is implemented,
@@ -69,4 +85,6 @@ experimental until their documented external qualification gates pass.
 
 See [maintenance](maintenance-execution.md), [storage handoff](persistent-fleet-lifecycle.md),
 [Ordered Bucket](ordered-bucket.md), [journal archives](journal-archives.md), and
-[operations](operations.md) for exact contracts and operational limits.
+[operations](operations.md), [EC2 fencing](infrastructure-fencing.md),
+[Bucket migration](bucket-migration.md), and [runtime dependencies](runtime-dependencies.md)
+for exact contracts and operational limits.

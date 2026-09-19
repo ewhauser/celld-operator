@@ -10,6 +10,7 @@ import (
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	"github.com/ewhauser/celld-operator/internal/capacity"
+	"github.com/ewhauser/celld-operator/internal/runtime/catalog"
 	v050 "github.com/ewhauser/celld-operator/internal/runtime/v050"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -29,22 +30,24 @@ const operationKey = "celld.example.com/lifecycle-operation"
 // The reservation survives status loss and fleet deletion. Never prune session
 // history or PVC identities automatically. Large journals use immutable archives.
 type lifecycleJournal struct {
-	Maintenance       *maintenanceOperation
-	CompletedRestarts []string
-	Inventory         recoveryInventory
-	Request           *disruptionRequest
-	RuntimeImage      string
-	Version           int
-	Initial, Applied  int32
-	WorkloadUID       types.UID
-	Operation         *lifecycleOperation
-	Sessions          []v050.Session
-	Claims            map[string]types.UID
-	Loss              string
-	History           []lifecycleCompletion
-	Capacity          *capacity.State
-	BucketHistory     []bucketSession
-	PersistentHistory []persistentMember
+	InfrastructureFences []infrastructureFence
+	BucketMigration      *bucketMigration
+	Maintenance          *maintenanceOperation
+	CompletedRestarts    []string
+	Inventory            recoveryInventory
+	Request              *disruptionRequest
+	RuntimeImage         string
+	Version              int
+	Initial, Applied     int32
+	WorkloadUID          types.UID
+	Operation            *lifecycleOperation
+	Sessions             []v050.Session
+	Claims               map[string]types.UID
+	Loss                 string
+	History              []lifecycleCompletion
+	Capacity             *capacity.State
+	BucketHistory        []bucketSession
+	PersistentHistory    []persistentMember
 }
 type lifecycleCompletion struct {
 	ID, TargetPod, TargetUID, TargetGeneration string
@@ -118,14 +121,14 @@ func readJournal(res *fleet.CelldStorageReservation) (*lifecycleJournal, error) 
 	if j.Version == 1 && j.RuntimeImage == "" {
 		j.RuntimeImage = Image
 	} // Legacy journals used only this pin.
-	if j.RuntimeImage != Image {
+	if !knownRuntime(j.RuntimeImage) {
 		return nil, errors.New("unsupported journal runtime image")
 	}
-	if (j.Version != 1 && j.Version != 2 && j.Version != 3 && j.Version != 4 && j.Version != 5 && j.Version != 6 && j.Version != 7) || j.Initial < 1 || j.Initial > 100 || j.Applied < 1 || j.Applied > 100 {
+	if (j.Version != 1 && j.Version != 2 && j.Version != 3 && j.Version != 4 && j.Version != 5 && j.Version != 6 && j.Version != 7 && j.Version != 8) || j.Initial < 1 || j.Initial > 100 || j.Applied < 1 || j.Applied > 100 {
 		return nil, errors.New("invalid lifecycle journal")
 	}
-	// Older binaries reject version 7 instead of ignoring handoff, maintenance, and session succession authority.
-	j.Version = 7
+	// Older binaries reject version 8 instead of ignoring handoff, maintenance, and session succession authority.
+	j.Version = 8
 	if req := j.Request; req != nil {
 		if req.ID == "" || req.SourceImage != j.RuntimeImage || req.WorkloadUID != j.WorkloadUID || (req.Kind != "Upgrade" && req.Kind != "Restart" && req.Kind != "Delete") {
 			return nil, errors.New("invalid disruption request")
@@ -141,6 +144,9 @@ func readJournal(res *fleet.CelldStorageReservation) (*lifecycleJournal, error) 
 	}
 	if j.Claims == nil {
 		j.Claims = map[string]types.UID{}
+	}
+	if err := validateBucketMigration(&j); err != nil {
+		return nil, err
 	}
 	if err := validateMaintenanceJournal(&j); err != nil {
 		return nil, err
@@ -193,6 +199,9 @@ func (r *Reconciler) reservationMatches(ctx context.Context, f *fleet.CelldFleet
 			baseline.Spec.Replicas = replicas(w)
 		}
 	}
+	if j != nil && j.BucketMigration != nil {
+		baseline.Spec.BucketWorkload = "Deployment"
+	}
 	want.SpecHash = specHash(baseline)
 	return res.Spec == want
 }
@@ -226,7 +235,7 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 		if initial == 0 {
 			initial = replicas(w)
 		}
-		j = &lifecycleJournal{Version: 7, RuntimeImage: Image, Initial: initial, Applied: replicas(w), WorkloadUID: w.GetUID(), Claims: map[string]types.UID{}}
+		j = &lifecycleJournal{Version: 8, RuntimeImage: runtimeImage(f), Initial: initial, Applied: replicas(w), WorkloadUID: w.GetUID(), Claims: map[string]types.UID{}}
 		// Creation records claim UIDs before workload creation. Verify those bindings;
 		// missing or replaced claims can never be adopted.
 		var created map[string]types.UID
@@ -278,11 +287,12 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 	}
 	expected := f.DeepCopy()
 	expected.Spec.Replicas = expectedCount
+	expected.Spec.RuntimeImage = j.RuntimeImage
 	if !matches(workload(expected, r.Options), w) {
 		return block("LifecycleBlocked", "Workload differs from journaled infrastructure; no template mutation or replica drift repair is allowed")
 	}
 	if f.Spec.Profile == "PersistentFleet" && r.Options.LauncherImage != "" {
-		if err := r.schedulePersistent(ctx, f, j); err != nil {
+		if err := r.schedulePersistent(ctx, appliedRuntime(f, j), j); err != nil {
 			if _, loss := errors.AsType[*v050.LossError](err); loss {
 				return r.recordLoss(ctx, f, w, res, j, err.Error())
 			}
@@ -295,7 +305,7 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 		}
 	}
 	if r.Evidence != nil {
-		inventory, loss := r.Evidence.Observe(ctx, f, j.Inventory)
+		inventory, loss := r.Evidence.Observe(ctx, appliedRuntime(f, j), j.Inventory)
 		j.Inventory = inventory
 		if loss != "" && j.Loss == "" {
 			return r.recordLoss(ctx, f, w, res, j, "possible loss declaration: "+loss)
@@ -512,6 +522,9 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 				return ctrl.Result{}, true, err
 			}
 		}
+		if op.From == 2 && op.To == 1 && !op.Automatic && (op.Phase == "Blocked" || op.Phase == "Intent") && coordinatedDowntime(f) {
+			return r.beginCoordinatedContraction(ctx, f, res, j, w)
+		}
 		return r.contractPersistent(ctx, f, res, j, w)
 	}
 	if op.Phase == "Blocked" {
@@ -572,7 +585,7 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 		if err := r.localLifecycle.Validate(ctx, f, op); err != nil {
 			return block("RecoveryBlocked", err.Error())
 		}
-		adapter, err := v050.New(j.RuntimeImage)
+		adapter, err := catalog.New(j.RuntimeImage)
 		if err != nil {
 			return ctrl.Result{}, true, err
 		}
@@ -634,7 +647,7 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 	if !found {
 		return block("RecoveryBlocked", "Selected runtime session is absent from durable inventory")
 	}
-	adapter, err := v050.New(j.RuntimeImage)
+	adapter, err := catalog.New(j.RuntimeImage)
 	if err != nil {
 		return ctrl.Result{}, true, err
 	}

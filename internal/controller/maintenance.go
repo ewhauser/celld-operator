@@ -60,11 +60,11 @@ func (r *Reconciler) setMaintenanceFence(ctx context.Context, f *fleet.CelldFlee
 // persistDisruptionRequest changes only the retained request. Callers report the
 // final reconcile outcome once, after any in-flight recovery has been assessed.
 func (r *Reconciler) persistDisruptionRequest(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, j *lifecycleJournal, w client.Object) (string, bool, error) {
-	kind, target, token := "", Image, ""
+	kind, target, token := "", runtimeImage(f), ""
 	if f.Spec.RuntimeImage != "" {
 		target = f.Spec.RuntimeImage
 	}
-	if target != Image {
+	if target != j.RuntimeImage {
 		kind = "Upgrade"
 	}
 	if f.Spec.Maintenance != nil {
@@ -84,7 +84,7 @@ func (r *Reconciler) persistDisruptionRequest(ctx context.Context, f *fleet.Cell
 		return kind, false, nil
 	}
 	if j.Request == nil || j.Request.Kind != kind || j.Request.TargetImage != target || j.Request.RestartToken != token {
-		j.Request = &disruptionRequest{ID: string(uuid.NewUUID()), Kind: kind, SourceImage: Image, TargetImage: target, RestartToken: token, WorkloadUID: w.GetUID(), Generation: f.Generation}
+		j.Request = &disruptionRequest{ID: string(uuid.NewUUID()), Kind: kind, SourceImage: j.RuntimeImage, TargetImage: target, RestartToken: token, WorkloadUID: w.GetUID(), Generation: f.Generation}
 		return kind, true, r.saveJournal(ctx, res, j)
 	}
 	return kind, false, nil
@@ -102,6 +102,10 @@ func (r *Reconciler) disruption(ctx context.Context, f *fleet.CelldFleet, res *f
 			return ctrl.Result{RequeueAfter: time.Second}, true, nil
 		}
 		return ctrl.Result{}, false, nil
+	}
+
+	if kind == "Upgrade" && canStopUpgrade(f, j, r.Options) && r.Evidence != nil {
+		return r.beginStoppedUpgrade(ctx, f, res, j, w)
 	}
 
 	if (f.Spec.Profile == "Bucket" || (f.Spec.Profile == "PersistentFleet" && r.Options.LauncherImage != "")) && (kind == "Restart" || kind == "Delete") && r.Evidence != nil {
@@ -158,6 +162,9 @@ func (r *Reconciler) maintenanceFleet(ctx context.Context, f *fleet.CelldFleet) 
 		}
 		return r.report(ctx, f, reason, "No reservation found; provisioning suspended", 0, false)
 	}
+	if result, handled, err := r.migrateBucket(ctx, f, res); handled || err != nil {
+		return result, err
+	}
 	want := fleet.ReservationSpec{InitialReplicas: f.Spec.Replicas, Bucket: f.Spec.Storage.Bucket, FleetNamespace: f.Namespace, FleetName: f.Name, FleetUID: string(f.UID), SpecHash: specHash(f)}
 	if len(res.OwnerReferences) != 0 || !res.DeletionTimestamp.IsZero() || !r.reservationMatches(ctx, f, res, want) {
 		return r.report(ctx, f, "StorageScopeConflict", "Cannot bind maintenance to retained storage authority", 0, false)
@@ -181,7 +188,7 @@ func (r *Reconciler) maintenanceFleet(ctx context.Context, f *fleet.CelldFleet) 
 					res.Annotations = map[string]string{}
 				}
 				res.Annotations[attemptAnnotation] = "deletion-before-workload"
-				j = &lifecycleJournal{Version: 7, RuntimeImage: Image, Initial: res.Spec.InitialReplicas, Applied: res.Spec.InitialReplicas, Maintenance: &maintenanceOperation{ID: string(uuid.NewUUID()), Kind: "Delete", Phase: "Cleanup"}}
+				j = &lifecycleJournal{Version: 8, RuntimeImage: Image, Initial: res.Spec.InitialReplicas, Applied: res.Spec.InitialReplicas, Maintenance: &maintenanceOperation{ID: string(uuid.NewUUID()), Kind: "Delete", Phase: "Cleanup"}}
 				if err := r.saveJournal(ctx, res, j); err != nil {
 					return ctrl.Result{}, err
 				}

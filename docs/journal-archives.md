@@ -1,5 +1,9 @@
 # Retained lifecycle journal archives
 
+Journal v8 adds infrastructure fence receipts, coordinated maintenance and
+Bucket migration authority. Readers accept v1–v7 and upgrade on the next durable
+write; older binaries reject v8 rather than ignoring its new authority.
+
 The reservation continues to be the only mutable pointer to lifecycle authority.
 Once its encoded journal exceeds 180 KiB, the controller stores large JSON fields
 in immutable ConfigMap pages in the fleet namespace. The reservation stores a

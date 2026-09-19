@@ -81,3 +81,37 @@ an explicit migration protocol and qualified exclusive handoff; this change does
 not claim to implement those migrations. AWS fault qualification, the final
 PersistentFleet protocol above, and directional cross-version adapters remain
 separate requirements.
+
+## Coordinated downtime for small PersistentFleet operations
+
+Set `spec.maintenance.allowCoordinatedDowntime: true` to authorize an intentional
+whole-fleet outage for a manual 2-to-1 contraction, or a same-version restart of a
+one- or two-member fleet. The default remains conservative; automatic capacity
+never selects this protocol. A target of one requires `placement.azCount: 1`.
+The existing live contraction/restart path still requires two survivors.
+
+The durable sequence captures all exact invocations and retained disk identities,
+stops every child with its fsynced per-Pod restart-denial receipt, and verifies
+all positive own-log epochs sealed and all leases expired. Only then does the
+operator persist retirement authority, scale to zero, observe empty membership,
+and restore the desired count. Each surviving ordinal gets a new Pod UID and
+runtime generation on its original PVC/PV. Same-host continuity or the existing
+exclusive EBS handoff proof remains mandatory. Fresh live metadata, readiness,
+unchanged invocation checks, a full loss scan and ten seconds of settling precede
+completion. Every PVC is retained, including the removed ordinal's disk.
+
+Pause or a changed request after stopping has begun does not abandon recovery;
+the already authorized target is restored before another action can be admitted.
+Removing opt-in before capture cancels admission. An incomplete seal **never**
+permits scale-to-zero or replacement startup, even with downtime enabled.
+
+There is still no safe automatic retry for an already all-stopped **unsealed**
+fleet using unchanged v0.5.0. The pinned runtime starts a recovery-only follower
+listener concurrently with immediate predecessor recovery (`main.rs:3316-3360,
+4265-4302`), without a fleet-wide startup barrier. Its recovery classifies an
+unreachable follower whose lease expired beyond three TTLs as conclusive and may
+persist bounded loss (`node_log.rs:4580-4725`). Parallel Pod creation does not
+prove every retained follower is serving before the first reclaim. Closing that
+gap requires a runtime recovery-only startup mode with an explicit release
+barrier, or a separately qualified retained-follower service. Retained PVCs and
+exit code zero cannot replace this contract.

@@ -6,6 +6,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/ewhauser/celld-operator/internal/runtime/catalog"
+
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	v050 "github.com/ewhauser/celld-operator/internal/runtime/v050"
 	appsv1 "k8s.io/api/apps/v1"
@@ -178,7 +180,7 @@ func (p *ProductionEvidence) inspectBucket(ctx context.Context, f *fleet.CelldFl
 	if err != nil {
 		return err
 	}
-	adapter, err := v050.New(Image)
+	adapter, err := catalog.New(runtimeImage(evidenceRuntime(f, j)))
 	if err != nil {
 		return err
 	}

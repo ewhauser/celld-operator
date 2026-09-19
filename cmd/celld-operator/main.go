@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	"github.com/ewhauser/celld-operator/internal/controller"
+	"github.com/ewhauser/celld-operator/internal/fencing"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -36,6 +38,8 @@ func run() error {
 	localTest := fs.Bool("local-test", false, "Use disposable local MinIO test configuration; never enable on EKS")
 	localEvidence := fs.Bool("local-evidence", false, "Enable fixed disposable MinIO evidence transport; requires --local-test")
 	launcherImage := fs.String("launcher-image", "", "Digest-pinned operator image containing /celld-launcher; enables new RWOP PersistentFleet workloads")
+	fencingAccount := fs.String("ec2-fencing-account", "", "Opt-in AWS account for per-operation dedicated-node EC2 termination")
+	fencingRegion := fs.String("ec2-fencing-region", "", "Region of the exact instances eligible for opt-in fencing")
 	metrics := fs.String("metrics-bind-address", "0", "Optional metrics listener (0 disables)")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -52,6 +56,9 @@ func run() error {
 	}
 	if *localEvidence && !*localTest {
 		return errors.New("--local-evidence requires --local-test")
+	}
+	if (*fencingAccount == "") != (*fencingRegion == "") || (*localTest && *fencingAccount != "") {
+		return errors.New("EC2 fencing requires account and region and is prohibited in local test mode")
 	}
 	ctrl.SetLogger(logr.FromSlogHandler(slog.NewJSONHandler(os.Stderr, nil)))
 	scheme := runtime.NewScheme()
@@ -77,7 +84,13 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	reconciler := &controller.Reconciler{Collector: collector, Client: direct, Options: controller.Options{OperatorNamespace: *namespace, LocalTest: *localTest, LauncherImage: *launcherImage}, NetworkPolicyEnforced: *enforced}
+	reconciler := &controller.Reconciler{Collector: collector, Client: direct, Options: controller.Options{OperatorNamespace: *namespace, LocalTest: *localTest, LauncherImage: *launcherImage, FencingAccount: *fencingAccount, FencingRegion: *fencingRegion}, NetworkPolicyEnforced: *enforced}
+	if *fencingAccount != "" {
+		reconciler.Infrastructure, err = fencing.New(context.Background(), *fencingRegion)
+		if err != nil {
+			return err
+		}
+	}
 	// Local disposable mode never falls through to AWS credentials or endpoints.
 	if !*localTest {
 		reconciler.Evidence = controller.NewProductionEvidence(direct)

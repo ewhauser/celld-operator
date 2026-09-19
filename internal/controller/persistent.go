@@ -7,6 +7,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/ewhauser/celld-operator/internal/runtime/catalog"
+
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	"github.com/ewhauser/celld-operator/internal/capacity"
 	v050 "github.com/ewhauser/celld-operator/internal/runtime/v050"
@@ -19,6 +21,7 @@ import (
 )
 
 type persistentMember struct {
+	ProviderID                                                                                                                        string
 	Node, PodUID, Container, Host, HostUID, Hostname, BootID, Zone, Invocation, Generation, ClaimUID, VolumeUID, VolumeHandle, DiskID string
 	Epoch                                                                                                                             uint64
 	Ensemble                                                                                                                          []string
@@ -53,7 +56,7 @@ func validatePersistentPod(f *fleet.CelldFleet, pod *corev1.Pod, opts Options) e
 	normalizePod(&expected)
 	normalizePod(&actual)
 	got, want := actual.Containers[0], expected.Containers[0]
-	if !equality.Semantic.DeepEqual(got.SecurityContext, want.SecurityContext) || !equality.Semantic.DeepEqual(actual.SecurityContext, expected.SecurityContext) || !equality.Semantic.DeepEqual(actual.AutomountServiceAccountToken, expected.AutomountServiceAccountToken) || got.Image != Image || !slices.Equal(got.Command, want.Command) || len(got.Args) != 0 || len(got.EnvFrom) != 0 || got.WorkingDir != "" || actual.ServiceAccountName != expected.ServiceAccountName {
+	if !equality.Semantic.DeepEqual(got.SecurityContext, want.SecurityContext) || !equality.Semantic.DeepEqual(actual.SecurityContext, expected.SecurityContext) || !equality.Semantic.DeepEqual(actual.AutomountServiceAccountToken, expected.AutomountServiceAccountToken) || got.Image != runtimeImage(f) || !slices.Equal(got.Command, want.Command) || len(got.Args) != 0 || len(got.EnvFrom) != 0 || got.WorkingDir != "" || actual.ServiceAccountName != expected.ServiceAccountName {
 		return errors.New("persistent runtime invocation differs")
 	}
 	init := actual.InitContainers[0]
@@ -106,6 +109,7 @@ func validatePersistentPod(f *fleet.CelldFleet, pod *corev1.Pod, opts Options) e
 	return nil
 }
 func (r *Reconciler) persistentMembers(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal, count int32, stopping bool) ([]persistentMember, error) {
+	f = evidenceRuntime(f, j)
 	pods, err := r.Evidence.pods(ctx, f)
 	if err != nil {
 		return nil, err
@@ -119,6 +123,27 @@ func (r *Reconciler) persistentMembers(ctx context.Context, f *fleet.CelldFleet,
 		owner := metav1.GetControllerOf(pod)
 		if owner == nil || owner.Kind != "StatefulSet" || owner.UID != j.WorkloadUID {
 			return nil, errors.New("persistent workload ownership changed")
+		}
+		if stopping && j.Operation != nil && pod.Name == j.Operation.TargetPod {
+			ix := slices.IndexFunc(j.Operation.PersistentMembers, func(m persistentMember) bool { return m.Node == pod.Name && m.PodUID == string(pod.UID) })
+			if ix >= 0 && certifiedInfrastructureFence(j, j.Operation.PersistentMembers[ix]) {
+				member := j.Operation.PersistentMembers[ix]
+				claim := &corev1.PersistentVolumeClaim{}
+				if err := r.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: "data-" + member.Node}, claim); err != nil {
+					return nil, err
+				}
+				uid, handle, err := r.persistentVolumeIdentity(ctx, claim)
+				if err != nil {
+					return nil, err
+				}
+				if string(claim.UID) != member.ClaimUID || uid != member.VolumeUID || handle != member.VolumeHandle {
+					return nil, errors.New("fenced writer retained disk changed")
+				}
+				member.Stopped = true
+				member.RestartDenied = true // irreversible instance termination, not a launcher receipt
+				members = append(members, member)
+				continue
+			}
 		}
 		if err := validatePersistentPod(f, pod, r.Options); err != nil {
 			return nil, err
@@ -174,7 +199,7 @@ func (r *Reconciler) persistentMembers(ctx context.Context, f *fleet.CelldFleet,
 		} else if state.Phase != "Running" || !podReady(pod) {
 			return nil, errors.New("persistent survivor launcher is not running and ready")
 		}
-		members = append(members, persistentMember{Node: pod.Name, PodUID: string(pod.UID), Container: id, Host: node.Name, HostUID: string(node.UID), Hostname: node.Labels[corev1.LabelHostname], BootID: node.Status.NodeInfo.BootID, Zone: node.Labels[corev1.LabelTopologyZone], Invocation: state.Invocation, Generation: state.Generation, ClaimUID: string(claim.UID), VolumeUID: volumeUID, VolumeHandle: volumeHandle, Stopped: isDonor, RestartDenied: isDonor && state.RestartDenied, DiskID: state.DiskID})
+		members = append(members, persistentMember{ProviderID: node.Spec.ProviderID, Node: pod.Name, PodUID: string(pod.UID), Container: id, Host: node.Name, HostUID: string(node.UID), Hostname: node.Labels[corev1.LabelHostname], BootID: node.Status.NodeInfo.BootID, Zone: node.Labels[corev1.LabelTopologyZone], Invocation: state.Invocation, Generation: state.Generation, ClaimUID: string(claim.UID), VolumeUID: volumeUID, VolumeHandle: volumeHandle, Stopped: isDonor, RestartDenied: isDonor && state.RestartDenied, DiskID: state.DiskID})
 	}
 	slices.SortFunc(members, func(a, b persistentMember) int {
 		if a.Node < b.Node {
@@ -219,7 +244,7 @@ func (r *Reconciler) assessPersistent(ctx context.Context, f *fleet.CelldFleet, 
 	if err != nil {
 		return nil, time.Time{}, err
 	}
-	adapter, err := v050.New(Image)
+	adapter, err := catalog.New(runtimeImage(evidenceRuntime(f, j)))
 	if err != nil {
 		return nil, time.Time{}, err
 	}
@@ -465,8 +490,24 @@ func (r *Reconciler) contractPersistent(ctx context.Context, f *fleet.CelldFleet
 			return fail(errors.New("donor invocation changed before stop"))
 		}
 		state, err := r.callLauncher(ctx, f, pod, "", "")
-		if err != nil {
-			return fail(err)
+		if err != nil || slices.ContainsFunc(j.InfrastructureFences, func(receipt infrastructureFence) bool {
+			return receipt.Operation == op.ID && sameInvocation(receipt.Member, old)
+		}) {
+			fenced, fenceErr := r.ensureInfrastructureFence(ctx, f, res, j, old, op.ID)
+			if fenceErr != nil {
+				return fail(fenceErr)
+			}
+			if !fenced {
+				return report("InfrastructureFencing", "Waiting for positive exact EC2 instance termination")
+			}
+			members, _, assessmentErr := r.assessPersistent(ctx, f, j, true, false)
+			if assessmentErr != nil {
+				return fail(assessmentErr)
+			}
+			op.PersistentMembers = members
+			op.Phase = "Retiring"
+			op.WorkloadVersion = w.GetResourceVersion()
+			return save()
 		}
 		if state.Invocation != old.Invocation || state.Generation != old.Generation {
 			return fail(errors.New("donor launcher changed before stop"))
@@ -611,7 +652,7 @@ func (r *Reconciler) finishReactivation(ctx context.Context, f *fleet.CelldFleet
 	if err != nil {
 		return fail(err)
 	}
-	adapter, err := v050.New(Image)
+	adapter, err := catalog.New(runtimeImage(evidenceRuntime(f, j)))
 	if err != nil {
 		return fail(err)
 	}
@@ -677,6 +718,18 @@ func (r *Reconciler) finishReactivation(ctx context.Context, f *fleet.CelldFleet
 
 func validatePersistentJournal(j *lifecycleJournal) error {
 	groups := [][]persistentMember{j.PersistentHistory}
+	seenFences := map[string]bool{}
+	for _, receipt := range j.InfrastructureFences {
+		key := receipt.Operation + "/" + receipt.Member.Node + "/" + receipt.Member.Generation
+		if err := validInfrastructureReceipt(receipt); err != nil {
+			return err
+		}
+		if seenFences[key] {
+			return errors.New("duplicate infrastructure fencing receipt")
+		}
+		seenFences[key] = true
+		groups = append(groups, []persistentMember{receipt.Member})
+	}
 	if j.Operation != nil {
 		groups = append(groups, j.Operation.PersistentMembers)
 	}

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"slices"
 
+	"github.com/ewhauser/celld-operator/internal/runtime/catalog"
+
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	"github.com/ewhauser/celld-operator/internal/launcher"
 	v050 "github.com/ewhauser/celld-operator/internal/runtime/v050"
@@ -93,7 +95,7 @@ func (r *Reconciler) authorizeVolumeHandoff(ctx context.Context, f *fleet.CelldF
 	if owner == nil || owner.UID != j.WorkloadUID || owner.Kind != "StatefulSet" || !pod.DeletionTimestamp.IsZero() {
 		return errors.New("handoff pod ownership changed")
 	}
-	if err := validatePersistentPod(f, pod, r.Options); err != nil {
+	if err := validatePersistentPod(evidenceRuntime(f, j), pod, r.Options); err != nil {
 		return err
 	}
 	if !slices.ContainsFunc(pod.Spec.Volumes, func(v corev1.Volume) bool {
@@ -131,7 +133,8 @@ func (r *Reconciler) authorizeVolumeHandoff(ctx context.Context, f *fleet.CelldF
 	reactivating := j.Operation != nil && j.Operation.Phase == "Reactivating" && reactivatedNode(f.Name, pod.Name, j.Operation.From, j.Operation.To)
 	maintenance := j.Maintenance
 	restarting := maintenance != nil && maintenance.Kind == "Restart" && maintenance.Phase == "Recovering" && maintenance.Index < len(maintenance.Targets) && maintenance.Targets[maintenance.Index].Name == pod.Name && maintenance.Targets[maintenance.Index].UID != pod.UID
-	if !reactivating && !restarting {
+	coordinated := maintenance != nil && maintenance.Coordinated && maintenance.Phase == "Resuming" && reactivatedNode(f.Name, pod.Name, 0, maintenance.TargetReplicas)
+	if !reactivating && !restarting && !coordinated {
 		return errors.New("handoff requires durable reactivation authority")
 	}
 	if j.Loss != "" || r.Evidence == nil {
@@ -141,7 +144,7 @@ func (r *Reconciler) authorizeVolumeHandoff(ctx context.Context, f *fleet.CelldF
 	if err != nil {
 		return err
 	}
-	adapter, err := v050.New(Image)
+	adapter, err := catalog.New(runtimeImage(evidenceRuntime(f, j)))
 	if err != nil {
 		return err
 	}

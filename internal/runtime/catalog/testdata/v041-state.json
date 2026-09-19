@@ -1,0 +1,64 @@
+{
+  "activating": 0,
+  "activation_waiting": 0,
+  "adopting": 0,
+  "capacity_waiting": 0,
+  "cgroup_current_bytes": 25776128,
+  "cgroup_working_set_bytes": 25526272,
+  "deployment": {
+    "cells": {
+      "Ledger:0681fa6dac426244bca34eae6aec80e25faea89ea18327efdc05834b021889b9": 1
+    },
+    "draining": [],
+    "generation": 1,
+    "prefix": "deploy/qualification/a0bbf82e0d4abc0f",
+    "swapping": 0,
+    "version": "a0bbf82e0d4abc0f"
+  },
+  "evicting": 0,
+  "handed_off": 0,
+  "handoff_failed": 0,
+  "in_use_bytes": 41065752,
+  "node_load": {
+    "bucket_format": 2,
+    "cgroup_current_bytes": 26034176,
+    "cgroup_working_set_bytes": 25784320,
+    "cpu_percent_x100": 99,
+    "draining": false,
+    "fd_limit": 524288,
+    "host_websockets": 0,
+    "in_use_bytes": 41065752,
+    "memory_headroom": true,
+    "open_fds": 34,
+    "owned_cells": 1,
+    "placement_weight": 4,
+    "pressured": false,
+    "rebalance_paused": false,
+    "resident_cells": 1,
+    "restoring": 0,
+    "rss_bytes": 51093504,
+    "sampled_ms": 1789785638340,
+    "shed_cells": 0
+  },
+  "occupied": 1,
+  "owned_cells": 1,
+  "ownership": "s3",
+  "phases": {
+    "resident": 1
+  },
+  "published": [
+    "Ledger:0681fa6dac426244bca34eae6aec80e25faea89ea18327efdc05834b021889b9"
+  ],
+  "publishes": 1,
+  "quiescing": 0,
+  "rebalance_failed": 0,
+  "rebalanced": 0,
+  "releasing": 0,
+  "residents": [
+    "Ledger:0681fa6dac426244bca34eae6aec80e25faea89ea18327efdc05834b021889b9"
+  ],
+  "restoring": 0,
+  "rss_bytes": 51093504,
+  "shedding": null,
+  "stops": 0
+}

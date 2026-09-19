@@ -53,6 +53,10 @@ spec:
             {{- if .Values.launcherImage }}
             - --launcher-image={{ .Values.launcherImage }}
             {{- end }}
+            {{- if or .Values.ec2Fencing.account .Values.ec2Fencing.region }}
+            - --ec2-fencing-account={{ required "ec2Fencing.account is required when fencing is enabled" .Values.ec2Fencing.account }}
+            - --ec2-fencing-region={{ required "ec2Fencing.region is required when fencing is enabled" .Values.ec2Fencing.region }}
+            {{- end }}
             {{- if .Values.metrics.enabled }}
             - --metrics-bind-address=:{{ .Values.metrics.port }}
             {{- end }}

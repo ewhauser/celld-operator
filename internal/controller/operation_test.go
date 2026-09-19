@@ -147,7 +147,7 @@ func TestJournalV1ThroughV6(t *testing.T) {
 			t.Fatal(err)
 		}
 		restored, err := readJournal(res)
-		if err != nil || restored.Version != 7 {
+		if err != nil || restored.Version != 8 {
 			t.Fatalf("legacy %d: %v", version, err)
 		}
 	}

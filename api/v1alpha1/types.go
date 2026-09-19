@@ -26,7 +26,7 @@ var AddToScheme = SchemeBuilder.AddToScheme
 type CelldFleet struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	// +kubebuilder:validation:XValidation:rule="self.qualification == oldSelf.qualification && self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement && self.bucketWorkload == oldSelf.bucketWorkload",message="only replicas, capacity, runtimeImage and maintenance may change"
+	// +kubebuilder:validation:XValidation:rule="self.qualification == oldSelf.qualification && self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement && (self.bucketWorkload == oldSelf.bucketWorkload || (oldSelf.bucketWorkload == 'Deployment' && self.bucketWorkload == 'Ordered' && has(self.maintenance) && has(self.maintenance.orderedMigrationToken) && size(self.maintenance.orderedMigrationToken) > 0 && has(self.maintenance.allowCoordinatedDowntime) && self.maintenance.allowCoordinatedDowntime))",message="only replicas, capacity, runtimeImage, maintenance and an authorized Deployment-to-Ordered migration may change"
 	Spec   CelldFleetSpec   `json:"spec"`
 	Status CelldFleetStatus `json:"status,omitempty"`
 }
@@ -71,6 +71,11 @@ type CelldFleetSpec struct {
 
 // MaintenanceSpec requests suspension or a qualified planned restart.
 type MaintenanceSpec struct {
+	// Explicitly permit an operation that stops the entire fleet.
+	AllowCoordinatedDowntime bool `json:"allowCoordinatedDowntime,omitempty"`
+	// Request one-way Deployment-to-Ordered migration together with bucketWorkload: Ordered.
+	// +kubebuilder:validation:MaxLength=128
+	OrderedMigrationToken string `json:"orderedMigrationToken,omitempty"`
 	// Pause new actions and unissued operations; continue recovery of issued actions.
 	Paused bool `json:"paused,omitempty"`
 	// Change this token to request a planned restart. No restart is qualified yet.

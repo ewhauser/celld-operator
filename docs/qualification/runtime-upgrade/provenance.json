@@ -1,0 +1,14 @@
+{
+  "source": {
+    "architecture": "arm64",
+    "image": "sha256:ce8bbc3c26a16c9ee00e3ce0501f36bfea2663b5af8285a08fc16a54568060a5",
+    "revision": "10cb1303dac710dcb3b557e318e08c855261f68b"
+  },
+  "target": {
+    "architecture": "arm64",
+    "image": "sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8",
+    "revision": "12d5b6333fe52717325addcfe1e99e9fd4f77bcd"
+  },
+  "versions_harness_sha256": "a33f9999adeec781072c061dd3e455b110a5df446d09beb10c9a2be971744862",
+  "shared_harness_sha256": "7e51063d458d23256d190194bb1e39bc42c263390315cfffe9e74f07798622f6"
+}

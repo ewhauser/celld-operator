@@ -11,6 +11,7 @@ import (
 	"time"
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
+	"github.com/ewhauser/celld-operator/internal/fencing"
 	"github.com/ewhauser/celld-operator/internal/launcher"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -36,6 +37,7 @@ const attemptAnnotation = "celld.example.com/workload-creation-attempted"
 type Reconciler struct {
 	client.Client
 	Options               Options
+	Infrastructure        fencing.API
 	NetworkPolicyEnforced bool
 	Recorder              events.EventRecorder
 	// localLifecycle is only supplied by in-package qualification tests. No production fence exists.
@@ -120,6 +122,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			return ctrl.Result{}, err
 		}
 	}
+	if result, handled, err := r.migrateBucket(ctx, f, reservation); handled || err != nil {
+		return result, err
+	}
 	if len(reservation.OwnerReferences) != 0 || !reservation.DeletionTimestamp.IsZero() || !r.reservationMatches(ctx, f, reservation, expected) {
 		return r.report(ctx, f, "StorageScopeConflict", "Bucket is permanently reserved to another fleet UID or immutable configuration; no resources adopted", 0, false)
 	}
@@ -133,8 +138,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	actual := emptyObject(desired)
 	err := r.Get(ctx, client.ObjectKeyFromObject(desired), actual)
 	if apierrors.IsNotFound(err) {
-		if f.Spec.RuntimeImage != "" && f.Spec.RuntimeImage != Image {
-			return r.report(ctx, f, "UnsupportedTransition", "Initial runtime must use the qualified adapter pin; no alternate image is supported", 0, false)
+		if !knownRuntime(runtimeImage(f)) || (runtimeImage(f) != Image && (f.Spec.Profile != "PersistentFleet" || r.Options.LauncherImage == "")) {
+			return r.report(ctx, f, "UnsupportedTransition", "Initial runtime requires a qualified release; v0.4.1 requires PersistentFleet with the trusted launcher", 0, false)
 		}
 		if reservation.Annotations[attemptAnnotation] != "" {
 			return r.report(ctx, f, "LifecycleBlocked", "Workload is missing after a recorded creation attempt; automatic recreation could reuse an unsafe identity or disk", 0, false)

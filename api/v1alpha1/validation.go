@@ -35,6 +35,9 @@ func (f *CelldFleet) Validate() error {
 	if s.Maintenance != nil && len(s.Maintenance.RestartToken) > 128 {
 		return fmt.Errorf("restartToken exceeds 128 characters")
 	}
+	if s.Maintenance != nil && len(s.Maintenance.OrderedMigrationToken) > 128 {
+		return fmt.Errorf("orderedMigrationToken exceeds 128 characters")
+	}
 	if s.Capacity != nil {
 		if err := s.Capacity.Validate(); err != nil {
 			return err

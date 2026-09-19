@@ -25,8 +25,9 @@ const (
 )
 
 type Options struct {
-	OperatorNamespace string
-	LauncherImage     string
+	OperatorNamespace             string
+	LauncherImage                 string
+	FencingAccount, FencingRegion string
 	// Explicit test-only configuration; never inferred from kubeconfig or AWS environment.
 	LocalTest bool
 }
@@ -63,6 +64,9 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 		{Name: "CELLD_TTL_MS", Value: "10000"},
 		{Name: "CELLD_SHUTDOWN_TOTAL_MS", Value: "20000"},
 		{Name: "CELLD_TOKIO_THREADS", Value: "2"},
+	}
+	if runtimeImage(f) != Image {
+		env = append(env, corev1.EnvVar{Name: "CELLD_DRAIN_TOKEN_WAIT_MS", Value: "15000"})
 	}
 	if opts.LocalTest {
 		env = append(env, corev1.EnvVar{Name: "S3_ENDPOINT", Value: "http://minio.celld-test-store.svc:9000"}, corev1.EnvVar{Name: "AWS_ALLOW_HTTP", Value: "true"}, corev1.EnvVar{Name: "AWS_ACCESS_KEY_ID", Value: "qualification"}, corev1.EnvVar{Name: "AWS_SECRET_ACCESS_KEY", Value: "qualification-only"})
@@ -109,7 +113,7 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 		Containers: []corev1.Container{
 			{
 				Name:            "celld",
-				Image:           Image,
+				Image:           runtimeImage(f),
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Command:         []string{"/bin/sh", "-c", launch},
 				Env:             env,

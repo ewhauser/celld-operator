@@ -186,6 +186,15 @@ spec:
               maintenance:
                 description: Maintenance requests share the retained lifecycle journal.
                 properties:
+                  allowCoordinatedDowntime:
+                    description: Explicitly permit an operation that stops the entire
+                      fleet.
+                    type: boolean
+                  orderedMigrationToken:
+                    description: 'Request one-way Deployment-to-Ordered migration
+                      together with bucketWorkload: Ordered.'
+                    maxLength: 128
+                    type: string
                   paused:
                     description: Pause new actions and unissued operations; continue
                       recovery of issued actions.
@@ -295,11 +304,15 @@ spec:
             - storage
             type: object
             x-kubernetes-validations:
-            - message: only replicas, capacity, runtimeImage and maintenance may change
+            - message: only replicas, capacity, runtimeImage, maintenance and an authorized
+                Deployment-to-Ordered migration may change
               rule: self.qualification == oldSelf.qualification && self.profile ==
                 oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName
                 && self.storage == oldSelf.storage && self.placement == oldSelf.placement
-                && self.bucketWorkload == oldSelf.bucketWorkload
+                && (self.bucketWorkload == oldSelf.bucketWorkload || (oldSelf.bucketWorkload
+                == 'Deployment' && self.bucketWorkload == 'Ordered' && has(self.maintenance)
+                && has(self.maintenance.orderedMigrationToken) && size(self.maintenance.orderedMigrationToken)
+                > 0 && has(self.maintenance.allowCoordinatedDowntime) && self.maintenance.allowCoordinatedDowntime))
             - message: Ordered bucketWorkload requires Bucket profile
               rule: self.bucketWorkload != 'Ordered' || self.profile == 'Bucket'
             - message: azCount must equal the zones count

@@ -8,6 +8,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/ewhauser/celld-operator/internal/runtime/catalog"
+
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	v050 "github.com/ewhauser/celld-operator/internal/runtime/v050"
 	corev1 "k8s.io/api/core/v1"
@@ -23,14 +25,17 @@ import (
 // stop admission of the next action, but cannot revoke an already authorized
 // request from a previous leader. Recovery always retains that authority.
 type maintenanceOperation struct {
-	Persistent             []persistentMember
-	ID, Kind, Token, Phase string
-	Targets                []maintenanceTarget
-	Index                  int
-	Sessions               []bucketSession
-	SettledAt              time.Time
-	Deadline               time.Time
-	StartedAt              time.Time
+	Coordinated              bool
+	TargetReplicas           int32
+	Persistent               []persistentMember
+	ID, Kind, Token, Phase   string
+	SourceImage, TargetImage string
+	Targets                  []maintenanceTarget
+	Index                    int
+	Sessions                 []bucketSession
+	SettledAt                time.Time
+	Deadline                 time.Time
+	StartedAt                time.Time
 }
 type maintenanceTarget struct {
 	Name string
@@ -78,14 +83,24 @@ func (r *Reconciler) executeMaintenance(ctx context.Context, f *fleet.CelldFleet
 		result, reportErr := r.report(ctx, f, "MaintenanceRecoveryBlocked", err.Error(), 0, false)
 		return result, true, reportErr
 	}
-	if m.ID == "" || (m.Kind != "Restart" && m.Kind != "Delete") || m.Index < 0 || m.Index > len(m.Targets) || j.Operation != nil {
+	if m.ID == "" || (m.Kind != "Restart" && m.Kind != "Delete" && m.Kind != "Contract" && m.Kind != "Upgrade") || m.Index < 0 || m.Index > len(m.Targets) || j.Operation != nil {
 		return block(errors.New("invalid maintenance authority"))
 	}
 	if j.Loss != "" || w.GetAnnotations()[lossFenceKey] != "" {
 		return block(errors.New("durable loss fence prohibits maintenance completion"))
 	}
-	expected := f.DeepCopy()
+	expected := appliedRuntime(f, j)
+	if m.Kind == "Upgrade" {
+		image, err := transitionWorkloadImage(j, w)
+		if err != nil {
+			return block(err)
+		}
+		expected.Spec.RuntimeImage = image
+	}
 	expected.Spec.Replicas = j.Applied
+	if m.Coordinated {
+		expected.Spec.Replicas = coordinatedExpectedReplicas(m, j.Applied, w)
+	}
 	if m.Kind == "Delete" && (m.Phase == "Recovering" || m.Phase == "Cleanup" || (m.Phase == "Authorized" && w.GetAnnotations()[operationKey] == m.ID)) {
 		expected.Spec.Replicas = 0
 	}
@@ -105,7 +120,7 @@ func (r *Reconciler) executeMaintenance(ctx context.Context, f *fleet.CelldFleet
 	if r.Evidence == nil {
 		return block(errors.New("production recovery evidence unavailable"))
 	}
-	inventory, loss := r.Evidence.Observe(ctx, f, j.Inventory)
+	inventory, loss := r.Evidence.Observe(ctx, expected, j.Inventory)
 	j.Inventory = inventory
 	if loss != "" {
 		return r.recordLoss(ctx, f, w, res, j, loss)
@@ -115,7 +130,15 @@ func (r *Reconciler) executeMaintenance(ctx context.Context, f *fleet.CelldFleet
 			result, err := r.report(ctx, f, "MaintenancePaused", "No new maintenance action admitted", 0, false)
 			return result, true, err
 		}
-		if m.Kind == "Restart" && (!f.DeletionTimestamp.IsZero() || (f.Spec.RuntimeImage != "" && f.Spec.RuntimeImage != Image) || f.Spec.Maintenance == nil || f.Spec.Maintenance.RestartToken != m.Token) {
+		if m.Kind == "Upgrade" && (!canStopUpgrade(f, j, r.Options) || runtimeImage(f) != m.TargetImage || !f.DeletionTimestamp.IsZero()) {
+			j.Maintenance = nil
+			return save()
+		}
+		if m.Kind == "Contract" && (f.Spec.Replicas != m.TargetReplicas || !f.DeletionTimestamp.IsZero() || !coordinatedDowntime(f)) {
+			j.Maintenance = nil
+			return save()
+		}
+		if m.Kind == "Restart" && (!f.DeletionTimestamp.IsZero() || runtimeImage(f) != j.RuntimeImage || f.Spec.Maintenance == nil || f.Spec.Maintenance.RestartToken != m.Token) {
 			j.Maintenance = nil
 			return save()
 		}
@@ -124,7 +147,12 @@ func (r *Reconciler) executeMaintenance(ctx context.Context, f *fleet.CelldFleet
 		}
 	}
 	if f.Spec.Profile == "PersistentFleet" {
-		return r.executePersistentMaintenance(ctx, f, res, j, w, block)
+		beforeVersion := expected.ResourceVersion
+		result, handled, err := r.executePersistentMaintenance(ctx, expected, res, j, w, block)
+		if expected.ResourceVersion != beforeVersion {
+			f.ResourceVersion, f.Status = expected.ResourceVersion, expected.Status
+		}
+		return result, handled, err
 	}
 	view := *j
 	view.Operation = &lifecycleOperation{ID: m.ID, Phase: "Recovering", From: j.Applied, To: j.Applied, BucketCandidates: m.Sessions}
@@ -294,7 +322,7 @@ func (r *Reconciler) executeBucketDeletion(ctx context.Context, f *fleet.CelldFl
 		if err != nil {
 			return block(err)
 		}
-		adapter, err := v050.New(Image)
+		adapter, err := catalog.New(runtimeImage(evidenceRuntime(f, j)))
 		if err != nil {
 			return block(err)
 		}
@@ -354,19 +382,43 @@ func validateMaintenanceJournal(j *lifecycleJournal) error {
 	if m == nil {
 		return nil
 	}
-	if j.Operation != nil || m.ID == "" || (m.Kind != "Restart" && m.Kind != "Delete") || m.Index < 0 || m.Index > len(m.Targets) {
+	if j.Operation != nil || m.ID == "" || (m.Kind != "Restart" && m.Kind != "Delete" && m.Kind != "Contract" && m.Kind != "Upgrade") || m.Index < 0 || m.Index > len(m.Targets) {
 		return errors.New("invalid maintenance journal")
 	}
 	switch m.Phase {
-	case "Capture", "Next", "Stopping", "Authorized", "Recovering", "Cleanup":
+	case "Capture", "Next", "Stopping", "Authorized", "Recovering", "Cleanup", "Quiesced", "Empty", "Resuming":
 	default:
 		return errors.New("invalid maintenance phase")
+	}
+	if m.Coordinated {
+		if (m.Kind != "Restart" && m.Kind != "Contract" && m.Kind != "Upgrade") || m.TargetReplicas < 1 || m.TargetReplicas > j.Applied || (m.Kind == "Contract" && (j.Applied != 2 || m.TargetReplicas != 1)) || ((m.Kind == "Restart" || m.Kind == "Upgrade") && m.TargetReplicas != j.Applied) {
+			return errors.New("invalid coordinated maintenance authority")
+		}
+		if m.Phase != "Capture" && len(m.Persistent) != int(j.Applied) {
+			return errors.New("coordinated capture must cover every applied member")
+		}
+		if m.Phase == "Quiesced" || m.Phase == "Empty" || m.Phase == "Resuming" {
+			for _, member := range m.Persistent {
+				if !member.Stopped || !member.RestartDenied {
+					return errors.New("coordinated recovery lacks every exact stop receipt")
+				}
+			}
+		}
+	} else if m.Kind == "Contract" || m.Kind == "Upgrade" || m.Phase == "Quiesced" || m.Phase == "Empty" || m.Phase == "Resuming" {
+		return errors.New("coordinated phase without authority")
+	}
+	if m.Kind == "Upgrade" {
+		if !catalog.StoppedUpgrade(m.SourceImage, m.TargetImage) || j.RuntimeImage != m.SourceImage || !m.Coordinated || (m.Phase != "Capture" && m.Phase != "Stopping" && m.Phase != "Quiesced" && m.Phase != "Empty" && m.Phase != "Resuming") {
+			return errors.New("invalid runtime transition authority")
+		}
+	} else if m.SourceImage != "" || m.TargetImage != "" {
+		return errors.New("runtime transition fields on unrelated operation")
 	}
 	if m.Kind == "Restart" {
 		if m.Token == "" || m.Phase == "Cleanup" {
 			return errors.New("invalid restart authority")
 		}
-		if (m.Phase == "Stopping" || m.Phase == "Authorized" || m.Phase == "Recovering") && m.Index == len(m.Targets) {
+		if !m.Coordinated && (m.Phase == "Stopping" || m.Phase == "Authorized" || m.Phase == "Recovering") && m.Index == len(m.Targets) {
 			return errors.New("restart target missing")
 		}
 	}

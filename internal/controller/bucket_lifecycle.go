@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ewhauser/celld-operator/internal/runtime/catalog"
+
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	"github.com/ewhauser/celld-operator/internal/capacity"
 	v050 "github.com/ewhauser/celld-operator/internal/runtime/v050"
@@ -120,7 +122,7 @@ func (r *Reconciler) bucketAssessmentMode(ctx context.Context, f *fleet.CelldFle
 	if err != nil {
 		return nil, time.Time{}, err
 	}
-	adapter, err := v050.New(Image)
+	adapter, err := catalog.New(runtimeImage(evidenceRuntime(f, j)))
 	if err != nil {
 		return nil, time.Time{}, err
 	}

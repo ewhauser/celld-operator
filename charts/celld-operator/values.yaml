@@ -8,6 +8,10 @@ image:
 imagePullSecrets: []
 # Pin this image by digest to enable launcher-managed PersistentFleet workloads.
 launcherImage: ''
+# Optional dedicated-instance termination; both fields are required to enable.
+ec2Fencing:
+  account: ''
+  region: ''
 networkPolicyEnforced: false
 serviceAccount:
   annotations: {}
