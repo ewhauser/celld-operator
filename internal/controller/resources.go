@@ -34,7 +34,14 @@ type Options struct {
 	// FaultPoint names a lifecycle boundary at which the disposable harness manager
 	// exits (see faultPoint). Ignored unless LocalTest is set.
 	FaultPoint string
+	// LocalRWOP requests ReadWriteOncePod claims in local test mode, served by the
+	// per-node hostpath CSI driver, so the shipped access mode is exercised on kind.
+	// Ignored unless LocalTest is set. It is not EBS or attachment qualification.
+	LocalRWOP bool
 }
+
+// localCSIDriver is the kubernetes-csi hostpath driver the harness deploys per node.
+const localCSIDriver = "hostpath.csi.k8s.io"
 
 // faultPoint terminates the manager at a named lifecycle boundary so the kind
 // harness can prove crash-consistency of the journal and workload CAS. It is a

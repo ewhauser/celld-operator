@@ -27,6 +27,15 @@ CURL = 'curlimages/curl:8.12.1'
 MC = 'quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z'
 TOXIPROXY = 'ghcr.io/shopify/toxiproxy:2.12.0'
 METRICS_SERVER = 'registry.k8s.io/metrics-server/metrics-server:v0.8.0'
+# Per-node hostpath CSI driver (kubernetes-csi/csi-driver-host-path v1.18.0,
+# kubernetes-distributed deployment) for ReadWriteOncePod claims on kind.
+HOSTPATH_CSI = 'https://raw.githubusercontent.com/kubernetes-csi/csi-driver-host-path/v1.18.0/deploy/kubernetes-distributed/hostpath/'
+CSI_MANIFESTS = {
+    'https://raw.githubusercontent.com/kubernetes-csi/external-provisioner/v6.3.0/deploy/kubernetes/rbac.yaml': '0ee8427b746a1d3b695705b74c2d7fb165121110b1a10c0b6e204918d93e814f',
+    HOSTPATH_CSI + 'csi-hostpath-driverinfo.yaml': '997418490e0a69887d5587e7b6dcec9f81c53b1eb2312b1dbf7d257683c196f6',
+    HOSTPATH_CSI + 'csi-hostpath-plugin.yaml': 'ab5ca63465cdc81e2f1ece90a1b85f74e958c9cd565d15ae761cb4e578c763ff',
+}
+CSI_IMAGES = ('registry.k8s.io/sig-storage/csi-provisioner:v6.3.0', 'registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.17.0', 'registry.k8s.io/sig-storage/hostpathplugin:v1.17.1', 'registry.k8s.io/sig-storage/livenessprobe:v2.19.0')
 
 
 def run(args, **kwargs):
@@ -43,6 +52,7 @@ def main():
     parser.add_argument('--persistent-lifecycle',action='store_true')
     parser.add_argument('--maintenance',action='store_true')
     parser.add_argument('--faults',action='store_true',help='fault injection: manager crash points, node loss, S3 latency/partition via toxiproxy')
+    parser.add_argument('--rwop-csi',action='store_true',help='serve PersistentFleet claims as ReadWriteOncePod through the per-node hostpath CSI driver instead of local-path RWO')
     args=parser.parse_args()
     persistent_lifecycle=args.persistent_lifecycle or args.maintenance or args.faults
     bucket_lifecycle=args.bucket_lifecycle or persistent_lifecycle or args.ordered_bucket
@@ -120,7 +130,7 @@ nodes:
                 k('-n', ns, 'apply', '-f', str(ROOT / 'config/rbac/fleet-namespace.yaml'))
             node_arch=json.loads(k('get','node',name+'-control-plane','-o','json'))['status']['nodeInfo']['architecture']
             nodes=(name+'-control-plane', name+'-worker', name+'-worker2')
-            for index,image in enumerate((IMAGE, MINIO, MC, CURL)+((METRICS_SERVER,) if bucket_lifecycle else ())+((TOXIPROXY,) if args.faults else ())):
+            for index,image in enumerate((IMAGE, MINIO, MC, CURL)+((METRICS_SERVER,) if bucket_lifecycle else ())+((TOXIPROXY,) if args.faults else ())+(CSI_IMAGES if args.rwop_csi else ())):
                 # Docker's containerd store may have only the local platform of
                 # a multiarch image. Export that platform explicitly; ordinary
                 # kind load docker-image can fail on absent sibling manifests.
@@ -190,7 +200,18 @@ nodes:
                 deploy_env={'CELLD_BUCKET':'s3://'+bucket,'AWS_REGION':'us-east-1','AWS_ALLOW_HTTP':'true','S3_ENDPOINT':'http://minio:9000','AWS_ACCESS_KEY_ID':'qualification','AWS_SECRET_ACCESS_KEY':'qualification-only','CELLD_ESBUILD':'/esbuild'}
                 apply({'apiVersion':'v1','kind':'Pod','metadata':{'name':deploy_name,'namespace':'celld-test-store'},'spec':{'nodeName':name+'-control-plane','restartPolicy':'Never','containers':[{'name':'deploy','image':IMAGE,'args':['deploy','/app'],'env':[{'name':key,'value':value} for key,value in deploy_env.items()],'volumeMounts':[{'name':'app','mountPath':'/app','readOnly':True},{'name':'esbuild','mountPath':'/esbuild','readOnly':True}]}],'volumes':[{'name':'app','hostPath':{'path':'/opt/celld-test-app'}},{'name':'esbuild','hostPath':{'path':'/opt/celld-test-esbuild'}}]}})
                 wait_for(lambda:succeeded(deploy_name,'celld-test-store'),'qualification app deployed to '+bucket,timeout=120)
-            apply({'apiVersion':'storage.k8s.io/v1','kind':'StorageClass','metadata':{'name':'retained'},'provisioner':'rancher.io/local-path','reclaimPolicy':'Retain','volumeBindingMode':'WaitForFirstConsumer'})
+            if args.rwop_csi:
+                # SHA-pinned upstream manifests, applied as published; the driver runs
+                # on every node so strict hostname separation still has three hosts.
+                for url,expected_sha in CSI_MANIFESTS.items():
+                    with urllib.request.urlopen(url,timeout=60) as response:
+                        body=response.read()
+                    assert hashlib.sha256(body).hexdigest()==expected_sha, url
+                    k('apply','-f','-',input=body.decode())
+                k('rollout','status','daemonset/csi-hostpathplugin','--timeout=240s')
+                apply({'apiVersion':'storage.k8s.io/v1','kind':'StorageClass','metadata':{'name':'retained'},'provisioner':'hostpath.csi.k8s.io','reclaimPolicy':'Retain','volumeBindingMode':'WaitForFirstConsumer','parameters':{'kind':'fast'}})
+            else:
+                apply({'apiVersion':'storage.k8s.io/v1','kind':'StorageClass','metadata':{'name':'retained'},'provisioner':'rancher.io/local-path','reclaimPolicy':'Retain','volumeBindingMode':'WaitForFirstConsumer'})
             token = k('-n','celld-system','create','token','celld-operator','--duration=1h').strip()
             operator_config = json.loads(k('config','view','--raw','-o','json'))
             operator_config['users'] = [{'name':'operator','user':{'token':token}}]
@@ -213,6 +234,8 @@ nodes:
                     run(['docker','build','-t',launcher_image,str(tmp)],timeout=180)
                     run(['kind','load','docker-image','--name',name,launcher_image],timeout=180)
                     patch['spec']['template']['spec']['containers'][0]['args'].append('--launcher-image='+launcher_image)
+                    if args.rwop_csi:
+                        patch['spec']['template']['spec']['containers'][0]['args'].append('--local-rwop')
                 k('-n','celld-system','patch','deployment','celld-operator','--type=strategic','-p',json.dumps(patch))
                 k('-n','celld-system','rollout','status','deployment/celld-operator','--timeout=120s')
                 operator_args=list(patch['spec']['template']['spec']['containers'][0]['args'])
@@ -352,6 +375,13 @@ nodes:
                 curl('beta-client','beta','/?cell=integration&id=ack',8080,method='PUT')
                 def settled(count):
                     return get('statefulset','beta')['spec']['replicas']==count and ready('beta') and not get('celldfleet','beta').get('status',{}).get('lifecycle',{}).get('operationID')
+                if args.rwop_csi:
+                    for i in range(2):
+                        claim=get('pvc','data-beta-'+str(i))
+                        assert claim['spec']['accessModes']==['ReadWriteOncePod'], claim['spec']['accessModes']
+                        volume=json.loads(k('get','pv',claim['spec']['volumeName'],'-o','json'))
+                        assert volume['spec'].get('csi',{}).get('driver')=='hostpath.csi.k8s.io', volume['spec']
+                    print('PASS: PersistentFleet claims are ReadWriteOncePod on per-node CSI volumes',flush=True)
                 for cycle in range(2):
                     k('-n','fleets','patch','celldfleet','beta','--type=merge','-p',json.dumps({'spec':{'replicas':3}}))
                     wait_for(lambda:settled(3),'PersistentFleet growth '+str(cycle),timeout=300)

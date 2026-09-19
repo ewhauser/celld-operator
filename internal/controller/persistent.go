@@ -791,6 +791,10 @@ func (r *Reconciler) persistentVolumeIdentity(ctx context.Context, claim *corev1
 	if r.Options.LocalTest && pv.Spec.HostPath != nil && pv.Spec.HostPath.Path != "" {
 		return string(pv.UID), "local-hostPath:" + pv.Spec.HostPath.Path, nil
 	}
+	if r.Options.LocalTest && pv.Spec.CSI != nil && pv.Spec.CSI.Driver == localCSIDriver && pv.Spec.CSI.VolumeHandle != "" {
+		// Local per-node CSI volumes: real CSI handles and ReadWriteOncePod, no EBS.
+		return string(pv.UID), localCSIDriver + ":" + pv.Spec.CSI.VolumeHandle, nil
+	}
 	if pv.Spec.CSI == nil || pv.Spec.CSI.Driver != "ebs.csi.aws.com" || pv.Spec.CSI.VolumeHandle == "" {
 		return "", "", errors.New("qualified EBS CSI volume identity unavailable")
 	}

@@ -101,3 +101,8 @@ integration-maintenance:
 .PHONY: integration-faults
 integration-faults:
 	python3 hack/integration/run.py --faults
+
+# PersistentFleet lifecycle with ReadWriteOncePod claims on the per-node hostpath CSI driver.
+.PHONY: integration-persistent-rwop
+integration-persistent-rwop:
+	python3 hack/integration/run.py --persistent-lifecycle --rwop-csi

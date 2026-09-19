@@ -176,3 +176,7 @@ remove the production gates above.
 Bucket follow-up: [logical membership contract and executor](../bucket-scale-in.md) and [new runtime/operator evidence](bucket-lifecycle/README.md) supersede the earlier blanket no-log completion blocker. The historical measurements above remain unchanged.
 
 Fault injection: [manager crash points, node loss and toxiproxy S3 latency/partition in kind](faults/README.md).
+
+Cloud: [EKS smoke suite plan](eks-smoke-plan.md) (not implemented; defines the checks only the cloud can run).
+
+ReadWriteOncePod on kind: [PersistentFleet lifecycle on per-node CSI volumes](persistent-rwop/README.md).

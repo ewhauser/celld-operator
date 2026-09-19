@@ -110,7 +110,7 @@ build caches may remain. Tests need Docker, kind, kubectl, network access and en
 memory for three Kubernetes nodes and at least six runtime pods. No AWS qualification follows
 from this local test, and local-path disk recovery is not EBS recovery. The
 `integration-bucket`, `integration-persistent`, `integration-ordered-bucket`,
-`integration-maintenance` and `integration-faults` targets run the in-cluster
+`integration-maintenance`, `integration-faults` and `integration-persistent-rwop` targets run the in-cluster
 manager with Metrics Server and the fixed MinIO evidence transport for the
 corresponding lifecycle paths; see [fault injection](qualification/faults/README.md).
 

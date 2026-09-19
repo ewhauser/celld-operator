@@ -32,7 +32,7 @@ const launcherKeyDigest = "celld.example.com/launcher-key-digest"
 
 func launcherSecretName(f *fleet.CelldFleet) string { return f.Name + "-launcher" }
 func persistentAccessModes(opts Options) []corev1.PersistentVolumeAccessMode {
-	if opts.LauncherImage != "" && !opts.LocalTest {
+	if opts.LauncherImage != "" && (!opts.LocalTest || opts.LocalRWOP) {
 		return []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOncePod}
 	}
 	return []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
