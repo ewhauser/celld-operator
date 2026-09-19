@@ -15,7 +15,7 @@ configuration, observed generation, exclusive storage scope and historical check
 missing logs alone do not establish those facts. PersistentFleet is unchanged.
 
 Journal every possible Deployment candidate before one CAS decrement. Retain
-historical Bucket admissions through repeated shrink/grow. Journal version 5
+historical Bucket admissions through repeated shrink/grow. Journal version 5 (at that step; see the current rules in [journal archives](../journal-archives.md))
 prevents older binaries from ignoring this state. Manual execution is experimental;
 automatic execution remains disabled against AWS until release qualification,
 while the fixed local fixture tests the same automatic path.

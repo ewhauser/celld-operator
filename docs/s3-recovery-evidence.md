@@ -1,5 +1,7 @@
 # Read-only S3 recovery evidence
 
+> Historical record (18 September 2026). It describes the state at that step; the current feature matrix is [critical-features.md](critical-features.md) and the current journal version and compatibility rules are in [journal-archives.md](journal-archives.md).
+
 Follow-up: [the launcher-managed graceful PersistentFleet path](persistent-fleet-lifecycle.md) implements a restricted same-host contract. The earlier analysis below remains relevant to unwrapped invocations and uncertain failures.
 
 Current implementation: [shared lifecycle safety](shared-lifecycle-safety.md). Production collection is now wired; exact identity/fencing and mode-specific removal qualification remain blocked.

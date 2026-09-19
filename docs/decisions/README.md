@@ -13,8 +13,14 @@ These records capture the celld operator decisions agreed on 18 September 2026. 
 | [0007](0007-runtime-compatibility.md) | Use an existing, unmodified celld release | Accepted |
 | [0008](0008-recovery-evidence-and-conservative-removal.md) | Require read-only S3 evidence for peer-disk automatic contraction | Accepted |
 | [0009](0009-service-and-ingress-boundary.md) | Expose ClusterIP Services; keep ingress, TLS, and DNS external | Accepted |
-| [0011](0011-initial-fleet-api.md) | Experimental API, reservations and initial provisioning gate | Implemented locally |
 | [0010](0010-production-qualification.md) | Qualify runtime-dependent behavior before production enablement | Accepted |
+| [0011](0011-initial-fleet-api.md) | Experimental API, reservations and initial provisioning gate | Implemented locally |
+| [0012](0012-restart-safe-manual-lifecycle.md) | Journaled manual lifecycle and explicit contraction gates | Implemented; contraction executors added by 0016/0017 |
+| [0013](0013-capacity-policy.md) | Observed capacity and journaled automatic intent | Implemented; production automatic contraction release-gated |
+| [0014](0014-coordinated-maintenance.md) | Coordinated maintenance and retained deletion | Implemented; restart and deletion executors added later |
+| [0015](0015-shared-lifecycle-safety.md) | Shared evidence, deadlines and cancellation authority | Implemented; amended for Bucket by 0016 |
+| [0016](0016-bucket-preflight-and-completion-boundary.md) | Bucket logical membership completion | Implemented experimental manual execution; automatic release-gated |
+| [0017](0017-persistent-launcher-and-graceful-retirement.md) | PersistentFleet launcher and graceful retirement | Implemented experimental same-host path; amended 19 September 2026 |
 
 Read [runtime qualification](../runtime-qualification.md), [shutdown evidence](../shutdown-evidence.md), and [S3 recovery evidence](../s3-recovery-evidence.md) for implementation evidence and unresolved gates. The later S3 investigation corrects the earlier interpretation of sealed logs: sealing alone does not establish lossless recovery.
 
@@ -22,13 +28,6 @@ The original proposal is `/Users/ewhauser/Downloads/Celld_Fleet_Operator_Design.
 
 Future decisions should receive a new numbered record. Material changes should identify which earlier record they supersede. Do not rewrite a qualification hypothesis as a proven guarantee.
 
-- [ADR 0012: restart-safe manual lifecycle](0012-restart-safe-manual-lifecycle.md)
-
-Step 4: [ADR 0013: capacity collection and policy](0013-capacity-policy.md).
-
-Step 5: [ADR 0014: coordinated maintenance and retained deletion](0014-coordinated-maintenance.md).
-
-- [0015 Shared lifecycle safety](0015-shared-lifecycle-safety.md): evidence, deadlines and safe cancellation; uncertain process/node fencing remains blocked.
-
-- [0016 Bucket completion](0016-bucket-preflight-and-completion-boundary.md): logical membership completion.
-- [0017 PersistentFleet launcher](0017-persistent-launcher-and-graceful-retirement.md): exact graceful termination, follower retirement and same-host retained-volume reuse.
+Statuses describe implementation and qualification separately: "implemented"
+means the path executes in the operator and local fixtures; nothing here is
+AWS-qualified. Current details are in [critical features](../critical-features.md).

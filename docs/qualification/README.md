@@ -104,7 +104,7 @@ a controlled removal would be blocked. No automatic scaling is enabled.
 
 Validation commands: `make check` passed (build, race tests, golangci-lint
 v2.13.2: zero issues), including adapter cancellation and evidence validation
-regressions. The two command packages currently have **no package tests**.
+regressions. The command packages under `cmd/` have **no package tests**; their logic lives in `internal/`.
 `make qualification-replay` passed its five positive/four negative cases.
 The Python collector's eight fault/completeness tests passed with
 `make qualification-test`. Python compilation and `git diff --check` passed.

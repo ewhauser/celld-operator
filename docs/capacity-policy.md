@@ -2,11 +2,12 @@
 
 Both Bucket and PersistentFleet support optional shadow recommendations and
 explicitly enabled bounded scale-out. All infrastructure and qualification limits
-in [fleet API](fleet-api.md) still apply. **The installed manager cannot execute
-scale-in in either profile.** `Automatic` reports requests through the exact
-BucketCompletionUnqualified/FencingUnqualified gates from step 3. CPU, memory and
-readiness cannot certify durability; Pod AZ spread does not establish follower
-AZ diversity.
+in [fleet API](fleet-api.md) still apply. Manual contraction executes for Bucket
+and launcher-managed PersistentFleet fleets. `Automatic` contraction executes only
+in the disposable local fixture; against production evidence it reports
+`BucketAutomaticUnqualified` or `PersistentAutomaticUnqualified` until the AWS
+release gate closes. CPU, memory and readiness cannot certify durability; Pod AZ
+spread does not establish follower AZ diversity.
 
 Start with `spec.capacity: {}` or the [shadow example](../config/samples/capacity-shadow.yaml).
 The operator reads private celld `/state` and the Kubernetes Metrics Server API.

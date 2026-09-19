@@ -89,7 +89,7 @@ the same Pod UID; its predecessor remains permanently recorded.
    evidence. Pinned `dead_node_gc.rs:399` deletes no-log dead records after a CAS tombstone. Persist the first successful positive-expiry assessment in the operation candidates before settling. A later complete listing may omit that exact generation during settling or after completion; full fresh survivor, live-lease and log/loss checks still run. This avoids requiring a runtime-GCed object to outlive the ten-second settling window. Absence cannot resolve a new retirement; unreadable listed records still block. Renewed historical leases block the next assessment. Reappearing
    retired identities and replaced generations are not adopted.
 
-The journal writes version **7** and reads versions 1–7. Unsupported older
+At this step the journal wrote version **7** and read versions 1–7; the current version is in [journal archives](journal-archives.md). Unsupported older
 binaries reject newer authority instead of ignoring it. Downgrade after advancement
 is unsupported. [Immutable journal archives](journal-archives.md) retain full
 history beyond the annotation budget; no fencing evidence is pruned.

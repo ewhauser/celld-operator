@@ -57,7 +57,7 @@ Fleet names must be DNS labels up to 40 characters. Only `replicas`, `capacity`,
 Invalid cross-field combinations fail admission; name/dependency errors also
 produce clear controller conditions. No `/scale` API is exposed. Production image
 updates, resize, storage changes and placement changes require a
-future qualified lifecycle implementation. Manual scale-out is journaled. Bucket reductions execute under [logical membership completion](bucket-scale-in.md); PersistentFleet reductions remain blocked by its fencing and recovery gates. See [ADR 0012](decisions/0012-restart-safe-manual-lifecycle.md).
+future qualified lifecycle implementation. Manual scale-out is journaled. Bucket reductions execute under [logical membership completion](bucket-scale-in.md); launcher-managed PersistentFleet reductions execute through the [graceful retirement path](persistent-fleet-lifecycle.md), and fleets without the launcher remain blocked by the fencing gates. See [ADR 0012](decisions/0012-restart-safe-manual-lifecycle.md) and [ADR 0017](decisions/0017-persistent-launcher-and-graceful-retirement.md).
 
 The application Service is `<fleet>:8080`; label authorized client/ingress pods
 in that namespace `celld.example.com/client-of: <fleet>`. Internal port 8081 is
@@ -94,10 +94,13 @@ it on EKS. It does not accept or infer AWS credentials or a default cluster. Wit
 
 ## Validation
 
-`make check` runs build, race tests and lint.
+`make check` runs build, race tests and lint. `make test-envtest` runs the
+reconciler and journal against a real kube-apiserver and etcd.
 `CELLD_DOCKER_TEST=1 go test -race ./internal/controller -run TestLauncher -v`
-checks the pinned image's full startup delay and termination during that delay
-in network-disabled Docker containers. `make generate` updates deepcopy and
+checks the Bucket profile's shell start-up wait (the full TTL delay before exec
+and termination during that delay) in network-disabled Docker containers; the
+PersistentFleet launcher binary has its own suite under `internal/launcher`.
+`make generate` updates deepcopy and
 CRD artifacts; `make manifests-check` verifies reproducibility without rewriting
 them. `make integration` creates a unique kind cluster and dedicated kubeconfig,
 installs SHA-checked Calico, local MinIO and local-path persistent volumes, runs the
@@ -105,7 +108,11 @@ real pinned runtime and operator with its ServiceAccount RBAC, tests strict miss
 that invocation's cluster. It never uses a pre-existing cluster. Docker images and
 build caches may remain. Tests need Docker, kind, kubectl, network access and enough
 memory for three Kubernetes nodes and at least six runtime pods. No AWS qualification follows
-from this local test, and local-path disk recovery is not EBS recovery.
+from this local test, and local-path disk recovery is not EBS recovery. The
+`integration-bucket`, `integration-persistent`, `integration-ordered-bucket`,
+`integration-maintenance` and `integration-faults` targets run the in-cluster
+manager with Metrics Server and the fixed MinIO evidence transport for the
+corresponding lifecycle paths; see [fault injection](qualification/faults/README.md).
 
 Recorded results and remaining limits: [step 2 evidence](qualification/infrastructure/README.md).
 
@@ -119,11 +126,14 @@ an operation. `LifecycleProgress` means a durable transition is in progress.
 `ScaleOutBlocked` identifies uncertain PVC allocation or replica update conflicts.
 `StorageIdentityConflict` identifies missing/replaced retained disks.
 
-`BucketCompletionUnqualified` and `FencingUnqualified` are explicit unavailable
-contraction paths, not temporary readiness failures. The installed manager cannot
-remove a replica. No timeout or administrative attestation bypasses these gates.
-A local, injected-evidence test seam exercises the one-at-a-time contraction
-engine; it is not connected to the manager, even with `--local-test`.
+Contraction executes for Bucket fleets and for launcher-managed PersistentFleet
+fleets (see [Bucket contraction](bucket-scale-in.md) and
+[PersistentFleet lifecycle](persistent-fleet-lifecycle.md)). `BucketCompletionUnqualified`
+appears when the manager has no evidence transport (no `--local-evidence` and no
+production reader); `FencingUnqualified` appears for PersistentFleet fleets
+without the launcher. Production automatic contraction reports
+`BucketAutomaticUnqualified` or `PersistentAutomaticUnqualified` until the AWS
+release gate closes. No timeout or administrative attestation bypasses these gates.
 
 Step 2 PersistentFleet reservations without recorded creation PVC UIDs now block
 for review. The operator does not infer identity from matching labels or offer an
@@ -165,10 +175,11 @@ fleet or an unsupported restart/image request can remain Ready while Blocked is
 also true. Workload status must cover its current generation; missing or replaced
 fleet identities cannot supply availability. `Ready` is not a recovery certificate.
 
-New journal writes use version 3 to preserve redistribution holds against an
-older binary silently ignoring them. Versions 1 and 2 are read conservatively;
-older binaries reject version 3. Downgrading after journal advancement is not a
-supported rollback procedure. All contraction and maintenance qualification gates
-remain unchanged.
+The journal is currently version 8. Every earlier version (1 through 7) is read
+conservatively and rewritten as 8 on the next durable write; an older operator
+binary rejects a newer journal rather than ignoring authority it does not know.
+Downgrading after advancement is not a supported rollback procedure. The version
+steps and what each added are recorded in the ADRs; the compatibility rules and
+archive format are in [journal archives](journal-archives.md).
 
-`status.lifecycle.retiredBucketSessions` counts retained Bucket generations outside observed membership whose physical process liveness remains unknown. It is not a count of fenced processes. Journal version 5 preserves these admissions and cannot be read by prior operator binaries.
+`status.lifecycle.retiredBucketSessions` counts retained Bucket generations outside observed membership whose physical process liveness remains unknown. It is not a count of fenced processes.

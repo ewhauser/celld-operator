@@ -1,5 +1,7 @@
 # celld runtime qualification for a Kubernetes fleet operator
 
+> Historical record (18 September 2026). It describes the state at that step; the current feature matrix is [critical-features.md](critical-features.md) and the current journal version and compatibility rules are in [journal-archives.md](journal-archives.md).
+
 Implementation follow-up: [step 1 adapter, real local experiments, and remaining release gates](qualification/README.md). The earlier source conclusions below are historical; the follow-up distinguishes observations from unqualified hypotheses.
 
 18 September 2026. This is a source and bounded local-policy assessment of the [fleet operator design](/Users/ewhauser/Downloads/Celld_Fleet_Operator_Design.docx), especially sections 2, 5, 9–11, and 15. It is **not** an EKS, S3, EBS, or end-to-end durability qualification. No upstream source or cloud resource was changed.

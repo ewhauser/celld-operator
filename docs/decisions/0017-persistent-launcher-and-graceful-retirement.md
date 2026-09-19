@@ -36,7 +36,7 @@ The implementation does not contract below two live nodes: the pin lacks an
 external completion watermark for retiring the last follower without an
 ensemble replacement.
 
-Journal version 7 retains reads of versions 1–6 and rejects incomplete launcher
+Journal version 7 (at that step; the current version is in [journal archives](../journal-archives.md)) retains reads of versions 1–6 and rejects incomplete launcher
 and volume authority. Versions 1–5 cannot read the new journal. Once `Stopping`
 is durable, the operation retains its identity through termination and recovery;
 new desired capacity cannot silently cancel or retarget it. A positive stopped

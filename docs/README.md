@@ -1,33 +1,31 @@
 # Celld operator documentation
 
-Start with the [architecture decision records](decisions/README.md) for accepted scope, operating boundaries, and the proposed controller architecture.
+## Current state
 
-The supporting investigations are:
+- [Critical feature checklist](critical-features.md): what executes today, what is a
+  runtime dependency, and what remains an external qualification gate. This is the
+  authoritative feature matrix; older step documents are historical snapshots.
+- [Fleet API and installation](fleet-api.md), [operations and Helm](operations.md).
+- Contracts by area: [Bucket contraction](bucket-scale-in.md),
+  [Ordered Bucket placement](ordered-bucket.md), [Bucket migration](bucket-migration.md),
+  [PersistentFleet launcher lifecycle](persistent-fleet-lifecycle.md),
+  [EC2 fencing](infrastructure-fencing.md), [maintenance execution](maintenance-execution.md),
+  [runtime versions](runtime-versions.md), [capacity policy](capacity-policy.md),
+  [journal archives](journal-archives.md) (current journal version and compatibility),
+  [runtime dependencies](runtime-dependencies.md).
+- [Architecture decision records](decisions/README.md).
+- Evidence: [qualification index](qualification/README.md), [local harness](../hack/qualification/README.md),
+  [fault injection in kind](qualification/faults/README.md).
 
-- [Runtime qualification](runtime-qualification.md): released capabilities, startup behavior, persistent identity, and qualification gaps.
-- [Shutdown evidence](shutdown-evidence.md): why successful process exit and HTTP status do not prove peer-log recovery completion.
-- [Read-only S3 recovery evidence](s3-recovery-evidence.md): the proposed metadata contract, IAM scope, conservative removal sequence, and required tests.
+## Historical investigations and step records
 
-These documents describe decisions and investigation results. They do not establish that the operator is implemented or production-qualified.
+These describe the state at the step they were written and are kept for the
+reasoning they contain. Where they say a path is blocked or name a journal
+version, check the current-state documents above.
 
-Step 1 implementation and measured local results: [qualification findings](qualification/README.md), with [repeatable harness commands](../hack/qualification/README.md).
-
-Step 2: [experimental fleet API and usage](fleet-api.md), including local integration
-commands and explicit lifecycle restrictions.
-
-Step 3: [manual lifecycle design](decisions/0012-restart-safe-manual-lifecycle.md)
-and [validation results](qualification/lifecycle/README.md).
-
-Step 4: [capacity collection and policy](capacity-policy.md).
-
-Bucket contraction follow-up: [all-candidate preflight and remaining completion
-boundary](bucket-scale-in.md). Experimental manual Bucket removal is implemented; production automatic execution remains release-gated.
-
-[PersistentFleet graceful lifecycle](persistent-fleet-lifecycle.md) describes the launcher protocol, same-AZ authenticated retained-volume handoff, executable contraction limits, migration boundary and remaining qualification.
-
-- [Maintenance execution](maintenance-execution.md): same-version restarts, retained deletion, and remaining runtime/adapter limits.
-
-- [Ordered Bucket placement](ordered-bucket.md): deterministic strict-AZ retirement.
-- [Installation, monitoring and releases](operations.md): Helm, status, metrics and release boundaries.
-
-Current [critical-feature checklist](critical-features.md) distinguishes implemented paths from runtime dependencies and external qualification.
+- [Runtime qualification](runtime-qualification.md), [shutdown evidence](shutdown-evidence.md),
+  [read-only S3 recovery evidence](s3-recovery-evidence.md): the original investigations.
+- [Shared lifecycle safety](shared-lifecycle-safety.md) (step-3 prerequisites),
+  [PersistentFleet implementation gap](persistent-fleet-implementation-gap.md)
+  (analysis that motivated the launcher), [pre-release review](pre-release-review.md)
+  (review at commit `d3ea0df`).

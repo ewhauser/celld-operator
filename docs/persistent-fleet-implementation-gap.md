@@ -1,10 +1,13 @@
 # PersistentFleet execution and retained-disk reuse
 
-Follow-up: [the launcher-managed graceful PersistentFleet path](persistent-fleet-lifecycle.md) implements a restricted same-host contract. The earlier analysis below remains relevant to unwrapped invocations and uncertain failures.
+> Historical analysis (18 September 2026). It motivated the trusted launcher; the
+> restricted same-host path it asked for is now implemented in
+> [persistent-fleet-lifecycle.md](persistent-fleet-lifecycle.md), and the current
+> feature matrix is [critical-features.md](critical-features.md). The analysis below
+> remains the reason unwrapped invocations and uncertain node failures stay blocked.
 
-18 September 2026. **Implementation remains blocked; this is not a completed
-scale-in feature or a testing-only release gate.** No production removal or
-reactivation path was enabled in this investigation. Bucket behavior is unchanged.
+At the time of writing, implementation was blocked: no production removal or
+reactivation path was enabled in this investigation. Bucket behavior was unchanged.
 
 ## What the current metadata contract cannot establish
 

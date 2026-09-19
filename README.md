@@ -2,9 +2,14 @@
 
 Kubernetes fleet operator for celld, targeting AWS EKS with S3 and EBS.
 
-This repository includes an experimental namespaced fleet API, initial infrastructure
-reconciliation, journaled manual scale-out and Bucket scale-in, and a version-pinned runtime evidence adapter. Production lifecycle
-automation remains blocked pending qualification.
+This repository is an experimental operator: a namespaced fleet API, reservation-arbitrated
+provisioning for Bucket and PersistentFleet profiles, a durable lifecycle journal, manual
+scale-out and contraction in both profiles (PersistentFleet through a trusted launcher),
+same-version restarts, retained deletion, one directional runtime upgrade, and an
+optional capacity policy. Every path is experimental. Automatic contraction executes only
+in the local test fixture; production automatic contraction, EKS/S3/EBS behavior and node
+failure remain release gates. The authoritative status is
+[docs/critical-features.md](docs/critical-features.md).
 
 ## Development
 
@@ -25,15 +30,17 @@ builds, and [docs/](docs/README.md) for the architecture and qualification work.
 
 Runtime qualification: [measured findings and release gates](docs/qualification/README.md), [local harness](hack/qualification/README.md).
 
-## Experimental infrastructure controller
+## Where to read
 
-Step 2 defines the namespaced CelldFleet API and initial provisioning for both
-profiles. See [API, examples and safety boundaries](docs/fleet-api.md). Production
-qualification and PersistentFleet contraction remain blocked. [Bucket logical membership contraction](docs/bucket-scale-in.md) supports experimental manual requests; production automatic removal remains release-gated. Step 3 adds a durable operation
-journal and fault-tested contraction engine behind explicit qualification gates;
-see [lifecycle validation](docs/qualification/lifecycle/README.md).
+- [Fleet API, installation and safety boundaries](docs/fleet-api.md).
+- [Current implementation checklist and remaining gates](docs/critical-features.md).
+- Contracts: [Bucket contraction](docs/bucket-scale-in.md),
+  [PersistentFleet launcher lifecycle](docs/persistent-fleet-lifecycle.md),
+  [maintenance execution](docs/maintenance-execution.md),
+  [runtime versions](docs/runtime-versions.md), [capacity policy](docs/capacity-policy.md).
+- [Architecture decisions](docs/decisions/README.md) and
+  [qualification evidence](docs/qualification/README.md), including the
+  [fault-injection suite](docs/qualification/faults/README.md).
 
-Step 4 adds [optional capacity policy](docs/capacity-policy.md). Step 5 adds
-[coordinated maintenance](docs/decisions/0014-coordinated-maintenance.md): durable
-blocked upgrade/restart requests, pause/resume fencing and retained deletion.
-No runtime transition, rollback, planned restart or final shutdown is qualified.
+Test layers: `make test` (unit, fake client), `make test-envtest` (real API server),
+`make integration` and its `integration-*` variants (disposable kind cluster).

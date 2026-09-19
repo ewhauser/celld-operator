@@ -1,5 +1,7 @@
 # Shared lifecycle safety implementation
 
+> Historical record (18 September 2026). It describes the state at that step; the current feature matrix is [critical-features.md](critical-features.md) and the current journal version and compatibility rules are in [journal-archives.md](journal-archives.md).
+
 Follow-up: [the launcher-managed graceful PersistentFleet path](persistent-fleet-lifecycle.md) implements a restricted same-host contract. The earlier analysis below remains relevant to unwrapped invocations and uncertain failures.
 
 18 September 2026. This implements shared prerequisites, not either profile's
@@ -44,7 +46,7 @@ clear current/freshness indicators, never historical records. A newer epoch of
 one unchanged observed process does not erase the earlier epoch. Replaced
 processes remain unresolved; no age limit automatically forgets them.
 
-The reservation journal now reads versions 1/2/3/4 and writes version 4. The
+At this step the reservation journal read versions 1/2/3/4 and wrote version 4 (current: [journal archives](journal-archives.md)). The
 inherited P2 version-3 reader and redistribution state are preserved on upgrade;
 version 4 prevents an older binary from ignoring cancellation/deadline/session
 state. Downgrade after advancement is unsupported. A 200 KiB journal budget
