@@ -49,8 +49,10 @@ The configuration is included, but hooks are not installed automatically.
 `site/` holds the Astro site published to GitHub Pages. Contract, decision and
 qualification pages are synced from `docs/` at build time, and the API, chart,
 sample and flag references are generated from `config/`, `charts/` and `cmd/`,
-so edit those sources rather than the synced copies. Only `site/src/content/docs/start`,
-`concepts` and `reference` are written by hand. `make site` builds it and fails on
+so edit those sources rather than the synced copies. User guides in
+`site/src/content/docs/{start,configure,operate,troubleshoot,concepts,reference,contribute}`
+are written by hand, except for the generated `reference/limitations.md` page.
+`make site` builds it and fails on
 broken internal links; `make site-dev` serves it locally.
 
 ## Containers

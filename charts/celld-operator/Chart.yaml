@@ -4,4 +4,4 @@ description: Experimental Kubernetes lifecycle operator for celld on EKS, S3 and
 type: application
 version: 0.1.0-dev
 appVersion: dev
-kubeVersion: '>=1.30.0-0'
+kubeVersion: '>=1.31.0-0'

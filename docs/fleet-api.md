@@ -1,11 +1,10 @@
 # Experimental fleet provisioning
 
-Step 5 adds [coordinated maintenance](decisions/0014-coordinated-maintenance.md)
-and durably blocked runtime/restart/deletion requests. Step 4 adds optional [capacity policy](capacity-policy.md) and metrics collection to
-journaled manual scale-out. [Bucket scale-in](bucket-scale-in.md) now implements experimental manual logical membership contraction. It does not establish production qualification,
-upgrades, automatic recovery operations, or deletion. Read
-[ADR 0011](decisions/0011-initial-fleet-api.md) and the
-[remaining qualification gates](qualification/README.md) first.
+The operator provisions Bucket and PersistentFleet workloads and coordinates
+manual scaling, maintenance, and retained-data deletion. The
+[current capability matrix](critical-features.md) distinguishes implemented paths
+from unsupported operations and outstanding cloud testing. For installation,
+follow the [user guide](../site/src/content/docs/start/install.mdx).
 
 Use Kubernetes 1.31 or newer with IPv4 Pod networking for this prototype. Before installation, externally provide:
 
@@ -40,9 +39,9 @@ have the runtime's necessary bucket permissions; the production evidence reader 
 | `qualification` | Required literal `Experimental`; no production setting |
 | `profile` | Required `Bucket` or `PersistentFleet` |
 | `replicas` | Manual target/override, 1–100; default 3; at least AZ count |
-| `runtimeImage` | Optional requested celld digest; only the original pin can run; all transitions blocked |
+| `runtimeImage` | Requested celld release digest; see [runtime versions](runtime-versions.md) for accepted images and the one-way PersistentFleet upgrade |
 | `maintenance.paused` | False by default; suspend new and unissued actions, continue issued recovery |
-| `maintenance.restartToken` | Nonempty token requests a restart; currently blocked as unqualified |
+| `maintenance.restartToken` | Change the token to request a same-version restart; placement and shutdown checks must pass |
 | `capacity` | Optional shadow/automatic policy; see [capacity policy](capacity-policy.md) |
 | `serviceAccountName` | Existing account in the fleet namespace |
 | `storage.bucket` | Dedicated canonical bucket, lowercase letters/digits/hyphens |
@@ -59,11 +58,10 @@ have the runtime's necessary bucket permissions; the production evidence reader 
 | `lifecycle.shutdownSeconds` | celld total stop budget (`CELLD_SHUTDOWN_TOTAL_MS`); default 20; immutable |
 | `lifecycle.terminationGraceSeconds` | Pod termination grace; default 30; at least shutdown + 5; the launcher escalates 5 s before it; immutable |
 
-Fleet names must be DNS labels up to 40 characters. Only `replicas`, `capacity`, `runtimeImage` and `maintenance` are mutable; `execution` and `lifecycle` tuning are fixed at creation because the operator never rolls out a changed pod template (see [ADR 0018](decisions/0018-per-fleet-tuning.md) and the [tuned example](../config/samples/tuned.yaml)).
+Fleet names must be DNS labels up to 40 characters. Only `replicas`, `capacity`, `runtimeImage`, `maintenance`, and an authorized Deployment-to-Ordered layout migration are mutable; `execution` and `lifecycle` tuning are fixed at creation because the operator never rolls out a changed pod template (see [ADR 0018](decisions/0018-per-fleet-tuning.md) and the [tuned example](../config/samples/tuned.yaml)).
 Invalid cross-field combinations fail admission; name/dependency errors also
-produce clear controller conditions. No `/scale` API is exposed. Production image
-updates, resize, storage changes and placement changes require a
-future qualified lifecycle implementation. Manual scale-out is journaled. Bucket reductions execute under [logical membership completion](bucket-scale-in.md); launcher-managed PersistentFleet reductions execute through the [graceful retirement path](persistent-fleet-lifecycle.md), and fleets without the launcher remain blocked by the fencing gates. See [ADR 0012](decisions/0012-restart-safe-manual-lifecycle.md) and [ADR 0017](decisions/0017-persistent-launcher-and-graceful-retirement.md).
+produce clear controller conditions. No `/scale` API is exposed. Storage resize, storage changes and placement changes are unsupported. Runtime
+updates follow the explicit [version transition](runtime-versions.md) procedure. Manual scale-out is journaled. Bucket reductions execute under [logical membership completion](bucket-scale-in.md); launcher-managed PersistentFleet reductions execute through the [graceful retirement path](persistent-fleet-lifecycle.md), and fleets without the launcher remain blocked by the fencing gates. See [ADR 0012](decisions/0012-restart-safe-manual-lifecycle.md) and [ADR 0017](decisions/0017-persistent-launcher-and-graceful-retirement.md).
 
 The application Service is `<fleet>:8080`; label authorized client/ingress pods
 in that namespace `celld.example.com/client-of: <fleet>`. Internal port 8081 is
@@ -72,8 +70,8 @@ private to same-fleet peers and the operator namespace's pods labeled
 external ingress. Public ingress, TLS and DNS remain user-managed. Runtime peer
 addresses are individual Pod IPs; headless `<fleet>-peers` also enables DNS discovery.
 
-`Ready` means the current workload reports the requested number of runtime-ready
-replicas. It is not evidence of durable writes or follower placement.
+`Ready` means the current workload has at least one replica and all its applied
+replicas are runtime-ready. It may be true while the fleet target differs. It is not evidence of durable writes or follower placement.
 `InfrastructureReady` means the required objects match, even while Pods are
 Pending. `Blocked` identifies invalid configuration, missing dependencies,
 isolation verification, conflicting reservations, drift or missing workloads.
@@ -82,8 +80,9 @@ Use Pod events to distinguish insufficient nodes, AZ constraints, PVC binding an
 runtime health 503. Metrics serving is optional through `--metrics-bind-address`;
 Prometheus is never a provisioning prerequisite.
 
-Deletion remains visibly pending behind a finalizer and retains the workload,
-PVCs and reservation. Do not remove that finalizer as a routine cleanup procedure.
+Deletion waits behind a finalizer while shutdown is verified. After verified
+shutdown, compute cleanup and finalizer completion proceed; PVCs, bucket data,
+reservation and recovery records remain retained. Do not remove that finalizer as a routine cleanup procedure.
 Initial PersistentFleet provisioning rejects pre-existing ordinal PVCs, including
 claims carrying matching labels. It exclusively creates new claims before the
 StatefulSet can consume them. A claim-name race or partial allocation preserves
@@ -128,7 +127,7 @@ Edit `spec.replicas` to request additive capacity. Both profiles preserve the
 workload UID and template. `status.lifecycle` exposes the operation ID, phase,
 from/to counts, selected target/session (when present) and sticky loss finding.
 The retained reservation journal is authoritative; clearing status does not cancel
-an operation. `LifecycleProgress` means a durable transition is in progress.
+an operation. The `Progressing` condition with reason `LifecycleProgress` means a durable transition is in progress.
 `ScaleOutBlocked` identifies uncertain PVC allocation or replica update conflicts.
 `StorageIdentityConflict` identifies missing/replaced retained disks.
 
@@ -141,7 +140,7 @@ without the launcher. Production automatic contraction reports
 `BucketAutomaticUnqualified` or `PersistentAutomaticUnqualified` until the AWS
 release gate closes. No timeout or administrative attestation bypasses these gates.
 
-Step 2 PersistentFleet reservations without recorded creation PVC UIDs now block
+Legacy PersistentFleet reservations without recorded creation PVC UIDs block
 for review. The operator does not infer identity from matching labels or offer an
 automatic migration. See [step 3 validation](qualification/lifecycle/README.md).
 
@@ -152,15 +151,15 @@ See [the pause example](../config/samples/maintenance-paused.yaml) and
 request precedence, finalizer and garbage collection semantics.
 `MaintenancePaused` and `Deleting` conditions expose the control state;
 `status.lifecycle.requestKind`, `requestID` and `targetImage` project the retained
-blocked request. The original workload pin remains unchanged. No upgrade or
-rollback transition is qualified, including a same-version planned restart.
+blocked request. Same-version restart and one directional PersistentFleet runtime upgrade are
+implemented with explicit prerequisites; see [maintenance](maintenance-execution.md)
+and [runtime versions](runtime-versions.md). Rollback remains unsupported.
 
 Pause is asynchronous: inspect the condition and workload maintenance fence.
 Already-issued effects continue recovery; uncertain completion and loss remain
-blockers. Deletion retains its finalizer and all identities; it is not a supported
-cleanup operation. Never delete a reservation to reuse a bucket or retained disk.
+blockers. Deletion retains storage and recovery identities after compute cleanup. Never delete a reservation to reuse a bucket or retained disk.
 
-Step 5 [validation and limitations](qualification/maintenance/README.md).
+Historical [maintenance validation](qualification/maintenance/README.md).
 
 ## Review corrections
 

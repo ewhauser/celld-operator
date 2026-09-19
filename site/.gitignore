@@ -10,3 +10,6 @@ src/content/docs/qualification/
 src/content/docs/history/
 src/content/docs/api/
 src/generated-sidebar.json
+
+# Current capability matrix generated from docs/critical-features.md
+src/content/docs/reference/limitations.md

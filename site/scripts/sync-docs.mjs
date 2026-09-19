@@ -23,7 +23,6 @@ const generatedSections = ['contracts', 'decisions', 'qualification', 'history',
 const contracts = [
 	['fleet-api', 'Fleet API and installation'],
 	['operations', 'Installation and operations'],
-	['critical-features', 'Implementation status'],
 	['capacity-policy', 'Capacity policy'],
 	['maintenance-execution', 'Maintenance execution'],
 	['bucket-scale-in', 'Bucket scale-in'],
@@ -47,6 +46,8 @@ const history = [
 /** @type {{source: string, section: string, slug: string, label?: string}[]} */
 const pages = [];
 for (const [name, label] of contracts) pages.push({ source: `docs/${name}.md`, section: 'contracts', slug: name, label });
+// This current user reference has one source; it is not an engineering report.
+pages.push({ source: 'docs/critical-features.md', section: 'reference', slug: 'limitations', label: 'Capabilities and limitations' });
 for (const [name, label] of history) pages.push({ source: `docs/${name}.md`, section: 'history', slug: name, label });
 
 pages.push({ source: 'docs/decisions/README.md', section: 'decisions', slug: 'index', label: 'Decision index' });
@@ -76,6 +77,17 @@ for (const file of ['bucket', 'bucket-ordered', 'capacity-shadow', 'maintenance-
 routeBySource.set('charts/celld-operator/values.yaml', 'api/helm-values/');
 routeBySource.set('config/crd/celld.example.com_celldfleets.yaml', 'api/celldfleet/');
 routeBySource.set('config/crd/celld.example.com_celldstoragereservations.yaml', 'api/celldstoragereservation/');
+
+// Link repository Markdown to handwritten guides without publishing duplicate copies.
+for (const section of ['start', 'configure', 'operate', 'troubleshoot', 'concepts', 'reference', 'contribute']) {
+    const directory = path.join(contentDir, section);
+    if (!existsSync(directory)) continue;
+    for (const file of readdirSync(directory)) {
+        if (!/\.mdx?$/.test(file)) continue;
+        const slug = file.replace(/\.mdx?$/, '');
+        routeBySource.set(`site/src/content/docs/${section}/${file}`, `${section}/${slug === 'index' ? '' : `${slug}/`}`);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Markdown transformation
@@ -160,17 +172,24 @@ const transform = (page, warnings) => {
 	if (sentence && sentence[0].length >= 40) description = sentence[0].trim();
 	if (description.length > 200) description = `${description.slice(0, 197).replace(/\s+\S*$/, '')}…`;
 	const label = page.label ?? title.replace(/^ADR \d{4} /, '');
+	const internal = ['contracts', 'qualification', 'decisions', 'history'].includes(page.section);
+	const category = { contracts: 'Implementation detail', qualification: 'Test report', decisions: 'Design record', history: 'Historical investigation' }[page.section];
 	const frontmatter = [
 		'---',
-		`title: ${yamlString(title)}`,
+		`title: ${yamlString(category ? `${category}: ${title}` : title)}`,
 		description ? `description: ${yamlString(description)}` : null,
-		`editUrl: ${yamlString(blob(sourceRel))}`,
+		`editUrl: ${yamlString(`${repoUrl}/edit/main/${sourceRel}`)}`,
+		internal ? 'pagefind: false' : null,
+		internal ? 'prev: false\nnext: false' : null,
 		'---',
 		'',
 	]
 		.filter((entry) => entry !== null)
 		.join('\n');
-	return { label, markdown: frontmatter + out.join('\n').replace(/^\n+/, '') };
+	const notice = internal
+		? `:::note[${category}]\nThis page is for contributors${page.section === 'contracts' ? ' and describes implementation details' : ' and records a particular design or test snapshot'}. For current user guidance, see [capabilities and limitations](${relativeRoute(route, 'reference/limitations/')}) and the [operation guides](${relativeRoute(route, 'operate/scaling/')}). Historical results do not establish current release or AWS validation.\n:::\n\n`
+		: '';
+	return { label, markdown: frontmatter + notice + out.join('\n').replace(/^\n+/, '') };
 };
 
 // ---------------------------------------------------------------------------
@@ -227,10 +246,11 @@ const emitObject = (name, schema, sections, depth) => {
 	}
 	const rules = schema['x-kubernetes-validations'];
 	if (rules?.length) {
-		sections.push('**Validation rules**', '');
+		sections.push('<details>', '<summary>Validation rules and expressions</summary>', '');
 		for (const rule of rules) {
 			sections.push(`- ${cell(rule.message ?? rule.messageExpression ?? '')}`, '', '  ```text', `  ${rule.rule.replace(/\n/g, ' ')}`, '  ```', '');
 		}
+		sections.push('</details>', '');
 	}
 	for (const [key, child] of Object.entries(props)) {
 		if (child.type === 'object' && child.properties) emitObject(`${name}.${key}`, child, sections, depth + 1);
@@ -250,9 +270,9 @@ const crdPage = (file, slug, intro) => {
 		`editUrl: ${yamlString(blob(file))}`,
 		'---',
 		'',
-		`Generated from [${path.basename(file)}](${blob(file)}) at build time. Regenerate the source with \`make generate\`; \`make manifests-check\` fails CI when it drifts from the Go types.`,
-		'',
 		...intro,
+		'',
+		`Field names, defaults, and validation rules come from the [CRD](${blob(file)}). Required fields are marked below; optional fields can be omitted unless a validation rule requires them for your profile.`,
 		'',
 		'| | |',
 		'| --- | --- |',
@@ -447,9 +467,12 @@ for (const page of pages) {
 	const target = path.join(contentDir, page.section, `${page.slug}.md`);
 	mkdirSync(path.dirname(target), { recursive: true });
 	writeFileSync(target, markdown);
-	sidebar[page.section].push({ label, slug: page.slug === 'index' ? page.section : `${page.section}/${page.slug}` });
+	if (sidebar[page.section]) sidebar[page.section].push({ label, slug: page.slug === 'index' ? page.section : `${page.section}/${page.slug}` });
 	count += 1;
 }
+
+// Preserve bookmarks to the former implementation-status route.
+writeFileSync(path.join(contentDir, 'contracts/critical-features.md'), `---\ntitle: Capabilities and limitations\npagefind: false\nprev: false\nnext: false\n---\n\nThe current feature matrix is now at [Capabilities and limitations](../../reference/limitations/).\n`);
 
 const generated = [
 	crdPage('config/crd/celld.example.com_celldfleets.yaml', 'celldfleet', [

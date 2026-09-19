@@ -38,7 +38,7 @@ type CelldFleet struct {
 // +kubebuilder:validation:XValidation:rule="self.placement.zones.all(z, z.startsWith(self.storage.region) && size(z) == size(self.storage.region) + 1 && z.matches('.*[a-z]$'))",message="zones must be standard AZ names in storage.region"
 // +kubebuilder:validation:XValidation:rule="!has(self.capacity) || self.capacity.minReplicas >= self.placement.azCount",message="capacity minimum must cover requested AZs"
 type CelldFleetSpec struct {
-	// Immutable Bucket controller layout. Ordered enables deterministic ordinal removal.
+	// Bucket workload layout. Defaults to Deployment; Ordered uses deterministic ordinal removal. Existing fleets require an explicit migration token and downtime permission to change to Ordered.
 	// +kubebuilder:default=Deployment
 	// +kubebuilder:validation:Enum=Deployment;Ordered
 	BucketWorkload string `json:"bucketWorkload,omitempty"`
@@ -53,20 +53,25 @@ type CelldFleetSpec struct {
 	// A required acknowledgment of the qualification boundary; production is unavailable.
 	// +kubebuilder:validation:Enum=Experimental
 	Qualification string `json:"qualification"`
+	// Storage profile: Bucket uses temporary local disk and S3; PersistentFleet adds retained peer disks. Immutable after creation.
 	// +kubebuilder:validation:Enum=Bucket;PersistentFleet
 	Profile string `json:"profile"`
+	// Manual replica target. Capacity policy can choose a different applied count without editing this field. Must cover every configured availability zone.
 	// +kubebuilder:default=3
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=100
 	Replicas int32 `json:"replicas,omitempty"`
 	// Optional policy; omission keeps manual ownership.
 	Capacity *CapacityPolicy `json:"capacity,omitempty"`
+	// Existing ServiceAccount in the fleet namespace with the runtime bucket permissions. Immutable after creation.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
-	ServiceAccountName string        `json:"serviceAccountName"`
-	Storage            StorageSpec   `json:"storage"`
-	Placement          PlacementSpec `json:"placement"`
+	ServiceAccountName string `json:"serviceAccountName"`
+	// Dedicated bucket and local disk settings. Immutable after creation.
+	Storage StorageSpec `json:"storage"`
+	// Allowed availability zones and scheduling strictness. Immutable after creation.
+	Placement PlacementSpec `json:"placement"`
 	// Per-fleet runtime sizing. Immutable after creation: the operator never rolls
 	// out a changed pod template. Omitted fields keep the prototype constants.
 	// +optional
@@ -186,7 +191,7 @@ type MaintenanceSpec struct {
 	OrderedMigrationToken string `json:"orderedMigrationToken,omitempty"`
 	// Pause new actions and unissued operations; continue recovery of issued actions.
 	Paused bool `json:"paused,omitempty"`
-	// Change this token to request a planned restart. No restart is qualified yet.
+	// Change to a new nonempty token to request a same-version restart. Completed tokens are not replayed. Placement and verified shutdown prerequisites must pass.
 	// +kubebuilder:validation:MaxLength=128
 	RestartToken string `json:"restartToken,omitempty"`
 }
@@ -194,10 +199,12 @@ type MaintenanceSpec struct {
 // One entire bucket is reserved, including all runtime metadata and peer keys.
 // Prefix multiplexing and alternate S3 authorities are deliberately unsupported.
 type StorageSpec struct {
+	// Name of the dedicated S3 bucket. The operator permanently reserves it for this fleet identity.
 	// +kubebuilder:validation:MinLength=3
 	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:Pattern=`^[a-z0-9][a-z0-9-]*[a-z0-9]$`
 	Bucket string `json:"bucket"`
+	// AWS region containing the bucket and the configured availability zones.
 	// +kubebuilder:validation:MaxLength=32
 	// +kubebuilder:validation:Pattern=`^[a-z]{2}(-[a-z]+)+-[0-9]+$`
 	Region string `json:"region"`
@@ -222,10 +229,11 @@ type PlacementSpec struct {
 	// +kubebuilder:validation:items:MinLength=1
 	// +listType=set
 	Zones []string `json:"zones"`
+	// Number of availability zones; must equal the number of entries in zones.
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=6
 	AZCount int32 `json:"azCount"`
-	// Relaxed keeps the zone allowlist but changes spread to ScheduleAnyway.
+	// Strict requires zone balance and distinct hosts. Relaxed makes spread and host separation preferences while retaining the zone allowlist.
 	// +kubebuilder:default=Strict
 	// +kubebuilder:validation:Enum=Strict;Relaxed
 	Mode string `json:"mode,omitempty"`
@@ -234,44 +242,75 @@ type PlacementSpec struct {
 // LifecycleStatus is an informational projection of the retained reservation journal.
 // Clearing status never cancels an operation or removes recovery evidence.
 type LifecycleStatus struct {
-	StartedAt        string `json:"startedAt,omitempty"`
+	// RFC3339 start time of the active operation, when available.
+	StartedAt string `json:"startedAt,omitempty"`
+	// RFC3339 evidence time of the most recent lifecycle history entry, when available.
 	LastCompletionAt string `json:"lastCompletionAt,omitempty"`
-	LastOutcome      string `json:"lastOutcome,omitempty"`
+	// Outcome recorded in the most recent lifecycle history entry.
+	LastOutcome string `json:"lastOutcome,omitempty"`
 
 	// RetiredBucketSessions left logical membership; physical liveness is unknown.
-	RetiredBucketSessions int32  `json:"retiredBucketSessions,omitempty"`
-	EvidenceBlocker       string `json:"evidenceBlocker,omitempty"`
-	EvidenceCheckedAt     string `json:"evidenceCheckedAt,omitempty"`
-	SessionCount          int32  `json:"sessionCount,omitempty"`
-	Deadline              string `json:"deadline,omitempty"`
-	Stalled               bool   `json:"stalled,omitempty"`
-	RequestKind           string `json:"requestKind,omitempty"`
-	RequestID             string `json:"requestID,omitempty"`
-	TargetImage           string `json:"targetImage,omitempty"`
-	OperationID           string `json:"operationID,omitempty"`
-	Phase                 string `json:"phase,omitempty"`
-	From                  int32  `json:"from,omitempty"`
-	To                    int32  `json:"to,omitempty"`
-	TargetPod             string `json:"targetPod,omitempty"`
-	TargetUID             string `json:"targetUID,omitempty"`
-	TargetGeneration      string `json:"targetGeneration,omitempty"`
-	PossibleLoss          string `json:"possibleLoss,omitempty"`
+	RetiredBucketSessions int32 `json:"retiredBucketSessions,omitempty"`
+	// Reason the most recent recovery metadata assessment could not establish the required state.
+	EvidenceBlocker string `json:"evidenceBlocker,omitempty"`
+	// RFC3339 time of the most recent recorded recovery metadata assessment.
+	EvidenceCheckedAt string `json:"evidenceCheckedAt,omitempty"`
+	// Number of runtime sessions in the most recent recorded evidence inventory.
+	SessionCount int32 `json:"sessionCount,omitempty"`
+	// RFC3339 operation deadline. Passing it reports a stall; it does not cancel recovery.
+	Deadline string `json:"deadline,omitempty"`
+	// Whether the active operation has exceeded its persisted deadline.
+	Stalled bool `json:"stalled,omitempty"`
+	// Kind of a retained maintenance or runtime-transition request.
+	RequestKind string `json:"requestKind,omitempty"`
+	// Identifier or token of the retained request.
+	RequestID string `json:"requestID,omitempty"`
+	// Requested runtime image of a retained transition request.
+	TargetImage string `json:"targetImage,omitempty"`
+	// Identifier of the active capacity or maintenance operation.
+	OperationID string `json:"operationID,omitempty"`
+	// Current phase of the active operation; use the condition message for the next action.
+	Phase string `json:"phase,omitempty"`
+	// Starting replica count of the active capacity operation.
+	From int32 `json:"from,omitempty"`
+	// Target replica count of the active capacity operation.
+	To int32 `json:"to,omitempty"`
+	// Pod selected for the active capacity operation, when applicable.
+	TargetPod string `json:"targetPod,omitempty"`
+	// Exact Kubernetes UID of the selected target Pod.
+	TargetUID string `json:"targetUID,omitempty"`
+	// Runtime session generation of the selected target.
+	TargetGeneration string `json:"targetGeneration,omitempty"`
+	// Retained runtime data-loss finding. Preserve storage and recovery records and investigate; editing status does not clear it.
+	PossibleLoss string `json:"possibleLoss,omitempty"`
 }
 
 type CelldFleetStatus struct {
-	DesiredReplicas         int32  `json:"desiredReplicas,omitempty"`
-	AppliedReplicas         int32  `json:"appliedReplicas,omitempty"`
-	ObservedReplicas        int32  `json:"observedReplicas,omitempty"`
-	JoiningReplicas         int32  `json:"joiningReplicas,omitempty"`
-	TerminatingReplicas     int32  `json:"terminatingReplicas,omitempty"`
-	ReplicaObservationValid bool   `json:"replicaObservationValid,omitempty"`
-	BlockedSince            string `json:"blockedSince,omitempty"`
-
-	Capacity           CapacityStatus  `json:"capacity,omitempty"`
-	Lifecycle          LifecycleStatus `json:"lifecycle,omitempty"`
-	ObservedGeneration int64           `json:"observedGeneration,omitempty"`
-	ReadyReplicas      int32           `json:"readyReplicas,omitempty"`
-	Reservation        string          `json:"reservation,omitempty"`
+	// Current operation or enabled policy target, otherwise spec.replicas; zero during deletion.
+	DesiredReplicas int32 `json:"desiredReplicas,omitempty"`
+	// Replica target currently applied to the owned Kubernetes workload.
+	AppliedReplicas int32 `json:"appliedReplicas,omitempty"`
+	// Number of owned Pods observed in the latest complete inventory, including terminating Pods.
+	ObservedReplicas int32 `json:"observedReplicas,omitempty"`
+	// Observed non-terminating Pods that are not ready yet.
+	JoiningReplicas int32 `json:"joiningReplicas,omitempty"`
+	// Observed Pods with a deletion timestamp.
+	TerminatingReplicas int32 `json:"terminatingReplicas,omitempty"`
+	// Whether the Pod inventory was complete. False means counts must not be interpreted as proof of no running processes.
+	ReplicaObservationValid bool `json:"replicaObservationValid,omitempty"`
+	// RFC3339 time when the fleet entered its current continuous Blocked state; empty when not blocked.
+	BlockedSince string `json:"blockedSince,omitempty"`
+	// Latest capacity policy recommendation and observation coverage.
+	Capacity CapacityStatus `json:"capacity,omitempty"`
+	// Progress and retained findings for capacity and maintenance operations.
+	Lifecycle LifecycleStatus `json:"lifecycle,omitempty"`
+	// Fleet metadata.generation reflected by this status update.
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+	// Ready count from the owned workload status, provided it covers the current workload generation.
+	ReadyReplicas int32 `json:"readyReplicas,omitempty"`
+	// Name of the cluster-scoped storage reservation holding this fleet's recovery records.
+	Reservation string `json:"reservation,omitempty"`
+	// Current readiness, progress, blocked, maintenance, and experimental-validation conditions.
 	// +listType=map
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
@@ -299,12 +338,17 @@ type ReservationSpec struct {
 	// +optional
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=100
-	InitialReplicas int32  `json:"initialReplicas,omitempty"`
-	Bucket          string `json:"bucket"`
-	FleetNamespace  string `json:"fleetNamespace"`
-	FleetName       string `json:"fleetName"`
-	FleetUID        string `json:"fleetUID"`
-	SpecHash        string `json:"specHash"`
+	InitialReplicas int32 `json:"initialReplicas,omitempty"`
+	// Dedicated S3 bucket permanently bound to this reservation.
+	Bucket string `json:"bucket"`
+	// Namespace of the fleet that owns the reservation.
+	FleetNamespace string `json:"fleetNamespace"`
+	// Name of the fleet that owns the reservation.
+	FleetName string `json:"fleetName"`
+	// Exact Kubernetes UID of the owning fleet; recreating a fleet with the same name does not transfer the reservation.
+	FleetUID string `json:"fleetUID"`
+	// Fingerprint of the original immutable fleet configuration used to detect conflicting reuse.
+	SpecHash string `json:"specHash"`
 }
 
 // +kubebuilder:object:root=true

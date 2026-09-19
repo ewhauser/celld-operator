@@ -81,7 +81,7 @@
 	border-radius: 9px;
 	border-collapse: separate;
 	border-spacing: 0;
-	overflow: hidden;
+	overflow-y: hidden;
 	font-size: var(--sl-text-sm);
 }
 .sl-markdown-content thead th {
@@ -176,3 +176,10 @@ summary:focus-visible {
 	outline: 3px solid #65aa83;
 	outline-offset: 3px;
 }
+
+/* Keep the introduction and its actions visible without a splash-page-sized gap. */
+.hero { padding-block: 2rem; grid-template-columns: 1fr; }
+.hero h1 { max-width: 24ch; font-size: clamp(2.25rem, 4vw, 3.25rem); }
+.hero .tagline { max-width: 54ch; }
+.sl-markdown-content details { margin-block: 1rem; }
+.sl-markdown-content details > summary { cursor: pointer; font-weight: 600; }

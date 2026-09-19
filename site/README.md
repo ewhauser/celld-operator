@@ -1,34 +1,38 @@
 # Documentation site
 
-Astro + Starlight site published to GitHub Pages by `.github/workflows/site.yaml`.
+Astro + Starlight user documentation. The primary navigation follows tasks:
+Get started, Configure, Operate, Troubleshoot, Reference, and Contribute.
 
 ```sh
-pnpm install
-pnpm dev      # syncs, then serves http://localhost:4321/celld-operator/
-pnpm build    # syncs, builds dist/, fails on broken internal links
+pnpm install --frozen-lockfile
+pnpm dev --background  # sync, then serve http://localhost:4321/celld-operator/
+pnpm exec astro dev stop
+pnpm build             # generate references, build search, validate internal links
 ```
 
-`pnpm sync` (run automatically before `dev` and `build`) regenerates everything under
-`src/content/docs/{contracts,decisions,qualification,history,api}` from the repository:
+Write user guides in `src/content/docs/{start,configure,operate,troubleshoot}`.
+The homepage is `src/content/docs/index.md`. Concepts and contributor guidance
+live under `concepts` and `contribute`; the sidebar is in `astro.config.mjs`.
 
-| Site section | Source |
-| --- | --- |
-| Contracts, Historical investigations | `docs/*.md` |
-| Design decisions | `docs/decisions/` |
-| Qualification evidence | `docs/qualification/**/README.md` and `eks-smoke-plan.md` |
-| API references | `config/crd/*.yaml` |
-| Sample manifests | `config/samples/*.yaml` |
-| Helm chart values | `charts/celld-operator/values.yaml` and `values.schema.json` |
-| Operator flags | `cmd/celld-operator/main.go` |
+`pnpm sync` runs before dev/build. It copies engineering records from `docs/` into
+ignored `contracts`, `decisions`, `qualification`, and `history` directories.
+Those pages remain accessible through Contribute and existing URLs, carry audience
+labels, and are excluded from user search. Edit their repository sources.
 
-Relative Markdown links between synced documents are rewritten to site routes; links to
-files that are not published (logs, JSON evidence, `hack/`) point at GitHub. Those
-directories are git-ignored; edit the sources, not the copies.
+The current capability matrix has one source: `docs/critical-features.md`, published
+as `reference/limitations`. Its former `contracts/critical-features` URL remains
+as a pointer. Keep implementation status and validation boundaries separate.
 
-Hand-written pages live in `src/content/docs/start`, `concepts` and `reference`, and the
-landing page is `src/content/docs/index.mdx`. Styling in `src/styles/custom.css` follows
-the celld-tck palette. The sidebar for synced sections is generated into
-`src/generated-sidebar.json`.
+API, Helm, sample and flag references under `api` are generated from Go-generated
+CRDs, chart values, sample manifests and the binary flags. Add field descriptions
+in `api/v1alpha1`, then run `make generate` and `make chart-sync` at repository root.
+Raw validation expressions are available in expandable details.
 
-The site builds for `https://ewhauser.github.io/celld-operator/`. Override for a custom
-domain with `SITE_URL` and `SITE_BASE`.
+Check a documentation change by reading its commands against the current code,
+running `pnpm build`, and opening the result on desktop and a narrow viewport.
+Verify the first-application example and key search terms. A site build checks
+links; it does not establish that the guide was executed on EKS.
+
+GitHub Pages publication is configured in `.github/workflows/site.yaml` for
+`https://ewhauser.github.io/celld-operator/`. Override both `SITE_URL` and `SITE_BASE`
+for another deployment. A successful local build does not publish the site.

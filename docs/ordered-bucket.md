@@ -21,10 +21,11 @@ combining a single-zone selector with a multi-zone minDomains constraint would
 prevent scheduling. Relaxed placement retains the existing soft spread and zone
 allowlist, without promising hard distribution after removal.
 
-`bucketWorkload` defaults to `Deployment` for compatibility and is immutable.
+`bucketWorkload` defaults to `Deployment`. An explicit one-way migration to
+Ordered is the only permitted layout change.
 Existing storage-reservation hashes retain their prior representation. There is
-no automatic Deployment adoption or conversion: changing workload layout on an
-existing fleet is rejected. This feature therefore enables strict multi-AZ
+no automatic Deployment adoption or conversion: use the [migration procedure](bucket-migration.md)
+with its token and downtime permission; an unaccompanied layout edit is rejected. This feature therefore enables strict multi-AZ
 contraction for new Ordered fleets; legacy Deployment fleets retain all-victims
 admission and may block when a scheduler-independent victim cannot be safe.
 

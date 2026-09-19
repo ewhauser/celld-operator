@@ -40,12 +40,17 @@ spec:
           spec:
             properties:
               bucket:
+                description: Dedicated S3 bucket permanently bound to this reservation.
                 type: string
               fleetName:
+                description: Name of the fleet that owns the reservation.
                 type: string
               fleetNamespace:
+                description: Namespace of the fleet that owns the reservation.
                 type: string
               fleetUID:
+                description: Exact Kubernetes UID of the owning fleet; recreating
+                  a fleet with the same name does not transfer the reservation.
                 type: string
               initialReplicas:
                 description: |-
@@ -56,6 +61,8 @@ spec:
                 minimum: 1
                 type: integer
               specHash:
+                description: Fingerprint of the original immutable fleet configuration
+                  used to detect conflicting reuse.
                 type: string
             required:
             - bucket
