@@ -9,7 +9,8 @@ spec:
   replicas: 3
   maintenance:
     paused: true
-    # Nonempty restartToken requests a restart, currently blocked as unqualified.
+    # Change restartToken to request a same-version restart after unpausing.
+    # Strict placement must remain valid; small PersistentFleets need explicit downtime.
     # restartToken: maintenance-2026-09
   # Omission of runtimeImage selects the original immutable v0.5.0 pin.
   serviceAccountName: runtime

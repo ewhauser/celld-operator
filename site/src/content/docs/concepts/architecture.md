@@ -1,60 +1,32 @@
 ---
 title: Architecture
-description: One controller, two profiles, a durable journal on a cluster-scoped reservation, and evidence transports that read but never write.
+description: How a CelldFleet connects Kubernetes workloads, storage, evidence and lifecycle decisions.
 sidebar:
   order: 1
 ---
 
-The operator follows [ADR 0001](../../decisions/0001-controller-architecture/): a single Go controller built on controller-runtime, reconciling a namespaced `CelldFleet` resource, with capacity recommendation separated from lifecycle execution. One installation manages many independent fleets across namespaces.
+A CelldFleet is the desired state for one independent celld cluster. The operator watches that resource, creates the supporting Kubernetes objects, and reports what it can actually prove about the fleet. One operator installation can manage fleets in multiple namespaces; each fleet owns a dedicated bucket and a permanent cluster-scoped storage reservation.
 
-## Resources the operator owns
+![Clients send requests through the application Service to celld pods. The operator manages pods and records operations in Kubernetes. celld writes to S3 and optional retained EBS disks; the operator only reads S3 recovery metadata.](../../../assets/architecture.svg)
 
-For each fleet the controller creates and drifts-checks:
+The runtime handles application requests and durable data. The operator handles placement, observed health, scaling and planned lifecycle actions. S3 evidence tells it whether older sessions and peer logs are still relevant; for PersistentFleet, launcher receipts and volume identity add another stop-and-attachment proof. The operator never writes S3 data.
 
-| Resource | Bucket | PersistentFleet |
-| --- | --- | --- |
-| Workload | Deployment, or a StatefulSet with disk-backed `emptyDir` when `bucketWorkload: Ordered` | StatefulSet with one retained PVC per ordinal |
-| Application Service | `<fleet>:8080`, ClusterIP | same |
-| Peer Service | headless `<fleet>-peers` for DNS discovery; peers address individual Pod IPs | same |
-| NetworkPolicy | 8080 open to Pods labelled `celld.example.com/client-of: <fleet>`; 8081 private to same-fleet peers and operator Pods | same, plus 8083 private to operator Pods for the launcher |
-| PodDisruptionBudget | yes | yes |
-| Launcher credential Secret | no | immutable per-fleet Secret with a random key |
-| Journal archive ConfigMaps | immutable, content-addressed pages once the journal exceeds 180 KiB | same |
+## What the operator creates
 
-Cluster-wide, the operator creates one `CelldStorageReservation` per fleet. It is never garbage collected and never freed. See [lifecycle journal](../lifecycle-journal/).
-
-## Reconciliation flow
-
-1. **Admission and defaults.** CRD validation rules enforce immutability, zone and replica invariants; the controller re-checks names and dependencies and reports `Blocked` with a reason rather than failing silently.
-2. **Reservation.** The bucket is bound to the fleet UID on the reservation before any namespaced object exists. A conflicting reservation blocks provisioning.
-3. **Infrastructure.** Services, policy, budget, claims and the workload are created; drift against the exact expected template is reported, not repaired. Disruptive template repairs need a separately qualified migration.
-4. **Observation.** The collector reads Pod inventory, runtime `/state` on port 8081 and Metrics Server, under a ten-second deadline with bounded workers. Incomplete observation is marked invalid rather than read as zero.
-5. **Lifecycle.** Replica changes, maintenance requests and capacity decisions become journaled operations. Each effect is persisted before it is issued and recovered after a crash. See [safety model](../safety-model/).
-6. **Status.** Conditions, replica pipeline counts, lifecycle projection and capacity explanation are written; Events fire on blocker transitions; metrics update.
-
-## Components in the image
-
-| Binary | Role |
+| Resource | Purpose |
 | --- | --- |
-| `celld-operator` | The controller. Two replicas with leader election; flags in the [operator flags reference](../../api/operator-flags/). |
-| `celld-launcher` | Copied by an init container into an `emptyDir` and run as the celld container's entrypoint for PersistentFleet. Holds an exclusive lock on the volume, seeds the runtime's lease generation, serves authenticated stop requests on port 8083 and writes durable restart-denial markers. See [PersistentFleet lifecycle](../../contracts/persistent-fleet-lifecycle/). |
+| Deployment or StatefulSet | Runs the chosen [profile](../profiles/) |
+| Application ClusterIP Service on 8080 | Stable address for labelled client Pods |
+| Headless peer Service on 8081 | Peer discovery |
+| NetworkPolicy | Restricts client, peer, launcher and egress paths |
+| PodDisruptionBudget | Prevents voluntary disruptions while the operator coordinates lifecycle |
+| CelldStorageReservation | Permanently binds the bucket to one fleet UID and holds lifecycle authority |
+| Retained PVCs and launcher credential | PersistentFleet only |
 
-## External inputs
+The operator does not create AWS buckets, IAM roles, node groups, ingress, TLS or DNS. Prepare those through [AWS identities](../../configure/aws/), [storage](../../configure/storage/), [networking](../../configure/networking/) and [placement](../../configure/placement/).
 
-| Input | Used for | Mode |
-| --- | --- | --- |
-| Kubernetes API | everything above | read and write within granted RBAC |
-| celld `/state` on 8081 | membership, health, pressure | read |
-| S3 `nodes/` and `log/` under the fleet bucket | session inventory, lease expiry, loss declarations | read-only, separate identity |
-| Metrics Server | capacity policy CPU and memory | read |
-| EC2 `TerminateInstances` and `DescribeInstances` | opt-in fencing of one admitted contraction donor | write, only with both fencing flags |
+## One reconciliation loop, two decisions
 
-The operator never writes to S3, never creates AWS resources, and never provisions nodes. Runtime service accounts receive no Kubernetes API tokens.
+Observation gathers Pod inventory, runtime /state, S3 recovery evidence and Metrics Server samples. Incomplete observation is invalid, not zero. Capacity policy may recommend a replica count, but the lifecycle executor decides whether the required evidence permits each action. It writes intent to the [journal](../lifecycle-journal/) before changing a workload or sending a stop request. Conditions and status show the result; [safety model](../safety-model/) explains why an action may remain blocked.
 
-## Where the boundaries come from
-
-- [ADR 0002](../../decisions/0002-durability-and-scaling/): both profiles, both scaling directions, in scope.
-- [ADR 0003](../../decisions/0003-aws-platform-and-provisioning/): EKS, S3, EBS; provisioning stays external.
-- [ADR 0004](../../decisions/0004-availability-zone-placement/): configurable AZ count with strict placement by default.
-- [ADR 0006](../../decisions/0006-metrics-dependencies/): Prometheus optional.
-- [ADR 0009](../../decisions/0009-service-and-ingress-boundary/): ClusterIP only; ingress, TLS, DNS external.
+The image contains the celld-operator controller and a celld-launcher used by PersistentFleet. The launcher holds the volume lock, seeds the runtime lease generation and serves authenticated stop requests. Read the [PersistentFleet lifecycle](../../contracts/persistent-fleet-lifecycle/) for its exact contract. The [architecture decision](../../decisions/0001-controller-architecture/) records design history.

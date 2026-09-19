@@ -1,43 +1,46 @@
 ---
-title: celld operator documentation
-description: Experimental Kubernetes fleet operator for celld on EKS, S3 and EBS.
+title: Run celld fleets on Kubernetes
+description: Install celld operator, deploy your first fleet, and manage scaling and maintenance on Kubernetes.
 tableOfContents: false
+hero:
+  title: Run celld fleets on Kubernetes
+  tagline: Define a fleet in YAML. Let the operator manage its workloads, storage connections, scaling, and maintenance.
+  actions:
+    - text: Install the operator
+      link: ./start/install/
+      icon: right-arrow
+    - text: Choose a storage profile
+      link: ./configure/profiles/
+      variant: secondary
+    - text: Operate a fleet
+      link: ./operate/scaling/
+      variant: minimal
 ---
 
-celld operator is a Go controller that provisions and scales fleets of the [celld](https://github.com/denoland/celld) runtime on Kubernetes. It manages a namespaced `CelldFleet` resource in two profiles, `Bucket` and `PersistentFleet`, records every lifecycle operation in a durable journal, and executes contraction, restart, migration and deletion only on positive evidence. celld keeps ownership of cells, leases, replication and recovery.
-
-:::caution[Experimental]
-Every path is experimental. Fleets must declare `qualification: Experimental`, `ProductionQualified` is always false, and nothing has been qualified on AWS. [Implementation status](./contracts/critical-features/) is the authoritative list of what executes and which release gates remain open.
+:::note[Experimental — for evaluation]
+AWS deployment and failure testing are still incomplete. Review [capabilities and limitations](./reference/limitations/) before choosing a workload for evaluation.
 :::
 
-Source: [github.com/ewhauser/celld-operator](https://github.com/ewhauser/celld-operator). The Contracts, Qualification evidence and Design decisions sections are synced from the repository's `docs/` directory at build time; the API, chart and flag references are generated from the CRDs, chart and binary.
+## From a manifest to a working application
 
-## Start here
+[celld](https://github.com/denoland/celld) runs stateful JavaScript applications using durable cells. The operator manages the Kubernetes fleet that hosts them. You supply the cluster, an S3 bucket, and AWS permissions; the operator creates the workloads, Services, and network policies.
 
-- [What celld operator is](./start/overview/): scope, what it does and deliberately does not do.
-- [Install](./start/install/): prerequisites, CRDs, chart, per-namespace RBAC, NetworkPolicy attestation.
-- [Your first fleet](./start/first-fleet/): adapt a sample, apply it, read the conditions.
-- [Verify and observe](./start/verify/): status fields, Events, metrics, and which signals are not evidence.
+1. [Prepare your cluster](./start/prerequisites/) and its storage and permissions.
+2. [Install the operator](./start/install/) and [create a fleet](./start/first-fleet/).
+3. [Run your first application](./start/first-application/) and check its response.
 
-## Concepts
+## Already running a fleet?
 
-- [Architecture](./concepts/architecture/): owned resources, reconciliation flow, external inputs.
-- [Fleet profiles](./concepts/profiles/): Bucket and PersistentFleet side by side.
-- [Lifecycle journal](./concepts/lifecycle-journal/): the storage reservation, its invariants and versioning.
-- [Safety model](./concepts/safety-model/): accepted evidence, refused inferences, blocker reasons.
+| I want to… | Start here |
+| --- | --- |
+| Add or remove replicas | [Scale a fleet](./operate/scaling/) |
+| Respond to changing demand | [Enable capacity policy](./operate/capacity/) |
+| Restart or upgrade | [Restart a fleet](./operate/restart/) · [Upgrade the runtime](./operate/upgrade-runtime/) |
+| Check health or investigate a problem | [Monitor a fleet](./operate/monitoring/) · [Troubleshoot](./troubleshoot/) |
+| Stop a fleet and understand what remains | [Delete a fleet and retain data](./operate/deletion/) |
 
-## Contracts
+## Choose storage for your workload
 
-The repository's behavioural contracts, unchanged: [fleet API](./contracts/fleet-api/), [operations](./contracts/operations/), [capacity policy](./contracts/capacity-policy/), [maintenance execution](./contracts/maintenance-execution/), [Bucket scale-in](./contracts/bucket-scale-in/), [Ordered Bucket](./contracts/ordered-bucket/), [Bucket migration](./contracts/bucket-migration/), [PersistentFleet lifecycle](./contracts/persistent-fleet-lifecycle/), [EC2 fencing](./contracts/infrastructure-fencing/), [runtime versions](./contracts/runtime-versions/), [journal archives](./contracts/journal-archives/), [runtime dependencies](./contracts/runtime-dependencies/).
+**Bucket** uses S3 for durable writes and temporary local disk. **PersistentFleet** adds retained EBS volumes and peer-disk durability. The choice affects setup, maintenance, and recovery: [compare the profiles](./configure/profiles/) before creating a fleet.
 
-## Reference
-
-- [CelldFleet API](./api/celldfleet/) and [CelldStorageReservation API](./api/celldstoragereservation/), generated from the CRDs.
-- [Sample manifests](./api/samples/), [Helm chart values](./api/helm-values/), [operator flags](./api/operator-flags/).
-- [Conditions and blockers](./reference/conditions/), [compatibility](./reference/compatibility/), [security boundaries](./reference/security-boundaries/).
-
-## Evidence and decisions
-
-- [Qualification evidence](./qualification/): recorded local runs, measured findings and the open gates, including the [EKS smoke suite plan](./qualification/eks-smoke-plan/).
-- [Design decisions](./decisions/): the seventeen architecture decision records.
-- Historical investigations: [runtime qualification](./history/runtime-qualification/), [shutdown evidence](./history/shutdown-evidence/), [S3 recovery evidence](./history/s3-recovery-evidence/), [shared lifecycle safety](./history/shared-lifecycle-safety/), [PersistentFleet implementation gap](./history/persistent-fleet-implementation-gap/), [pre-release review](./history/pre-release-review/).
+For configuration fields, see the [Fleet API](./api/celldfleet/) and [Helm values](./api/helm-values/). To work on the operator itself, start with [Contribute](./contribute/).

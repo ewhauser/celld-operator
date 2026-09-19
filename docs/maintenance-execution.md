@@ -1,10 +1,13 @@
 # Maintenance execution
 
-The shared retained reservation journal now executes same-version restart tokens
-and RetainData deletion. The adapter image remains the pinned v0.5.0 digest.
-Different-image upgrades and rollback are **not implemented**: neither a second
-adapter nor a qualified directional compatibility contract exists. An arbitrary
-new digest remains `UnsupportedTransition`; changing it never edits a pod image.
+The operator executes same-version restarts and RetainData deletion after checking
+runtime and storage state. PersistentFleet also supports the one-way v0.4.1 to
+v0.5.0 upgrade with whole-fleet downtime; see [runtime versions](runtime-versions.md).
+Other image transitions and rollback remain unsupported. All paths are experimental;
+see [capabilities and limitations](critical-features.md) for validation status.
+
+For commands and progress checks, use the [restart guide](../site/src/content/docs/operate/restart.md)
+and [deletion guide](../site/src/content/docs/operate/deletion.md).
 
 ## Planned restart
 
@@ -78,9 +81,8 @@ creation updates and remains after the CelldFleet disappears.
 Existing workloads without the launcher and existing RWO PVCs are not silently
 adopted or edited. Introducing the launcher or changing PVC access modes requires
 an explicit migration protocol and qualified exclusive handoff; this change does
-not claim to implement those migrations. AWS fault qualification, the final
-PersistentFleet protocol above, and directional cross-version adapters remain
-separate requirements.
+not claim to implement those migrations. AWS fault qualification remains outstanding. The implemented directional adapter
+does not authorize additional version pairs or rollback.
 
 ## Coordinated downtime for small PersistentFleet operations
 

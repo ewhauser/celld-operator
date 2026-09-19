@@ -1,96 +1,67 @@
 ---
-title: Install
-description: Provide the AWS and cluster prerequisites, install the CRDs and chart, grant the namespaced Role, and decide whether to attest NetworkPolicy enforcement.
+title: Install the operator
+description: Build and publish an immutable operator image, install CRDs and Helm chart, and check the rollout.
 sidebar:
-  order: 2
+  order: 3
 ---
 
 import { Steps } from '@astrojs/starlight/components';
 
-There is one operator installation per cluster. It watches every namespace that holds fleets but can only act inside namespaces where you grant it the fleet Role. Read the [installation and operations contract](../../contracts/operations/) for the full text; this page is the ordered walk-through.
-
-:::caution[Use an explicit kubeconfig context]
-The operator never infers a default cluster, and neither should you. Every command below takes `--context`. Never enable `--local-test` on EKS; it selects local MinIO and synthetic credentials for the disposable integration harness.
-:::
-
-## Prerequisites you provide
-
-| Requirement | Why |
-| --- | --- |
-| Kubernetes 1.31 or newer with IPv4 Pod networking | Prototype target; the chart accepts 1.30+ but the API contract names 1.31. |
-| A CNI that enforces NetworkPolicy, independently verified | The generated policies isolate celld's private peer and launcher ports. The operator cannot verify enforcement itself. |
-| One dedicated S3 bucket per fleet, no external writers, no object expiry | The whole bucket is reserved for the fleet. Evidence records must not expire. |
-| A ServiceAccount in each fleet namespace bound to a runtime IAM role (EKS Pod Identity or IRSA) | The runtime's credentials. The CR stores no secrets. |
-| A separate read-only AWS identity for the operator's `nodes/` and `log/` evidence reads | Contraction evidence. The operator writes nothing to S3. |
-| For PersistentFleet: EBS CSI, a StorageClass with `ebs.csi.aws.com`, `reclaimPolicy: Retain`, `volumeBindingMode: WaitForFirstConsumer` | Retained volumes are recovery assets. Delete reclaim would destroy them. |
-| Node capacity in every zone you list | Strict placement leaves Pods Pending rather than relaxing zones. |
-| Optional: Metrics Server, Prometheus Operator CRDs | Capacity policy needs Metrics Server. Prometheus is never a prerequisite. |
-
-## Install with Helm
+Run these commands from a clone of the [celld operator repository](https://github.com/ewhauser/celld-operator) after completing [prerequisites](../prerequisites/). They install one operator per cluster. Use a registry that your EKS nodes can pull from.
 
 <Steps>
 
-1. **Build or pull an image.** Nothing is published yet; the development manifest references an unpublished `:dev` tag. Build and push your own, then record its digest.
+1. **Clone, build and publish the operator image.** The development `:dev` image is not a published release. Choose a unique tag and registry path. The Dockerfile cross-compiles its Go binaries for the target platform; this command publishes an image index for both common EKS node architectures. Inspect the published index and copy its top-level `sha256:…` digest for Helm.
 
    ```bash
-   make image VERSION=dev
+   git clone https://github.com/ewhauser/celld-operator.git
+   cd celld-operator
+   docker buildx build --platform linux/amd64,linux/arm64 \
+     --build-arg VERSION=YOUR_TAG \
+     --tag YOUR_REGISTRY/celld-operator:YOUR_TAG --push .
+   docker buildx imagetools inspect YOUR_REGISTRY/celld-operator:YOUR_TAG
    ```
 
-2. **Apply the CRDs explicitly.** Helm installs CRDs once and never upgrades or removes them, so the repository treats them as a separate step on install and on every upgrade.
+   Authenticate Docker to your registry before pushing, and check that the inspection lists the platforms used by your EKS nodes. If the registry is private, create an image pull Secret in `celld-system` and set chart `imagePullSecrets`; see the [chart values](../../api/helm-values/). The image includes the operator and launcher binaries. The runtime itself is the separately pinned celld v0.5.0 image.
+
+2. **Install or update the CRDs.** Helm does not upgrade CRDs from a chart's `crds/` directory. Apply the repository copies on every operator upgrade.
 
    ```bash
    kubectl --context YOUR_CONTEXT apply -f config/crd/
    ```
 
-3. **Install the chart**, listing every namespace that will hold fleets so the chart renders the namespaced Role and RoleBinding into each.
+3. **Install the Helm chart.** The `fleetNamespaces` value creates a Role and RoleBinding in each named namespace. `fleets` must already exist. Set the operator AWS identity by creating a Pod Identity association for `celld-system/celld-celld-operator`, or attach the IRSA role annotation through a Helm values file.
 
    ```bash
    helm --kube-context YOUR_CONTEXT upgrade --install celld charts/celld-operator \
      --namespace celld-system --create-namespace \
      --set image.repository=YOUR_REGISTRY/celld-operator \
-     --set image.digest=sha256:YOUR_DIGEST \
+     --set image.digest=sha256:YOUR_PUBLISHED_DIGEST \
      --set 'fleetNamespaces={fleets}'
    ```
 
-   For PersistentFleet also set `launcherImage` to the same digest-pinned image; the launcher binary ships inside it. See the [chart values reference](../../api/helm-values/).
+   Verify or create the operator's Pod Identity association now if you chose Pod Identity. The chart's ServiceAccount is `celld-celld-operator` for this release name.
 
-4. **Grant the fleet Role by hand** for any namespace you did not list. A fleet in a namespace without it reports `NamespaceAccessDenied` and nothing is created there.
+4. **Check the rollout and namespace permissions.** A healthy installation has both requested operator replicas available and a RoleBinding in `fleets` whose subject is `celld-celld-operator` in `celld-system`.
 
    ```bash
-   kubectl --context YOUR_CONTEXT -n fleets apply -f config/rbac/fleet-namespace.yaml
+   kubectl --context YOUR_CONTEXT -n celld-system rollout status deployment/celld-celld-operator --timeout=180s
+   kubectl --context YOUR_CONTEXT -n celld-system get pods
+   kubectl --context YOUR_CONTEXT -n fleets get rolebinding celld-celld-operator-fleet -o yaml
    ```
 
-5. **Attest NetworkPolicy enforcement only after verifying it.** `networkPolicyEnforced=true` is an administrator assertion, not a CNI installer. Provisioning is blocked until it is set.
+5. **Attest NetworkPolicy enforcement.** Once you have independently checked that your CNI enforces policies, enable fleet provisioning:
 
    ```bash
    helm --kube-context YOUR_CONTEXT upgrade celld charts/celld-operator \
      --namespace celld-system --reuse-values --set networkPolicyEnforced=true
+   kubectl --context YOUR_CONTEXT -n celld-system rollout status deployment/celld-celld-operator --timeout=180s
    ```
 
 </Steps>
 
-## Install with plain manifests
+The plain-manifest path uses `config/manager/operator.yaml` and `config/rbac/fleet-namespace.yaml`. That RoleBinding refers to **`celld-system/celld-operator`**, the plain-manifest ServiceAccount. Do not apply it unchanged as a fallback for the Helm release: edit its subject to `celld-system/celld-celld-operator`, or add `fleets` to `fleetNamespaces` and let Helm render the binding.
 
-The same steps without Helm, using the development manifest:
-
-```bash
-kubectl --context YOUR_CONTEXT apply -f config/crd/
-kubectl --context YOUR_CONTEXT apply -f config/manager/operator.yaml
-kubectl --context YOUR_CONTEXT -n YOUR_FLEET_NAMESPACE apply -f config/rbac/fleet-namespace.yaml
-```
-
-Edit the Deployment's `args` to add `--network-policy-enforced` after verification, and `--launcher-image` for PersistentFleet. Every flag is listed in the [operator flags reference](../../api/operator-flags/).
-
-## Optional features
-
-| Feature | How to enable | Read first |
-| --- | --- | --- |
-| Metrics and alerts | `metrics.enabled=true`, then `metrics.serviceMonitor.enabled` and `metrics.prometheusRule.enabled` if Prometheus Operator is installed | [Operations](../../contracts/operations/#monitoring) |
-| PersistentFleet launcher | `launcherImage` set to the digest-pinned operator image | [PersistentFleet lifecycle](../../contracts/persistent-fleet-lifecycle/) |
-| EC2 fencing for an unreachable contraction donor | `ec2Fencing.account` and `ec2Fencing.region` together, plus dedicated-node instance tags | [EC2 fencing](../../contracts/infrastructure-fencing/) |
-
-## Upgrading the operator
-
-Before upgrading, back up together: fleet specifications, `CelldStorageReservation` objects, the immutable journal archive ConfigMaps in each fleet namespace, and launcher credential Secrets. Inspect CRD changes and apply `config/crd/` explicitly. Never roll back to a controller that cannot read the persisted journal version; the current version and compatibility rules are in [journal archives](../../contracts/journal-archives/).
+For a PersistentFleet, also provide `launcherImage=YOUR_REGISTRY/celld-operator@sha256:YOUR_PUBLISHED_DIGEST` and the [EBS prerequisites](../../concepts/profiles/). See [chart values](../../api/helm-values/) for other options. Never use `--local-test` on EKS; that flag is for the disposable MinIO integration harness.
 
 Next: [create your first fleet](../first-fleet/).

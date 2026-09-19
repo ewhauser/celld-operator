@@ -12,74 +12,91 @@ type CapacityPolicy struct {
 	// +kubebuilder:validation:Minimum=30
 	// +kubebuilder:validation:Maximum=3600
 	RedistributionObservationSeconds int32 `json:"redistributionObservationSeconds,omitempty"`
-
+	// Shadow reports recommendations only. ScaleOut permits bounded additions. Automatic also requests removals, which remain disabled against production evidence.
 	// +kubebuilder:default=Shadow
 	// +kubebuilder:validation:Enum=Shadow;ScaleOut;Automatic
 	Mode string `json:"mode,omitempty"`
+	// Policy replica floor; must cover every configured availability zone. Manual overrides can exceed policy bounds.
 	// +kubebuilder:default=3
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=100
 	MinReplicas int32 `json:"minReplicas,omitempty"`
+	// Policy ceiling for automatic additions. Manual overrides can exceed policy bounds.
 	// +kubebuilder:default=10
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=100
 	MaxReplicas int32 `json:"maxReplicas,omitempty"`
+	// Maximum replicas added in one completed stable policy decision.
 	// +kubebuilder:default=1
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=10
 	ScaleOutStep int32 `json:"scaleOutStep,omitempty"`
+	// Minimum interval between counted observations.
 	// +kubebuilder:default=15
 	// +kubebuilder:validation:Minimum=5
 	// +kubebuilder:validation:Maximum=300
 	SampleIntervalSeconds int32 `json:"sampleIntervalSeconds,omitempty"`
+	// Maximum allowed observation age and gap between observations.
 	// +kubebuilder:default=45
 	// +kubebuilder:validation:Minimum=10
 	// +kubebuilder:validation:Maximum=600
 	MaxAgeSeconds int32 `json:"maxAgeSeconds,omitempty"`
+	// Minimum accepted Metrics Server CPU averaging window.
 	// +kubebuilder:default=5
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=60
 	MinWindowSeconds int32 `json:"minWindowSeconds,omitempty"`
+	// Maximum accepted Metrics Server CPU averaging window.
 	// +kubebuilder:default=60
 	// +kubebuilder:validation:Minimum=5
 	// +kubebuilder:validation:Maximum=300
 	MaxWindowSeconds int32 `json:"maxWindowSeconds,omitempty"`
+	// Distinct advancing observations required in a stabilization window.
 	// +kubebuilder:default=3
 	// +kubebuilder:validation:Minimum=2
 	// +kubebuilder:validation:Maximum=100
 	MinSamples int32 `json:"minSamples,omitempty"`
+	// Continuous high-demand duration required before a policy addition.
 	// +kubebuilder:default=30
 	// +kubebuilder:validation:Minimum=10
 	// +kubebuilder:validation:Maximum=3600
 	ScaleOutStabilizationSeconds int32 `json:"scaleOutStabilizationSeconds,omitempty"`
+	// Continuous low-demand duration required before a policy removal recommendation.
 	// +kubebuilder:default=600
 	// +kubebuilder:validation:Minimum=60
 	// +kubebuilder:validation:Maximum=86400
 	ScaleInStabilizationSeconds int32 `json:"scaleInStabilizationSeconds,omitempty"`
+	// Minimum wait after a durable action before another automatic addition.
 	// +kubebuilder:default=300
 	// +kubebuilder:validation:Minimum=30
 	// +kubebuilder:validation:Maximum=86400
 	ScaleOutCooldownSeconds int32 `json:"scaleOutCooldownSeconds,omitempty"`
+	// Minimum wait after a durable action before an automatic removal request.
 	// +kubebuilder:default=900
 	// +kubebuilder:validation:Minimum=60
 	// +kubebuilder:validation:Maximum=86400
 	ScaleInCooldownSeconds int32 `json:"scaleInCooldownSeconds,omitempty"`
+	// Time allowed for requested capacity to become useful before further additions are held.
 	// +kubebuilder:default=600
 	// +kubebuilder:validation:Minimum=60
 	// +kubebuilder:validation:Maximum=86400
 	ProvisioningTimeoutSeconds int32 `json:"provisioningTimeoutSeconds,omitempty"`
+	// Absolute per-container CPU threshold for high demand, in millicores; not a percentage of resource requests.
 	// +kubebuilder:default=200
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=1000000
 	CPUHighMillicores int32 `json:"cpuHighMillicores,omitempty"`
+	// Absolute per-container CPU threshold for low demand, in millicores.
 	// +kubebuilder:default=80
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=1000000
 	CPULowMillicores int32 `json:"cpuLowMillicores,omitempty"`
+	// Per-container Metrics Server memory threshold for high demand, in MiB.
 	// +kubebuilder:default=768
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=1048576
 	MemoryHighMiB int32 `json:"memoryHighMiB,omitempty"`
+	// Per-container Metrics Server memory threshold for low demand, in MiB.
 	// +kubebuilder:default=384
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=1048576
@@ -87,13 +104,20 @@ type CapacityPolicy struct {
 }
 
 type CapacityStatus struct {
-	Mode            string `json:"mode,omitempty"`
-	Reason          string `json:"reason,omitempty"`
-	Message         string `json:"message,omitempty"`
-	DesiredReplicas int32  `json:"desiredReplicas,omitempty"`
-	UsefulReplicas  int32  `json:"usefulReplicas,omitempty"`
-	PendingReplicas int32  `json:"pendingReplicas,omitempty"`
-	CoveredReplicas int32  `json:"coveredReplicas,omitempty"`
+	// Current capacity policy mode.
+	Mode string `json:"mode,omitempty"`
+	// Machine-readable explanation of the latest recommendation or hold.
+	Reason string `json:"reason,omitempty"`
+	// Human-readable explanation of the latest recommendation or hold.
+	Message string `json:"message,omitempty"`
+	// Recommended count; informational in Shadow mode and not necessarily the applied workload count.
+	DesiredReplicas int32 `json:"desiredReplicas,omitempty"`
+	// Observed replicas considered ready and useful by the capacity policy.
+	UsefulReplicas int32 `json:"usefulReplicas,omitempty"`
+	// Capacity requested but not yet observed as useful.
+	PendingReplicas int32 `json:"pendingReplicas,omitempty"`
+	// Expected replicas covered by the current capacity observations.
+	CoveredReplicas int32 `json:"coveredReplicas,omitempty"`
 }
 
 func (p *CapacityPolicy) Default() {

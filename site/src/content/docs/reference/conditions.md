@@ -3,20 +3,29 @@ title: Conditions and blockers
 description: The condition types a CelldFleet reports, the reasons that accompany Blocked, and what each one asks you to do.
 ---
 
+Read conditions with:
+
+```bash
+kubectl --context YOUR_CONTEXT -n fleets get celldfleet my-fleet \
+  -o jsonpath='{range .status.conditions[*]}{.type}{"="}{.status}{" "}{.reason}{": "}{.message}{"\n"}{end}'
+```
+
+Use the condition **type**, **status**, **reason**, and **message** together. For step-by-step diagnosis, start with [Troubleshoot](../../troubleshoot/).
+
 Conditions live in `status.conditions`. `Blocked`, `LifecycleBlocked` and `ProductionQualified` are always present; `LifecycleBlocked=True` and `ProductionQualified=False` stay set throughout the experimental release. Events are emitted only when a blocker's status or reason changes.
 
 ## Condition types
 
 | Type | True means | Notes |
 | --- | --- | --- |
-| `Ready` | The current workload generation reports the requested number of runtime-ready replicas. | Describes observed availability only. A paused or blocked fleet can be Ready. Not a recovery certificate. |
+| `Ready` | The current workload generation has at least one replica and all its applied replicas are runtime-ready. | Describes observed availability only. A paused or blocked fleet can be Ready. It may still be scaling toward a different fleet target. |
 | `InfrastructureReady` | The required Kubernetes objects match the expected template. | Can be true while Pods are Pending. |
 | `Blocked` | Some requested action cannot proceed. | The reason (below) says which. Compatible additive capacity may continue. |
-| `LifecycleBlocked` | Always true in this release. | Contraction, upgrade and deletion paths carry explicit gates. |
-| `LifecycleProgress` | A durable transition is in progress. | The reservation journal is authoritative; clearing status cancels nothing. |
+| `LifecycleBlocked` | Always true in this release. | This reports the experimental validation limit, not whether every manual operation is disabled. |
+| `Progressing` | Provisioning or a lifecycle operation is in progress. | `LifecycleProgress` is a reason value, not a separate condition. Editing status does not cancel an operation. |
 | `MaintenancePaused` | `spec.maintenance.paused` has taken effect. | Pause is asynchronous; issued effects continue recovery. |
-| `Deleting` | The fleet has a deletion timestamp and the finalizer is holding it. | Workload, PVCs and reservation are retained. |
-| `ProductionQualified` | Never true in this release. | See [implementation status](../../contracts/critical-features/). |
+| `Deleting` | The fleet has a deletion timestamp and the finalizer is holding it. | Compute is removed after shutdown checks pass; data and recovery records remain. |
+| `ProductionQualified` | Never true in this release. | See [capabilities and limitations](../limitations/). |
 
 ## Blocker reasons
 
@@ -49,7 +58,7 @@ Reasons appear on `Blocked` and, for lifecycle operations, in `status.lifecycle`
 | `MaintenancePaused` | New actions are suspended by `spec.maintenance.paused`. |
 | `CoordinatedDowntimeBlocked` | The request needs `allowCoordinatedDowntime: true` or its preconditions are not met. |
 
-### A gate that no configuration opens
+### Operation prerequisites or unsupported paths
 
 | Reason | Meaning |
 | --- | --- |
@@ -75,4 +84,4 @@ Reasons appear on `Blocked` and, for lifecycle operations, in `status.lifecycle`
 
 ## Capacity policy reasons
 
-`status.capacity.reason` explains a policy decision rather than a blocker: `PendingCapacity` (requested replicas not yet useful), `IneffectiveCapacity` (past the provisioning deadline), `IncompleteMetrics`, `RepeatedSamples`, `RateLimited`, `StabilizingOut`, `StabilizingIn`, `ObservingRedistribution`, `LoadNotRedistributed`, `RedistributionUnknown` and `ManualOverride`. See [capacity policy](../../contracts/capacity-policy/).
+`status.capacity.reason` explains a policy decision rather than a blocker: `PendingCapacity` (requested replicas not yet useful), `IneffectiveCapacity` (past the provisioning deadline), `IncompleteMetrics`, `RepeatedSamples`, `RateLimited`, `StabilizingOut`, `StabilizingIn`, `ObservingRedistribution`, `LoadNotRedistributed`, `RedistributionUnknown` and `ManualOverride`. See [capacity policy](../../operate/capacity/) for interpreting these reasons and choosing settings.
