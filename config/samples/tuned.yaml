@@ -1,0 +1,30 @@
+# Per-fleet tuning. Every field is optional and immutable after creation; the
+# operator never rolls out a changed pod template. Values are starting points,
+# not capacity guarantees, and the capacity policy's thresholds are independent.
+apiVersion: celld.example.com/v1alpha1
+kind: CelldFleet
+metadata:
+  name: agents
+  namespace: agents-prod
+spec:
+  qualification: Experimental
+  profile: Bucket
+  replicas: 3
+  serviceAccountName: agents-celld
+  storage:
+    bucket: agents-prod-celld
+    region: us-east-1
+    sizeGiB: 20
+  placement:
+    azCount: 3
+    zones: [us-east-1a, us-east-1b, us-east-1c]
+  execution:
+    cpuRequest: "2"
+    cpuLimit: "2"
+    memoryRequest: 4Gi
+    memoryLimit: 4Gi
+    maxResidentCells: 400   # replace with a measured safe cap for the application
+    idleEvictSeconds: 60
+  lifecycle:
+    shutdownSeconds: 120          # CELLD_SHUTDOWN_TOTAL_MS
+    terminationGraceSeconds: 180  # must exceed shutdownSeconds by at least 5

@@ -54,3 +54,51 @@ func TestDefaultsAndValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestTuningValidation(t *testing.T) {
+	good := valid()
+	good.Spec.Execution = &ExecutionSpec{CPURequest: "500m", CPULimit: "1", MemoryRequest: "1Gi", MemoryLimit: "2Gi", MaxResidentCells: 400, IdleEvictSeconds: 60}
+	good.Spec.Lifecycle = &LifecycleSpec{ShutdownSeconds: 60, TerminationGraceSeconds: 65}
+	if err := good.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	e := good.Spec.EffectiveExecution()
+	if e.CPULimit != "1" || e.MemoryLimit != "2Gi" {
+		t.Fatalf("effective execution lost values: %+v", e)
+	}
+	if d := valid().Spec.EffectiveLifecycle(); d.ShutdownSeconds != 20 || d.TerminationGraceSeconds != 30 {
+		t.Fatalf("defaults changed: %+v", d)
+	}
+	partial := valid()
+	partial.Spec.Execution = &ExecutionSpec{MemoryLimit: "3Gi"}
+	if err := partial.Validate(); err != nil {
+		t.Fatalf("partial tuning must fall back to defaults: %v", err)
+	}
+	if e := partial.Spec.EffectiveExecution(); e.CPURequest != DefaultCPURequest || e.MemoryRequest != DefaultMemoryRequest || e.MemoryLimit != "3Gi" {
+		t.Fatalf("partial merge wrong: %+v", e)
+	}
+	bad := map[string]func(*CelldFleet){
+		"cpu limit below request":    func(f *CelldFleet) { f.Spec.Execution = &ExecutionSpec{CPURequest: "2", CPULimit: "1"} },
+		"memory limit below request": func(f *CelldFleet) { f.Spec.Execution = &ExecutionSpec{MemoryRequest: "2Gi", MemoryLimit: "1Gi"} },
+		"memory limit below default": func(f *CelldFleet) { f.Spec.Execution = &ExecutionSpec{MemoryLimit: "256Mi"} },
+		"malformed quantity":         func(f *CelldFleet) { f.Spec.Execution = &ExecutionSpec{CPURequest: "two"} },
+		"zero request":               func(f *CelldFleet) { f.Spec.Execution = &ExecutionSpec{CPURequest: "0"} },
+		"grace too close to shutdown": func(f *CelldFleet) {
+			f.Spec.Lifecycle = &LifecycleSpec{ShutdownSeconds: 60, TerminationGraceSeconds: 62}
+		},
+		"shutdown alone too long": func(f *CelldFleet) { f.Spec.Lifecycle = &LifecycleSpec{ShutdownSeconds: 40} },
+		"grace alone too short":   func(f *CelldFleet) { f.Spec.Lifecycle = &LifecycleSpec{TerminationGraceSeconds: 20} },
+		"shutdown beyond bound": func(f *CelldFleet) {
+			f.Spec.Lifecycle = &LifecycleSpec{ShutdownSeconds: 4000, TerminationGraceSeconds: 4005}
+		},
+	}
+	for name, mutate := range bad {
+		t.Run(name, func(t *testing.T) {
+			f := valid()
+			mutate(f)
+			if f.Validate() == nil {
+				t.Fatal("invalid tuning accepted")
+			}
+		})
+	}
+}

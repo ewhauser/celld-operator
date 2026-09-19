@@ -26,7 +26,7 @@ var AddToScheme = SchemeBuilder.AddToScheme
 type CelldFleet struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	// +kubebuilder:validation:XValidation:rule="self.qualification == oldSelf.qualification && self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement && (self.bucketWorkload == oldSelf.bucketWorkload || (oldSelf.bucketWorkload == 'Deployment' && self.bucketWorkload == 'Ordered' && has(self.maintenance) && has(self.maintenance.orderedMigrationToken) && size(self.maintenance.orderedMigrationToken) > 0 && has(self.maintenance.allowCoordinatedDowntime) && self.maintenance.allowCoordinatedDowntime))",message="only replicas, capacity, runtimeImage, maintenance and an authorized Deployment-to-Ordered migration may change"
+	// +kubebuilder:validation:XValidation:rule="self.qualification == oldSelf.qualification && self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement && has(self.execution) == has(oldSelf.execution) && (!has(self.execution) || self.execution == oldSelf.execution) && has(self.lifecycle) == has(oldSelf.lifecycle) && (!has(self.lifecycle) || self.lifecycle == oldSelf.lifecycle) && (self.bucketWorkload == oldSelf.bucketWorkload || (oldSelf.bucketWorkload == 'Deployment' && self.bucketWorkload == 'Ordered' && has(self.maintenance) && has(self.maintenance.orderedMigrationToken) && size(self.maintenance.orderedMigrationToken) > 0 && has(self.maintenance.allowCoordinatedDowntime) && self.maintenance.allowCoordinatedDowntime))",message="only replicas, capacity, runtimeImage, maintenance and an authorized Deployment-to-Ordered migration may change; execution and lifecycle tuning are fixed at creation"
 	Spec   CelldFleetSpec   `json:"spec"`
 	Status CelldFleetStatus `json:"status,omitempty"`
 }
@@ -67,6 +67,114 @@ type CelldFleetSpec struct {
 	ServiceAccountName string        `json:"serviceAccountName"`
 	Storage            StorageSpec   `json:"storage"`
 	Placement          PlacementSpec `json:"placement"`
+	// Per-fleet runtime sizing. Immutable after creation: the operator never rolls
+	// out a changed pod template. Omitted fields keep the prototype constants.
+	// +optional
+	Execution *ExecutionSpec `json:"execution,omitempty"`
+	// Per-fleet shutdown and termination budgets. Immutable after creation.
+	// +optional
+	Lifecycle *LifecycleSpec `json:"lifecycle,omitempty"`
+}
+
+// ExecutionSpec sizes the celld container and bounds its residency. Values are
+// starting points, not capacity guarantees; the capacity policy's thresholds are
+// absolute and independent of these requests.
+// +kubebuilder:validation:XValidation:rule="!has(self.cpuLimit) || !has(self.cpuRequest) || quantity(self.cpuLimit).isGreaterThan(quantity(self.cpuRequest)) || quantity(self.cpuLimit).compareTo(quantity(self.cpuRequest)) == 0",message="cpuLimit must be at least cpuRequest"
+// +kubebuilder:validation:XValidation:rule="!has(self.memoryLimit) || !has(self.memoryRequest) || quantity(self.memoryLimit).isGreaterThan(quantity(self.memoryRequest)) || quantity(self.memoryLimit).compareTo(quantity(self.memoryRequest)) == 0",message="memoryLimit must be at least memoryRequest"
+type ExecutionSpec struct {
+	// CPU request for the celld container (Kubernetes quantity). Default 250m.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[0-9]+(\.[0-9]+)?m?$`
+	CPURequest string `json:"cpuRequest,omitempty"`
+	// CPU limit for the celld container. Default: none.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[0-9]+(\.[0-9]+)?m?$`
+	CPULimit string `json:"cpuLimit,omitempty"`
+	// Memory request for the celld container. Default 512Mi.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[0-9]+(\.[0-9]+)?(Ki|Mi|Gi|Ti|K|M|G|T)?$`
+	MemoryRequest string `json:"memoryRequest,omitempty"`
+	// Memory limit for the celld container. Default 1Gi.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[0-9]+(\.[0-9]+)?(Ki|Mi|Gi|Ti|K|M|G|T)?$`
+	MemoryLimit string `json:"memoryLimit,omitempty"`
+	// Hard resident-cell admission limit (CELLD_MAX_RESIDENT_CELLS). Unset leaves
+	// the runtime default.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=1000000
+	MaxResidentCells int32 `json:"maxResidentCells,omitempty"`
+	// Seconds after which an idle resident cell hibernates (CELLD_IDLE_EVICT_S).
+	// Unset leaves only pressure and the residency cap to evict idle cells.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=86400
+	IdleEvictSeconds int32 `json:"idleEvictSeconds,omitempty"`
+}
+
+// LifecycleSpec bounds shutdown. The runtime's total stop budget must leave room
+// inside the pod's termination grace for signal delivery and the launcher's
+// lock proof; a longer budget is an opportunity to hand off, not proof of it.
+// +kubebuilder:validation:XValidation:rule="!has(self.shutdownSeconds) || !has(self.terminationGraceSeconds) || self.shutdownSeconds + 5 <= self.terminationGraceSeconds",message="terminationGraceSeconds must exceed shutdownSeconds by at least 5"
+// +kubebuilder:validation:XValidation:rule="!has(self.shutdownSeconds) || has(self.terminationGraceSeconds) || self.shutdownSeconds + 5 <= 30",message="shutdownSeconds above 25 requires an explicit terminationGraceSeconds"
+// +kubebuilder:validation:XValidation:rule="has(self.shutdownSeconds) || !has(self.terminationGraceSeconds) || self.terminationGraceSeconds >= 25",message="terminationGraceSeconds must be at least 25 with the default 20 second shutdown"
+type LifecycleSpec struct {
+	// celld total stop bound in seconds (CELLD_SHUTDOWN_TOTAL_MS). Default 20.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=3600
+	ShutdownSeconds int32 `json:"shutdownSeconds,omitempty"`
+	// Pod terminationGracePeriodSeconds. Default 30. Must exceed shutdownSeconds by 5.
+	// +optional
+	// +kubebuilder:validation:Minimum=6
+	// +kubebuilder:validation:Maximum=3605
+	TerminationGraceSeconds int32 `json:"terminationGraceSeconds,omitempty"`
+}
+
+// Effective tuning with the prototype constants filled in for omitted fields.
+// Existing fleets carry no execution or lifecycle block and keep exactly the
+// template they were created with.
+const (
+	DefaultCPURequest              = "250m"
+	DefaultMemoryRequest           = "512Mi"
+	DefaultMemoryLimit             = "1Gi"
+	DefaultShutdownSeconds   int32 = 20
+	DefaultTerminationGrace  int32 = 30
+	terminationGraceHeadroom int32 = 5
+)
+
+func (s *CelldFleetSpec) EffectiveExecution() ExecutionSpec {
+	e := ExecutionSpec{CPURequest: DefaultCPURequest, MemoryRequest: DefaultMemoryRequest, MemoryLimit: DefaultMemoryLimit}
+	if s.Execution == nil {
+		return e
+	}
+	if s.Execution.CPURequest != "" {
+		e.CPURequest = s.Execution.CPURequest
+	}
+	e.CPULimit = s.Execution.CPULimit
+	if s.Execution.MemoryRequest != "" {
+		e.MemoryRequest = s.Execution.MemoryRequest
+	}
+	if s.Execution.MemoryLimit != "" {
+		e.MemoryLimit = s.Execution.MemoryLimit
+	}
+	e.MaxResidentCells = s.Execution.MaxResidentCells
+	e.IdleEvictSeconds = s.Execution.IdleEvictSeconds
+	return e
+}
+
+func (s *CelldFleetSpec) EffectiveLifecycle() LifecycleSpec {
+	l := LifecycleSpec{ShutdownSeconds: DefaultShutdownSeconds, TerminationGraceSeconds: DefaultTerminationGrace}
+	if s.Lifecycle == nil {
+		return l
+	}
+	if s.Lifecycle.ShutdownSeconds != 0 {
+		l.ShutdownSeconds = s.Lifecycle.ShutdownSeconds
+	}
+	if s.Lifecycle.TerminationGraceSeconds != 0 {
+		l.TerminationGraceSeconds = s.Lifecycle.TerminationGraceSeconds
+	}
+	return l
 }
 
 // MaintenanceSpec requests suspension or a qualified planned restart.

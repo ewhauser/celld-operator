@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
@@ -46,6 +47,9 @@ func (f *CelldFleet) Validate() error {
 			return fmt.Errorf("capacity minimum must cover requested AZs")
 		}
 	}
+	if err := validateTuning(&s); err != nil {
+		return err
+	}
 	switch {
 	case s.BucketWorkload != "" && s.BucketWorkload != "Deployment" && s.BucketWorkload != "Ordered":
 		return fmt.Errorf("bucketWorkload must be Deployment or Ordered")
@@ -82,6 +86,60 @@ func (f *CelldFleet) Validate() error {
 		if !strings.HasPrefix(z, s.Storage.Region) || len(z) != len(s.Storage.Region)+1 || z[len(z)-1] < 'a' || z[len(z)-1] > 'z' || slices.Contains(s.Placement.Zones[:i], z) {
 			return fmt.Errorf("zones must be unique standard AZ names in storage.region")
 		}
+	}
+	return nil
+}
+
+// validateTuning mirrors the CRD rules for execution and lifecycle so that an
+// admission bypass still fails closed before any template is generated.
+func validateTuning(s *CelldFleetSpec) error {
+	quantity := func(field, value string) (resource.Quantity, error) {
+		q, err := resource.ParseQuantity(value)
+		if err != nil {
+			return q, fmt.Errorf("%s must be a Kubernetes quantity: %w", field, err)
+		}
+		if q.Sign() <= 0 {
+			return q, fmt.Errorf("%s must be positive", field)
+		}
+		return q, nil
+	}
+	e := s.EffectiveExecution()
+	cpuRequest, err := quantity("execution.cpuRequest", e.CPURequest)
+	if err != nil {
+		return err
+	}
+	if e.CPULimit != "" {
+		cpuLimit, err := quantity("execution.cpuLimit", e.CPULimit)
+		if err != nil {
+			return err
+		}
+		if cpuLimit.Cmp(cpuRequest) < 0 {
+			return fmt.Errorf("execution.cpuLimit must be at least cpuRequest")
+		}
+	}
+	memoryRequest, err := quantity("execution.memoryRequest", e.MemoryRequest)
+	if err != nil {
+		return err
+	}
+	memoryLimit, err := quantity("execution.memoryLimit", e.MemoryLimit)
+	if err != nil {
+		return err
+	}
+	if memoryLimit.Cmp(memoryRequest) < 0 {
+		return fmt.Errorf("execution.memoryLimit must be at least memoryRequest")
+	}
+	if e.MaxResidentCells < 0 || e.MaxResidentCells > 1000000 {
+		return fmt.Errorf("execution.maxResidentCells must be between 1 and 1000000")
+	}
+	if e.IdleEvictSeconds < 0 || e.IdleEvictSeconds > 86400 {
+		return fmt.Errorf("execution.idleEvictSeconds must be between 1 and 86400")
+	}
+	l := s.EffectiveLifecycle()
+	if l.ShutdownSeconds < 1 || l.ShutdownSeconds > 3600 {
+		return fmt.Errorf("lifecycle.shutdownSeconds must be between 1 and 3600")
+	}
+	if l.TerminationGraceSeconds < l.ShutdownSeconds+terminationGraceHeadroom || l.TerminationGraceSeconds > 3605 {
+		return fmt.Errorf("lifecycle.terminationGraceSeconds must exceed shutdownSeconds by at least %d", terminationGraceHeadroom)
 	}
 	return nil
 }

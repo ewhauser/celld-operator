@@ -27,8 +27,13 @@ type Config struct {
 	Key                                       []byte
 	Command                                   []string
 	Spacing                                   time.Duration
-	Stdout, Stderr                            io.Writer
+	// StopGrace bounds the wait for the child after SIGTERM before SIGKILL. Zero
+	// selects the default that fits the 30 second pod grace period.
+	StopGrace      time.Duration
+	Stdout, Stderr io.Writer
 }
+
+const defaultStopGrace = 25 * time.Second
 
 // requestExpiryBound is the longest future expiry a request may carry: the
 // controller uses three seconds, plus tolerance for clock skew between pods.
@@ -356,9 +361,13 @@ func Run(ctx context.Context, c Config) error {
 		return ctx.Err()
 	}
 	_ = cmd.Process.Signal(syscall.SIGTERM)
+	stopGrace := c.StopGrace
+	if stopGrace <= 0 {
+		stopGrace = defaultStopGrace
+	}
 	select {
 	case <-done:
-	case <-time.After(25 * time.Second):
+	case <-time.After(stopGrace):
 		_ = cmd.Process.Kill()
 		<-done
 	}

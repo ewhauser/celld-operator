@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"os"
+	"strconv"
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -68,6 +69,15 @@ func metadata(f *fleet.CelldFleet, name string) metav1.ObjectMeta {
 
 func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 	s := f.Spec
+	execution := s.EffectiveExecution()
+	lifecycle := s.EffectiveLifecycle()
+	resources := corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(execution.CPURequest), corev1.ResourceMemory: resource.MustParse(execution.MemoryRequest)},
+		Limits:   corev1.ResourceList{corev1.ResourceMemory: resource.MustParse(execution.MemoryLimit)},
+	}
+	if execution.CPULimit != "" {
+		resources.Limits[corev1.ResourceCPU] = resource.MustParse(execution.CPULimit)
+	}
 	mode := "bucket"
 	nodeField := "metadata.uid"
 	if s.Profile == "PersistentFleet" {
@@ -85,11 +95,18 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 		{Name: "CELLD_INTERNAL_ADDR", Value: "0.0.0.0:8081"},
 		{Name: "CELLD_WATCH", Value: "/work"},
 		{Name: "CELLD_TTL_MS", Value: "10000"},
-		{Name: "CELLD_SHUTDOWN_TOTAL_MS", Value: "20000"},
+		{Name: "CELLD_SHUTDOWN_TOTAL_MS", Value: strconv.Itoa(int(lifecycle.ShutdownSeconds) * 1000)},
 		{Name: "CELLD_TOKIO_THREADS", Value: "2"},
 	}
+	if execution.MaxResidentCells > 0 {
+		env = append(env, corev1.EnvVar{Name: "CELLD_MAX_RESIDENT_CELLS", Value: strconv.Itoa(int(execution.MaxResidentCells))})
+	}
+	if execution.IdleEvictSeconds > 0 {
+		env = append(env, corev1.EnvVar{Name: "CELLD_IDLE_EVICT_S", Value: strconv.Itoa(int(execution.IdleEvictSeconds))})
+	}
 	if runtimeImage(f) != Image {
-		env = append(env, corev1.EnvVar{Name: "CELLD_DRAIN_TOKEN_WAIT_MS", Value: "15000"})
+		// v0.4.1 requires an explicit drain-token wait under the total stop budget.
+		env = append(env, corev1.EnvVar{Name: "CELLD_DRAIN_TOKEN_WAIT_MS", Value: strconv.Itoa(int(lifecycle.ShutdownSeconds) * 750)})
 	}
 	if opts.LocalTest {
 		env = append(env, corev1.EnvVar{Name: "S3_ENDPOINT", Value: "http://minio.celld-test-store.svc:9000"}, corev1.EnvVar{Name: "AWS_ALLOW_HTTP", Value: "true"}, corev1.EnvVar{Name: "AWS_ACCESS_KEY_ID", Value: "qualification"}, corev1.EnvVar{Name: "AWS_SECRET_ACCESS_KEY", Value: "qualification-only"})
@@ -110,7 +127,7 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 	pod := corev1.PodSpec{
 		ServiceAccountName:            s.ServiceAccountName,
 		AutomountServiceAccountToken:  new(false),
-		TerminationGracePeriodSeconds: new(int64(30)),
+		TerminationGracePeriodSeconds: new(int64(lifecycle.TerminationGraceSeconds)),
 		SecurityContext: &corev1.PodSecurityContext{
 			RunAsUser:      new(int64(10001)),
 			RunAsGroup:     new(int64(10001)),
@@ -149,10 +166,7 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 					FailureThreshold: 3,
 					SuccessThreshold: 1,
 				},
-				Resources: corev1.ResourceRequirements{
-					Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("250m"), corev1.ResourceMemory: resource.MustParse("512Mi")},
-					Limits:   corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("1Gi")},
-				},
+				Resources:    resources,
 				VolumeMounts: []corev1.VolumeMount{{Name: "data", MountPath: "/work"}},
 			},
 		},
@@ -177,6 +191,11 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 		c := &pod.Containers[0]
 		c.Command = []string{"/launcher/celld-launcher"}
 		c.Env = append(c.Env, corev1.EnvVar{Name: "POD_UID", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.uid"}}}, corev1.EnvVar{Name: "NODE_NAME", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "spec.nodeName"}}})
+		if lifecycle.TerminationGraceSeconds != fleet.DefaultTerminationGrace {
+			// The launcher escalates SIGTERM to SIGKILL five seconds before kubelet
+			// would, so its lock proof still runs inside the pod's grace period.
+			c.Env = append(c.Env, corev1.EnvVar{Name: "LAUNCHER_STOP_GRACE_SECONDS", Value: strconv.Itoa(int(lifecycle.TerminationGraceSeconds - 5))})
+		}
 		c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: "launcher", MountPath: "/launcher", ReadOnly: true}, corev1.VolumeMount{Name: "launcher-key", MountPath: "/launcher-key", ReadOnly: true})
 		c.Ports = append(c.Ports, corev1.ContainerPort{Name: "launcher", ContainerPort: 8083})
 	}

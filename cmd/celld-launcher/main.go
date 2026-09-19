@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -36,5 +37,13 @@ func run() error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
-	return launcher.Run(ctx, launcher.Config{Root: "/work", Address: ":8083", PodUID: os.Getenv("POD_UID"), Node: os.Getenv("CELLD_NODE"), Host: os.Getenv("NODE_NAME"), Key: key, Command: []string{"/usr/local/bin/celld"}, Spacing: 10 * time.Second, Stdout: os.Stdout, Stderr: os.Stderr})
+	var stopGrace time.Duration
+	if raw := os.Getenv("LAUNCHER_STOP_GRACE_SECONDS"); raw != "" {
+		seconds, err := strconv.Atoi(raw)
+		if err != nil || seconds < 1 {
+			return fmt.Errorf("invalid LAUNCHER_STOP_GRACE_SECONDS %q", raw)
+		}
+		stopGrace = time.Duration(seconds) * time.Second
+	}
+	return launcher.Run(ctx, launcher.Config{Root: "/work", Address: ":8083", PodUID: os.Getenv("POD_UID"), Node: os.Getenv("CELLD_NODE"), Host: os.Getenv("NODE_NAME"), Key: key, Command: []string{"/usr/local/bin/celld"}, Spacing: 10 * time.Second, StopGrace: stopGrace, Stdout: os.Stdout, Stderr: os.Stderr})
 }

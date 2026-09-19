@@ -52,8 +52,14 @@ have the runtime's necessary bucket permissions; the production evidence reader 
 | `placement.zones` | Explicit distinct standard AZ names in the storage region |
 | `placement.azCount` | Must equal number of zones, 1–6 |
 | `placement.mode` | Strict (default) or Relaxed; same allowlist in either mode |
+| `execution.cpuRequest` / `cpuLimit` | celld container CPU; defaults 250m and no limit; limit ≥ request; immutable |
+| `execution.memoryRequest` / `memoryLimit` | celld container memory; defaults 512Mi and 1Gi; limit ≥ request; immutable |
+| `execution.maxResidentCells` | Hard resident-cell admission cap (`CELLD_MAX_RESIDENT_CELLS`); unset keeps the runtime default; immutable |
+| `execution.idleEvictSeconds` | Idle hibernation age (`CELLD_IDLE_EVICT_S`); unset leaves only pressure and the cap to evict; immutable |
+| `lifecycle.shutdownSeconds` | celld total stop budget (`CELLD_SHUTDOWN_TOTAL_MS`); default 20; immutable |
+| `lifecycle.terminationGraceSeconds` | Pod termination grace; default 30; at least shutdown + 5; the launcher escalates 5 s before it; immutable |
 
-Fleet names must be DNS labels up to 40 characters. Only `replicas`, `capacity`, `runtimeImage` and `maintenance` are mutable.
+Fleet names must be DNS labels up to 40 characters. Only `replicas`, `capacity`, `runtimeImage` and `maintenance` are mutable; `execution` and `lifecycle` tuning are fixed at creation because the operator never rolls out a changed pod template (see [ADR 0018](decisions/0018-per-fleet-tuning.md) and the [tuned example](../config/samples/tuned.yaml)).
 Invalid cross-field combinations fail admission; name/dependency errors also
 produce clear controller conditions. No `/scale` API is exposed. Production image
 updates, resize, storage changes and placement changes require a

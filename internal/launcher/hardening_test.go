@@ -176,3 +176,31 @@ func TestPersistHostIsExclusiveAndLeavesNoTemporaries(t *testing.T) {
 		t.Fatalf("temporary files left behind: %v", entries)
 	}
 }
+
+func TestStopGraceEscalatesToKillOnSchedule(t *testing.T) {
+	c := config(t)
+	// The child ignores SIGTERM; only the configured escalation ends it.
+	c.Command = []string{"/bin/sh", "-c", "trap '' TERM; while :; do sleep 1; done"}
+	c.StopGrace = 2 * time.Second
+	startSupervisor(t, c)
+	running := awaitPhase(t, c.Address, c.Key, "Running")
+	started := time.Now()
+	if _, err := query(t, c.Address, c.Key, "retire", running.Generation); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		st, err := query(t, c.Address, c.Key, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.Phase == "Stopped" {
+			if elapsed := time.Since(started); elapsed < 2*time.Second || elapsed > 6*time.Second {
+				t.Fatalf("escalation did not follow the configured grace: %v", elapsed)
+			}
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("child ignoring SIGTERM was never killed")
+}

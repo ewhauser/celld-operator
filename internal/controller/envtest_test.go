@@ -527,3 +527,82 @@ func TestEnvtestCorruptJournalBlocksWithoutRewrite(t *testing.T) {
 		t.Fatal("workload changed while the journal was unreadable")
 	}
 }
+
+func TestEnvtestTuningAdmission(t *testing.T) {
+	c := envtestClient(t)
+	ctx := t.Context()
+	ns := fmt.Sprintf("tuning-%d", envtestSeq.Add(1))
+	if err := c.Create(ctx, &corev1.Namespace{Name: ns}); err != nil {
+		t.Fatal(err)
+	}
+	base := func(name string) *fleet.CelldFleet {
+		return &fleet.CelldFleet{Name: name, Namespace: ns, Spec: fleet.CelldFleetSpec{
+			Qualification: "Experimental", Profile: "Bucket", ServiceAccountName: "runtime",
+			Storage:   fleet.StorageSpec{Bucket: "bucket-" + ns + "-" + name, Region: "us-east-1"},
+			Placement: fleet.PlacementSpec{AZCount: 1, Zones: []string{"us-east-1a"}},
+		}}
+	}
+	// CEL cross-field rules on the tuning blocks reject at admission.
+	for name, edit := range map[string]func(*fleet.CelldFleet){
+		"cpu limit below request": func(f *fleet.CelldFleet) { f.Spec.Execution = &fleet.ExecutionSpec{CPURequest: "2", CPULimit: "1"} },
+		"memory limit below request": func(f *fleet.CelldFleet) {
+			f.Spec.Execution = &fleet.ExecutionSpec{MemoryRequest: "2Gi", MemoryLimit: "1Gi"}
+		},
+		"grace inside shutdown": func(f *fleet.CelldFleet) {
+			f.Spec.Lifecycle = &fleet.LifecycleSpec{ShutdownSeconds: 60, TerminationGraceSeconds: 60}
+		},
+		"long shutdown default grace": func(f *fleet.CelldFleet) {
+			f.Spec.Lifecycle = &fleet.LifecycleSpec{ShutdownSeconds: 40}
+		},
+		"malformed quantity": func(f *fleet.CelldFleet) { f.Spec.Execution = &fleet.ExecutionSpec{MemoryRequest: "lots"} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := base("invalid")
+			edit(f)
+			if err := c.Create(ctx, f); !apierrors.IsInvalid(err) {
+				t.Fatalf("admission accepted %s: %v", name, err)
+			}
+		})
+	}
+	// Valid tuning is accepted; equal quantities in different spellings compare equal.
+	f := base("tuned")
+	f.Spec.Execution = &fleet.ExecutionSpec{CPURequest: "1000m", CPULimit: "1", MemoryRequest: "1Gi", MemoryLimit: "1024Mi", MaxResidentCells: 400, IdleEvictSeconds: 60}
+	f.Spec.Lifecycle = &fleet.LifecycleSpec{ShutdownSeconds: 120, TerminationGraceSeconds: 180}
+	if err := c.Create(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	// Both blocks are immutable, including adding or removing them.
+	for name, edit := range map[string]func(*fleet.CelldFleet){
+		"change cpu":       func(f *fleet.CelldFleet) { f.Spec.Execution.CPURequest = "2" },
+		"change shutdown":  func(f *fleet.CelldFleet) { f.Spec.Lifecycle.ShutdownSeconds = 100 },
+		"remove execution": func(f *fleet.CelldFleet) { f.Spec.Execution = nil },
+	} {
+		t.Run("immutable "+name, func(t *testing.T) {
+			got := &fleet.CelldFleet{}
+			if err := c.Get(ctx, client.ObjectKeyFromObject(f), got); err != nil {
+				t.Fatal(err)
+			}
+			edit(got)
+			if err := c.Update(ctx, got); !apierrors.IsInvalid(err) {
+				t.Fatalf("tuning mutation accepted (%s): %v", name, err)
+			}
+		})
+	}
+	plain := base("plain")
+	if err := c.Create(ctx, plain); err != nil {
+		t.Fatal(err)
+	}
+	plain.Spec.Lifecycle = &fleet.LifecycleSpec{ShutdownSeconds: 10, TerminationGraceSeconds: 30}
+	if err := c.Update(ctx, plain); !apierrors.IsInvalid(err) {
+		t.Fatalf("adding tuning after creation accepted: %v", err)
+	}
+	// Mutable fields still change on a tuned fleet.
+	got := &fleet.CelldFleet{}
+	if err := c.Get(ctx, client.ObjectKeyFromObject(f), got); err != nil {
+		t.Fatal(err)
+	}
+	got.Spec.Replicas = 4
+	if err := c.Update(ctx, got); err != nil {
+		t.Fatalf("replicas rejected on a tuned fleet: %v", err)
+	}
+}

@@ -183,6 +183,85 @@ spec:
                 - message: invalid sampling windows
                   rule: self.minWindowSeconds <= self.maxWindowSeconds && self.sampleIntervalSeconds
                     <= self.maxAgeSeconds
+              execution:
+                description: |-
+                  Per-fleet runtime sizing. Immutable after creation: the operator never rolls
+                  out a changed pod template. Omitted fields keep the prototype constants.
+                properties:
+                  cpuLimit:
+                    description: 'CPU limit for the celld container. Default: none.'
+                    pattern: ^[0-9]+(\.[0-9]+)?m?$
+                    type: string
+                  cpuRequest:
+                    description: CPU request for the celld container (Kubernetes quantity).
+                      Default 250m.
+                    pattern: ^[0-9]+(\.[0-9]+)?m?$
+                    type: string
+                  idleEvictSeconds:
+                    description: |-
+                      Seconds after which an idle resident cell hibernates (CELLD_IDLE_EVICT_S).
+                      Unset leaves only pressure and the residency cap to evict idle cells.
+                    format: int32
+                    maximum: 86400
+                    minimum: 1
+                    type: integer
+                  maxResidentCells:
+                    description: |-
+                      Hard resident-cell admission limit (CELLD_MAX_RESIDENT_CELLS). Unset leaves
+                      the runtime default.
+                    format: int32
+                    maximum: 1000000
+                    minimum: 1
+                    type: integer
+                  memoryLimit:
+                    description: Memory limit for the celld container. Default 1Gi.
+                    pattern: ^[0-9]+(\.[0-9]+)?(Ki|Mi|Gi|Ti|K|M|G|T)?$
+                    type: string
+                  memoryRequest:
+                    description: Memory request for the celld container. Default 512Mi.
+                    pattern: ^[0-9]+(\.[0-9]+)?(Ki|Mi|Gi|Ti|K|M|G|T)?$
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: cpuLimit must be at least cpuRequest
+                  rule: '!has(self.cpuLimit) || !has(self.cpuRequest) || quantity(self.cpuLimit).isGreaterThan(quantity(self.cpuRequest))
+                    || quantity(self.cpuLimit).compareTo(quantity(self.cpuRequest))
+                    == 0'
+                - message: memoryLimit must be at least memoryRequest
+                  rule: '!has(self.memoryLimit) || !has(self.memoryRequest) || quantity(self.memoryLimit).isGreaterThan(quantity(self.memoryRequest))
+                    || quantity(self.memoryLimit).compareTo(quantity(self.memoryRequest))
+                    == 0'
+              lifecycle:
+                description: Per-fleet shutdown and termination budgets. Immutable
+                  after creation.
+                properties:
+                  shutdownSeconds:
+                    description: celld total stop bound in seconds (CELLD_SHUTDOWN_TOTAL_MS).
+                      Default 20.
+                    format: int32
+                    maximum: 3600
+                    minimum: 1
+                    type: integer
+                  terminationGraceSeconds:
+                    description: Pod terminationGracePeriodSeconds. Default 30. Must
+                      exceed shutdownSeconds by 5.
+                    format: int32
+                    maximum: 3605
+                    minimum: 6
+                    type: integer
+                type: object
+                x-kubernetes-validations:
+                - message: terminationGraceSeconds must exceed shutdownSeconds by
+                    at least 5
+                  rule: '!has(self.shutdownSeconds) || !has(self.terminationGraceSeconds)
+                    || self.shutdownSeconds + 5 <= self.terminationGraceSeconds'
+                - message: shutdownSeconds above 25 requires an explicit terminationGraceSeconds
+                  rule: '!has(self.shutdownSeconds) || has(self.terminationGraceSeconds)
+                    || self.shutdownSeconds + 5 <= 30'
+                - message: terminationGraceSeconds must be at least 25 with the default
+                    20 second shutdown
+                  rule: has(self.shutdownSeconds) || !has(self.terminationGraceSeconds)
+                    || self.terminationGraceSeconds >= 25
               maintenance:
                 description: Maintenance requests share the retained lifecycle journal.
                 properties:
@@ -305,14 +384,19 @@ spec:
             type: object
             x-kubernetes-validations:
             - message: only replicas, capacity, runtimeImage, maintenance and an authorized
-                Deployment-to-Ordered migration may change
+                Deployment-to-Ordered migration may change; execution and lifecycle
+                tuning are fixed at creation
               rule: self.qualification == oldSelf.qualification && self.profile ==
                 oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName
                 && self.storage == oldSelf.storage && self.placement == oldSelf.placement
-                && (self.bucketWorkload == oldSelf.bucketWorkload || (oldSelf.bucketWorkload
-                == 'Deployment' && self.bucketWorkload == 'Ordered' && has(self.maintenance)
-                && has(self.maintenance.orderedMigrationToken) && size(self.maintenance.orderedMigrationToken)
-                > 0 && has(self.maintenance.allowCoordinatedDowntime) && self.maintenance.allowCoordinatedDowntime))
+                && has(self.execution) == has(oldSelf.execution) && (!has(self.execution)
+                || self.execution == oldSelf.execution) && has(self.lifecycle) ==
+                has(oldSelf.lifecycle) && (!has(self.lifecycle) || self.lifecycle
+                == oldSelf.lifecycle) && (self.bucketWorkload == oldSelf.bucketWorkload
+                || (oldSelf.bucketWorkload == 'Deployment' && self.bucketWorkload
+                == 'Ordered' && has(self.maintenance) && has(self.maintenance.orderedMigrationToken)
+                && size(self.maintenance.orderedMigrationToken) > 0 && has(self.maintenance.allowCoordinatedDowntime)
+                && self.maintenance.allowCoordinatedDowntime))
             - message: Ordered bucketWorkload requires Bucket profile
               rule: self.bucketWorkload != 'Ordered' || self.profile == 'Bucket'
             - message: azCount must equal the zones count
