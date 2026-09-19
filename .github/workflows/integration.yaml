@@ -1,0 +1,68 @@
+# Disposable kind integration suites. They need Docker, a three-node kind
+# cluster, registry access and 15-25 minutes each, so they run nightly and on
+# demand rather than on every push. Add the `integration` label to a pull
+# request to run them there.
+name: Integration
+
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Suite to run (all, base, bucket, persistent, ordered-bucket, maintenance, faults)
+        default: all
+        type: string
+  pull_request:
+    types: [labeled, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kind:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'integration')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [base, bucket, persistent, ordered-bucket, maintenance, faults]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Select suite
+        id: select
+        env:
+          REQUESTED: ${{ github.event.inputs.suite || 'all' }}
+        run: |
+          if [ "$REQUESTED" != all ] && [ "$REQUESTED" != "${{ matrix.suite }}" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
+        if: steps.select.outputs.run == 'true'
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+        if: steps.select.outputs.run == 'true'
+        with:
+          install_only: true
+          version: v0.33.0
+      - name: Raise inotify limits for three kubelets
+        if: steps.select.outputs.run == 'true'
+        run: |
+          sudo sysctl -w fs.inotify.max_user_instances=1024
+          sudo sysctl -w fs.inotify.max_user_watches=1048576
+      - name: Run suite
+        if: steps.select.outputs.run == 'true'
+        run: |
+          case "${{ matrix.suite }}" in
+            base) make integration ;;
+            *) make "integration-${{ matrix.suite }}" ;;
+          esac

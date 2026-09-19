@@ -65,6 +65,10 @@ actionlint .github/workflows/ci.yaml
 ```
 
 CI has separate build, race-test, and lint jobs using the same Make targets.
+The kind integration suites run nightly and on demand from the Integration
+workflow (`workflow_dispatch` with a suite name, or the `integration` label on a
+pull request); each suite is a disposable three-node cluster and takes 15 to 25
+minutes.
 The test job also runs `make qualification-replay` and `make qualification-test`;
 see the [qualification harness](hack/qualification/README.md) for Python setup
 and the separately invoked local Docker experiments.
