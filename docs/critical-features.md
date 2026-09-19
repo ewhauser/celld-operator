@@ -25,6 +25,7 @@ recorded versions and environments.
 | Change Bucket layout | One-way Deployment to Ordered migration | v0.5.0, a migration token and explicit whole-fleet downtime. Storage and fleet identity stay unchanged. | Controller tests; live cluster migration validation pending. |
 | Delete a fleet | Implemented RetainData shutdown and compute cleanup | Removal waits for verified shutdown. The operator completes the finalizer after cleanup; storage, reservation, recovery records, network isolation and credentials remain. | Controller tests; positive real-runtime final shutdown validation remains incomplete. |
 | Recover an unreachable retirement target | Optional EC2 termination for a captured PersistentFleet target | Dedicated tagged node, scoped IAM permission, fencing settings and explicit operation annotation. This is not general node repair. | Fake EC2 tests; real AWS failure testing pending. |
+| Recover an unreachable member | Optional EC2 termination of the exact instance behind an admitted PersistentFleet member whose host disappeared, then retained-disk reactivation on another node in the same zone | The member was admitted while healthy (the operator records every running invocation in steady state), the same dedicated-node tags, IAM and fencing settings as above, no other operation in flight, and an explicit per-invocation annotation. Survivors must seal the lost member's log before its disk is handed off. | Fake EC2 and fake attachment tests; real AWS node loss, EBS reattachment and seal timing pending. |
 
 Use the [scaling](../site/src/content/docs/operate/scaling.md),
 [capacity policy](../site/src/content/docs/operate/capacity.md),
@@ -42,7 +43,8 @@ Use the [scaling](../site/src/content/docs/operate/scaling.md),
 ## Unsupported recovery and migration paths
 
 - Restarting an all-stopped PersistentFleet when required logs did not seal. Keep the disks and recovery records; no supported automatic retry exists.
-- General recovery from an uncertain node failure before the operator captured the exact runtime and host identity.
+- Recovery from an uncertain node failure whose member was never admitted (a fleet last reconciled by an operator older than journal v9, or a pod that never reached Running), or whose instance is not tagged for fencing. The retained disk stays pinned to the lost host incarnation.
+- Recovery of a member that fails while another operation, restart, upgrade or migration is in flight; the operation blocks on its own evidence and must be resolved first.
 - Converting a PersistentFleet created without the launcher or with ReadWriteOnce claims to the launcher/ReadWriteOncePod layout.
 - Adopting pre-existing persistent claims, transferring a bucket reservation to another fleet, or automatically freeing retained storage.
 - Changing storage, placement, profile, or runtime ServiceAccount after fleet creation.
