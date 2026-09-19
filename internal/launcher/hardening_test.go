@@ -178,6 +178,12 @@ func TestPersistHostIsExclusiveAndLeavesNoTemporaries(t *testing.T) {
 }
 
 func TestStopGraceEscalatesToKillOnSchedule(t *testing.T) {
+	if os.Getenv("LAUNCHER_TESTS_EMULATED") != "" {
+		// Under user-mode QEMU the SIGTERM reaches the emulator process, whose
+		// default disposition exits, so a child cannot ignore it; the fixture, not
+		// the escalation, is what emulation breaks. Native runs cover this test.
+		t.Skip("SIGTERM-ignoring fixture is not reproducible under CPU emulation")
+	}
 	c := config(t)
 	// The child ignores SIGTERM; only the configured escalation ends it.
 	c.Command = []string{"/bin/sh", "-c", "trap '' TERM; while :; do sleep 1; done"}

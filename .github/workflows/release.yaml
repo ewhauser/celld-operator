@@ -37,15 +37,21 @@ jobs:
           # reference at once ("cannot overwrite digest"), so address each platform
           # of the pinned celld index by its own manifest digest.
           index=ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8
+          native="$(dpkg --print-architecture)"
           for arch in amd64 arm64; do
             manifest="$(docker buildx imagetools inspect "$index" --raw | jq -r --arg a "$arch" '.manifests[] | select(.platform.os=="linux" and .platform.architecture==$a) | .digest')"
             test -n "$manifest"
+            # Signal-disposition fixtures are not reproducible under user-mode QEMU;
+            # the emulated architecture skips exactly those tests and says so.
+            emulated=()
+            if [ "$arch" != "$native" ]; then emulated=(-e LAUNCHER_TESTS_EMULATED=1); fi
             for pkg in launcher controller; do
               CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go test -c -o "bin/tests/${pkg}-${arch}.test" "./internal/${pkg}"
-              docker run --rm --platform "linux/${arch}" \
+              # pipefail carries the test binary's exit status through the filter.
+              docker run --rm --platform "linux/${arch}" "${emulated[@]}" \
                 -v "$PWD/bin/tests:/t:ro" -v "$PWD:/src:ro" -w "/src/internal/${pkg}" \
                 --entrypoint "/t/${pkg}-${arch}.test" \
-                "ghcr.io/denoland/celld@${manifest}" -test.count=1
+                "ghcr.io/denoland/celld@${manifest}" -test.count=1 -test.v 2>&1 | grep -E "^(--- (FAIL|SKIP)|FAIL|ok|PASS)"
             done
           done
   publish:
