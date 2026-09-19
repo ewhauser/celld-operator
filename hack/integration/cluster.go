@@ -122,6 +122,9 @@ func (h *harness) createCluster() {
 
 func (h *harness) loadImages() {
 	images := []string{runtimeImage, minioImage, mcImage, curlImage}
+	if h.opts.operatorImage != "" {
+		images = append(images, h.opts.operatorImage)
+	}
 	if h.bucketLifecycle {
 		images = append(images, metricsServer)
 	}
@@ -354,30 +357,43 @@ func (h *harness) startOperator() {
 	}
 	// Run the actual manager under its in-cluster ServiceAccount so
 	// direct Pod IP state collection and Metrics Server are real.
-	h.goBuild(h.path("operator"), "./cmd/celld-operator")
-	h.sh(30*time.Second, "docker", "cp", h.path("operator"), h.nodes[0]+":/opt/celld-test-operator")
 	args := []string{"--operator-namespace=" + operatorNS, "--network-policy-enforced", "--local-test", "--local-evidence"}
-	if h.persistentLifecycle {
-		h.goBuild(h.path("celld-launcher"), "./cmd/celld-launcher")
-		h.launcherImage = "celld-launcher-test:" + h.name
-		h.writeFile("Dockerfile", []byte("FROM "+runtimeImage+"\nCOPY celld-launcher /celld-launcher\n"))
-		h.sh(3*time.Minute, "docker", "build", "-t", h.launcherImage, h.tmp)
-		h.sh(3*time.Minute, "kind", "load", "docker-image", "--name", h.name, h.launcherImage)
-		args = append(args, "--launcher-image="+h.launcherImage)
-		if h.opts.rwopCSI {
-			args = append(args, "--local-rwop")
+	container := object{"name": "operator", "args": args}
+	var volumes []object
+	if h.opts.operatorImage != "" {
+		// Qualify the published artifact itself: its entrypoint, its embedded
+		// launcher, nothing rebuilt from source.
+		container["image"] = h.opts.operatorImage
+		if h.persistentLifecycle {
+			h.launcherImage = h.opts.operatorImage
+			args = append(args, "--launcher-image="+h.launcherImage)
+		}
+	} else {
+		h.goBuild(h.path("operator"), "./cmd/celld-operator")
+		h.sh(30*time.Second, "docker", "cp", h.path("operator"), h.nodes[0]+":/opt/celld-test-operator")
+		container["image"] = runtimeImage
+		container["command"] = []string{"/operator"}
+		container["volumeMounts"] = []object{{"name": "operator-binary", "mountPath": "/operator", "readOnly": true}}
+		volumes = []object{{"name": "operator-binary", "hostPath": object{"path": "/opt/celld-test-operator", "type": "File"}}}
+		if h.persistentLifecycle {
+			h.goBuild(h.path("celld-launcher"), "./cmd/celld-launcher")
+			h.launcherImage = "celld-launcher-test:" + h.name
+			h.writeFile("Dockerfile", []byte("FROM "+runtimeImage+"\nCOPY celld-launcher /celld-launcher\n"))
+			h.sh(3*time.Minute, "docker", "build", "-t", h.launcherImage, h.tmp)
+			h.sh(3*time.Minute, "kind", "load", "docker-image", "--name", h.name, h.launcherImage)
+			args = append(args, "--launcher-image="+h.launcherImage)
 		}
 	}
+	if h.persistentLifecycle && h.opts.rwopCSI {
+		args = append(args, "--local-rwop")
+	}
+	container["args"] = args
 	h.operatorArgs = args
-	patch := object{"spec": object{"replicas": 1, "template": object{"spec": object{
-		"nodeName":        h.nodes[0],
-		"securityContext": object{"runAsUser": 65532},
-		"containers": []object{{
-			"name": "operator", "image": runtimeImage, "command": []string{"/operator"}, "args": args,
-			"volumeMounts": []object{{"name": "operator-binary", "mountPath": "/operator", "readOnly": true}},
-		}},
-		"volumes": []object{{"name": "operator-binary", "hostPath": object{"path": "/opt/celld-test-operator", "type": "File"}}},
-	}}}}
+	spec := object{"nodeName": h.nodes[0], "securityContext": object{"runAsUser": 65532}, "containers": []object{container}}
+	if volumes != nil {
+		spec["volumes"] = volumes
+	}
+	patch := object{"spec": object{"replicas": 1, "template": object{"spec": spec}}}
 	h.k("-n", operatorNS, "patch", "deployment", "celld-operator", "--type=strategic", "-p", encode(patch))
 	h.k("-n", operatorNS, "rollout", "status", "deployment/celld-operator", "--timeout=120s")
 	metrics := h.writeFile("metrics.yaml", verified(h.fetch(metricsURL, 2*time.Minute), metricsSHA, metricsURL))

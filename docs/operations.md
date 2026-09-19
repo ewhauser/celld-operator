@@ -64,9 +64,29 @@ establish that an old process stopped.
 ## Releases
 
 Tag pushes run Go race tests, lint, generated-manifest checks, qualification
-replays, collector tests, and chart validation before publishing a multiarch
-controller/launcher image and OCI chart. The release workflow records the image
-digest, includes CRDs and checksums, and verifies the chart pulled from GHCR.
+replays, collector tests, chart validation, and the launcher and controller
+suites under both Linux architectures before publishing a multiarch
+controller/launcher image. Each platform of the pushed digest is then executed
+(version banner and launcher install), and the PersistentFleet kind suite runs
+against that exact digest with `--operator-image`. Only after it passes are the
+OCI chart and GitHub release published, both pointing at the digest. The image,
+the chart and the checksum file are signed keyless with cosign under this
+workflow's OIDC identity. Release notes carry the lifecycle journal version;
+an older operator cannot read fleets touched by a newer journal, so downgrades
+are unsupported.
+
+Verify before installing:
+
+```sh
+cosign verify --certificate-identity-regexp 'https://github.com/ewhauser/celld-operator/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/ewhauser/celld-operator@sha256:DIGEST
+```
+
+Cadence: tag from `main` only when the nightly Integration matrix is green for
+that commit. Every release stays a GitHub prerelease marked experimental until
+the [EKS smoke suite](qualification/eks-smoke-plan.md) has run against a
+release digest; that is the criterion for the first non-prerelease.
 All releases are marked experimental until cloud qualification is independently
 completed. Workflow implementation and local packaging do not mean an image or
 chart has been published. `make chart-check` validates rendering and RBAC parity;

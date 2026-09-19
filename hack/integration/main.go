@@ -27,6 +27,9 @@ type options struct {
 	rwopCSI             bool
 	external            bool
 	leaderFailover      bool
+	// operatorImage runs a published controller/launcher image (repo@digest or
+	// repo:tag) instead of building from source; used to qualify a release.
+	operatorImage string
 }
 
 type harness struct {
@@ -65,6 +68,7 @@ func realMain() (code int) {
 	fs.BoolVar(&opts.rwopCSI, "rwop-csi", false, "serve PersistentFleet claims as ReadWriteOncePod through the per-node hostpath CSI driver instead of local-path RWO")
 	fs.BoolVar(&opts.external, "external", false, "External capacity mode: a HorizontalPodAutoscaler drives spec.replicas through the /scale subresource")
 	fs.BoolVar(&opts.leaderFailover, "leader-failover", false, "two manager replicas; the elected leader is deleted while a contraction is issued")
+	fs.StringVar(&opts.operatorImage, "operator-image", "", "run this published controller/launcher image (repo@sha256:... or repo:tag) instead of building from source; implies the in-cluster manager")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -94,7 +98,7 @@ func realMain() (code int) {
 		root:                root,
 		name:                "celld-step2-" + hex.EncodeToString(suffix),
 	}
-	h.bucketLifecycle = opts.bucketLifecycle || h.persistentLifecycle || opts.orderedBucket || opts.external || opts.leaderFailover
+	h.bucketLifecycle = opts.bucketLifecycle || h.persistentLifecycle || opts.orderedBucket || opts.external || opts.leaderFailover || opts.operatorImage != ""
 	h.tmp, err = os.MkdirTemp("", h.name)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

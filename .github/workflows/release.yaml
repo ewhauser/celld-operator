@@ -46,8 +46,11 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
       packages: write
+    outputs:
+      image: ${{ steps.repository.outputs.image }}
+      digest: ${{ steps.image.outputs.digest }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
@@ -101,11 +104,65 @@ jobs:
             test "$version" = "$RELEASE_VERSION"
             docker run --rm --platform "linux/${arch}" --entrypoint /celld-launcher "$IMAGE@$DIGEST" install /home/nonroot/launcher/celld-launcher
           done
+  # The pushed digest, not a rebuild, must pass the in-cluster kind suite before
+  # any chart or GitHub release points at it. A failure here leaves a tagged
+  # image with no chart or release; the version is then burned by policy.
+  qualify:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+        with:
+          install_only: true
+          version: v0.33.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: |
+          sudo sysctl -w fs.inotify.max_user_instances=1024
+          sudo sysctl -w fs.inotify.max_user_watches=1048576
+      - name: Run the persistent lifecycle suite against the published image
+        env:
+          IMAGE: ${{ needs.publish.outputs.image }}
+          DIGEST: ${{ needs.publish.outputs.digest }}
+        run: |
+          docker pull "$IMAGE@$DIGEST"
+          go run ./hack/integration --persistent-lifecycle --operator-image "$IMAGE@$DIGEST"
+
+  release:
+    needs: [publish, qualify]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        with:
+          version: v4.2.4
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish immutable chart and experimental release artifacts
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
-          IMAGE: ${{ steps.repository.outputs.image }}
-          DIGEST: ${{ steps.image.outputs.digest }}
+          IMAGE: ${{ needs.publish.outputs.image }}
+          DIGEST: ${{ needs.publish.outputs.digest }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_USER: ${{ github.actor }}
           REPOSITORY: ${{ github.repository }}
@@ -116,11 +173,29 @@ jobs:
           owner="${REPOSITORY%%/*}"
           owner="${owner,,}"
           printf '%s' "$GH_TOKEN" | helm registry login ghcr.io --username "$GH_USER" --password-stdin
-          helm push "dist/celld-operator-${version}.tgz" "oci://ghcr.io/${owner}/charts"
+          helm push "dist/celld-operator-${version}.tgz" "oci://ghcr.io/${owner}/charts" | tee dist/helm-push.txt
+          chart_digest="$(sed -n 's/^Digest: //p' dist/helm-push.txt)"
+          test -n "$chart_digest"
           mkdir -p dist/verified
           helm pull "oci://ghcr.io/${owner}/charts/celld-operator" --version "$version" --destination dist/verified
           cmp "dist/celld-operator-${version}.tgz" "dist/verified/celld-operator-${version}.tgz"
+          # Keyless signatures bind the artifacts to this workflow run's OIDC identity.
+          cosign sign --yes "$IMAGE@$DIGEST"
+          cosign sign --yes "ghcr.io/${owner}/charts/celld-operator@${chart_digest}"
           cp config/crd/*.yaml dist/
           printf '%s@%s\n' "$IMAGE" "$DIGEST" > dist/image.txt
-          (cd dist && sha256sum ./*.tgz ./*.yaml image.txt > SHA256SUMS)
-          gh release create "$RELEASE_VERSION" dist/*.tgz dist/*.yaml dist/image.txt dist/SHA256SUMS --verify-tag --prerelease --title "$RELEASE_VERSION (experimental)" --notes 'Experimental operator. See docs/operations.md for installation and qualification limits. Local checks do not establish AWS/EKS qualification. CRD upgrades are explicit; retained data and storage reservations must not be deleted during uninstall.'
+          printf 'ghcr.io/%s/charts/celld-operator@%s\n' "$owner" "$chart_digest" > dist/chart.txt
+          journal="$(grep -o 'j.Version = [0-9]*' internal/controller/lifecycle.go | grep -o '[0-9]*$')"
+          (cd dist && sha256sum ./*.tgz ./*.yaml image.txt chart.txt > SHA256SUMS)
+          cosign sign-blob --yes --bundle dist/SHA256SUMS.sigstore.json dist/SHA256SUMS
+          cat > dist/notes.md <<EOF
+          Experimental operator release. See docs/operations.md for installation, verification and qualification limits; local kind suites, including the one this release's image passed, do not establish AWS/EKS qualification.
+
+          - Image: \`$IMAGE@$DIGEST\` (linux/amd64, linux/arm64), signed keyless by this workflow run.
+          - Chart: \`ghcr.io/$owner/charts/celld-operator:$version\` (digest in chart.txt), signed keyless.
+          - Lifecycle journal version: $journal. Operators older than the first release writing this version cannot read fleets touched by this one; downgrading is unsupported.
+          - CRD upgrades are explicit: apply the bundled CRDs before upgrading the chart. Retained data and storage reservations must never be deleted on uninstall.
+
+          Verify: \`cosign verify --certificate-identity-regexp 'https://github.com/$REPOSITORY/' --certificate-oidc-issuer https://token.actions.githubusercontent.com $IMAGE@$DIGEST\`
+          EOF
+          gh release create "$RELEASE_VERSION" dist/*.tgz dist/*.yaml dist/image.txt dist/chart.txt dist/SHA256SUMS dist/SHA256SUMS.sigstore.json --verify-tag --prerelease --title "$RELEASE_VERSION (experimental)" --notes-file dist/notes.md
