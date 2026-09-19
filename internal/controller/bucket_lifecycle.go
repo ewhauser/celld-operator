@@ -21,6 +21,8 @@ import (
 type bucketSession struct {
 	Node, Generation, Container, Host, IP string
 	Retired                               bool
+	ExpiryObserved                        bool
+	ExpiryInvalidated                     bool
 }
 
 func (r *Reconciler) bucketAssessment(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal, count int32, issued bool) ([]bucketSession, time.Time, error) {
@@ -84,8 +86,13 @@ func (r *Reconciler) bucketAssessment(ctx context.Context, f *fleet.CelldFleet, 
 		}
 		s.Retired = !present
 		members = append(members, v050.BucketMember{Node: s.Node, Generation: s.Generation, Retired: s.Retired, Resolved: slices.ContainsFunc(j.BucketHistory, func(old bucketSession) bool {
-			return old.Node == s.Node && old.Generation == s.Generation && old.Retired
-		})})
+			return old.Node == s.Node && old.Generation == s.Generation && old.Retired && !old.ExpiryInvalidated
+		}) || (issued && j.Operation.Phase == "Recovering" && slices.ContainsFunc(j.Operation.BucketCandidates, func(old bucketSession) bool {
+			// Recovering candidates record ExpiryObserved only after a successful
+			// issued assessment positively reads their expired lease. Persist proof
+			// before settling so runtime GC cannot erase an already observed fact.
+			return old.Node == s.Node && old.Generation == s.Generation && old.Retired && !old.ExpiryInvalidated && old.ExpiryObserved
+		}))})
 	}
 	reader, err := r.Evidence.reader(ctx, f)
 	if err != nil {
@@ -129,6 +136,14 @@ func (r *Reconciler) bucketAssessment(ctx context.Context, f *fleet.CelldFleet, 
 	}
 	if !equality.Semantic.DeepEqual(candidates, after) || evidence.ObservedAt.After(r.capacityNow()) || r.capacityNow().Sub(evidence.ObservedAt) > 5*time.Second || observation.At.After(r.capacityNow()) || r.capacityNow().Sub(observation.At) > capacity.Seconds(policy.Spec.Capacity.MaxAgeSeconds) {
 		return nil, time.Time{}, errors.New("bucket assessment expired or membership changed")
+	}
+	if issued {
+		for i := range sessions {
+			if sessions[i].Retired {
+				sessions[i].ExpiryObserved = true
+				sessions[i].ExpiryInvalidated = false
+			}
+		}
 	}
 	slices.SortFunc(sessions, func(a, b bucketSession) int {
 		if a.Node < b.Node {
@@ -214,8 +229,23 @@ func (r *Reconciler) contractBucket(ctx context.Context, f *fleet.CelldFleet, re
 		if _, ok := errors.AsType[*v050.LossError](err); ok {
 			return r.recordLoss(ctx, f, w, res, j, err.Error())
 		}
+		dirty := false
+		if invalidated, ok := errors.AsType[*v050.BucketExpiryInvalidatedError](err); ok {
+			for _, sessions := range [][]bucketSession{op.BucketCandidates, j.BucketHistory} {
+				for i := range sessions {
+					if sessions[i].Node == invalidated.Node && sessions[i].Generation == invalidated.Generation {
+						sessions[i].ExpiryObserved = false
+						sessions[i].ExpiryInvalidated = true
+						dirty = true
+					}
+				}
+			}
+		}
 		if !op.SettledAt.IsZero() {
 			op.SettledAt = time.Time{}
+			dirty = true
+		}
+		if dirty {
 			if err := r.saveJournal(ctx, res, j); err != nil {
 				return ctrl.Result{}, true, err
 			}

@@ -22,3 +22,5 @@ Step 4: [capacity collection and policy](capacity-policy.md).
 
 Bucket contraction follow-up: [all-candidate preflight and remaining completion
 boundary](bucket-scale-in.md). Experimental manual Bucket removal is implemented; production automatic execution remains release-gated.
+
+[PersistentFleet graceful lifecycle](persistent-fleet-lifecycle.md) describes the launcher protocol, same-host retained-volume reuse, executable contraction limits, migration boundary and remaining qualification.

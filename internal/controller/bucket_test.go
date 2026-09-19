@@ -19,10 +19,11 @@ import (
 )
 
 type bucketReader struct {
-	now     time.Time
-	nodes   []string
-	hook    func()
-	expired map[string]bool
+	now        time.Time
+	nodes      []string
+	hook       func()
+	expired    map[string]bool
+	generation map[string]string
 }
 
 func (r *bucketReader) List(_ context.Context, prefix, _ string) (v050.Page, error) {
@@ -45,7 +46,11 @@ func (r *bucketReader) Get(_ context.Context, key string) ([]byte, error) {
 	if r.expired[node] {
 		expires = r.now.Add(-time.Second).UnixMilli()
 	}
-	return json.Marshal(map[string]any{"node": node, "ownership_index_generation": "generation", "peer_protocol": 5, "expires_ms": expires, "load": map[string]any{"sampled_ms": r.now.UnixMilli()}})
+	generation := r.generation[node]
+	if generation == "" {
+		generation = "generation"
+	}
+	return json.Marshal(map[string]any{"node": node, "ownership_index_generation": generation, "peer_protocol": 5, "expires_ms": expires, "load": map[string]any{"sampled_ms": r.now.UnixMilli()}})
 }
 
 func bucketPreflightSetup(t *testing.T) (*ProductionEvidence, *fleet.CelldFleet, *lifecycleJournal, Options, *bucketReader) {

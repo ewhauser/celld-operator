@@ -35,6 +35,7 @@ func run() error {
 	enforced := fs.Bool("network-policy-enforced", false, "Administrator attests NetworkPolicy enforcement has been verified on this cluster")
 	localTest := fs.Bool("local-test", false, "Use disposable local MinIO test configuration; never enable on EKS")
 	localEvidence := fs.Bool("local-evidence", false, "Enable fixed disposable MinIO evidence transport; requires --local-test")
+	launcherImage := fs.String("launcher-image", "", "Digest-pinned operator image containing /celld-launcher; enables new RWOP PersistentFleet workloads")
 	metrics := fs.String("metrics-bind-address", "0", "Optional metrics listener (0 disables)")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -76,7 +77,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	reconciler := &controller.Reconciler{Collector: collector, Client: direct, Options: controller.Options{OperatorNamespace: *namespace, LocalTest: *localTest}, NetworkPolicyEnforced: *enforced}
+	reconciler := &controller.Reconciler{Collector: collector, Client: direct, Options: controller.Options{OperatorNamespace: *namespace, LocalTest: *localTest, LauncherImage: *launcherImage}, NetworkPolicyEnforced: *enforced}
 	// Local disposable mode never falls through to AWS credentials or endpoints.
 	if !*localTest {
 		reconciler.Evidence = controller.NewProductionEvidence(direct)

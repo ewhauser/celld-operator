@@ -116,3 +116,30 @@ that the replacement gets a new S3 generation and becomes Ready while the old
 invocation still holds the same mounted filesystem. It does not resume concurrent
 writers or claim peer-only durability/data-loss qualification. See
 [the remaining implementation contract](../../docs/persistent-fleet-implementation-gap.md).
+
+## Launcher and peer-only PersistentFleet checks
+
+Build the Linux launcher for the architecture of the local pinned image, then:
+
+```sh
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o bin/celld-launcher-linux ./cmd/celld-launcher
+.qualification-venv/bin/python hack/qualification/launcher_reuse.py --launcher-binary bin/celld-launcher-linux --output .qualification-runs/launcher-lock-new
+.qualification-venv/bin/python hack/qualification/persistent_peer_only.py --launcher-binary bin/celld-launcher-linux --output .qualification-runs/peer-only-new
+make integration-persistent
+```
+
+Use `GOARCH=amd64` on an amd64 Docker host. The lock experiment verifies the
+actual celld FD3 and generation, pauses the original container, and proves the
+replacement cannot start its child while that invocation retains its mount.
+The peer-only experiment acknowledges a new operation while MinIO is paused,
+kills its owner before the store is restarted, stops a selected donor via the
+authenticated launcher, and reads the operation through a surviving peer after
+matching seal/no-loss evidence. The paused store is killed before restart to
+discard buffered old-owner requests. The warm store's container layer is retained.
+These are local experiments, not production qualification or throughput results.
+
+`integration-persistent` uses the real manager, private launcher transport,
+Metrics Server and local hostPath provisioning for repeated manual shrink/grow
+and automatic 3-to-2 contraction. Its local RWO exception is explicit and does
+not qualify production RWOP/EBS attachment fencing. All tests own and clean only
+their disposable infrastructure; never point these harnesses at cloud resources.

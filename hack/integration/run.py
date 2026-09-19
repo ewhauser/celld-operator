@@ -37,10 +37,14 @@ def run(args, **kwargs):
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--bucket-lifecycle',action='store_true')
-    bucket_lifecycle=parser.parse_args().bucket_lifecycle
+    parser.add_argument('--persistent-lifecycle',action='store_true')
+    args=parser.parse_args()
+    persistent_lifecycle=args.persistent_lifecycle
+    bucket_lifecycle=args.bucket_lifecycle or persistent_lifecycle
     name = 'celld-step2-' + uuid.uuid4().hex[:8]
     process = None
     created = False
+    launcher_image = None
     with tempfile.TemporaryDirectory(prefix=name) as tmp:
         tmp = pathlib.Path(tmp)
         config = tmp / 'kubeconfig'
@@ -143,6 +147,14 @@ nodes:
                 (tmp/'operator').chmod(0o755)
                 run(['docker','cp',str(tmp/'operator'),name+'-control-plane:/opt/celld-test-operator'],timeout=30)
                 patch={'spec':{'replicas':1,'template':{'spec':{'nodeName':name+'-control-plane','securityContext':{'runAsUser':65532},'containers':[{'name':'operator','image':IMAGE,'command':['/operator'],'args':['--operator-namespace=celld-system','--network-policy-enforced','--local-test','--local-evidence'],'volumeMounts':[{'name':'operator-binary','mountPath':'/operator','readOnly':True}]}],'volumes':[{'name':'operator-binary','hostPath':{'path':'/opt/celld-test-operator','type':'File'}}]}}}}
+                if persistent_lifecycle:
+                    run(['go','build','-o',str(tmp/'celld-launcher'),'./cmd/celld-launcher'],cwd=ROOT,env={**env,'GOOS':'linux','GOARCH':arch,'CGO_ENABLED':'0'},timeout=300)
+                    (tmp/'celld-launcher').chmod(0o755)
+                    launcher_image='celld-launcher-test:'+name
+                    (tmp/'Dockerfile').write_text('FROM '+IMAGE+'\nCOPY celld-launcher /celld-launcher\n')
+                    run(['docker','build','-t',launcher_image,str(tmp)],timeout=180)
+                    run(['kind','load','docker-image','--name',name,launcher_image],timeout=180)
+                    patch['spec']['template']['spec']['containers'][0]['args'].append('--launcher-image='+launcher_image)
                 k('-n','celld-system','patch','deployment','celld-operator','--type=strategic','-p',json.dumps(patch))
                 k('-n','celld-system','rollout','status','deployment/celld-operator','--timeout=120s')
                 with urllib.request.urlopen('https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.8.0/components.yaml',timeout=60) as response:
@@ -253,6 +265,32 @@ nodes:
             assert [get('pod','beta-'+str(i))['metadata']['uid'] for i in range(2)]==beta_pod_uids
             k('-n','fleets','patch','statefulset','beta','--type=json','-p',json.dumps([{'op':'replace','path':'/spec/template','value':original_template}]))
             wait_for(lambda:ready('beta'),'restored original template matches normalized API defaults')
+            if persistent_lifecycle:
+                # Local-path RWO is deliberately local-test-only: test same-host
+                # locks and scheduling, not CSI/RWOP/EBS attachment guarantees.
+                probe('beta-client',{'celld.example.com/client-of':'beta'})
+                curl('beta-client','beta','/?cell=integration&id=ack',8080,method='PUT')
+                def settled(count):
+                    return get('statefulset','beta')['spec']['replicas']==count and ready('beta') and not get('celldfleet','beta').get('status',{}).get('lifecycle',{}).get('operationID')
+                for cycle in range(2):
+                    k('-n','fleets','patch','celldfleet','beta','--type=merge','-p',json.dumps({'spec':{'replicas':3}}))
+                    wait_for(lambda:settled(3),'PersistentFleet growth '+str(cycle),timeout=300)
+                    retained_uid=get('pvc','data-beta-2')['metadata']['uid']
+                    retained_host=get('pod','beta-2')['spec']['nodeName']
+                    k('-n','fleets','patch','celldfleet','beta','--type=merge','-p',json.dumps({'spec':{'replicas':2}}))
+                    restart_operator()
+                    wait_for(lambda:settled(2),'PersistentFleet graceful retirement '+str(cycle),timeout=300)
+                    assert get('pvc','data-beta-2')['metadata']['uid']==retained_uid
+                    assert json.loads(curl('beta-client','beta','/?cell=integration&id=ack',8080))['stored'] is True
+                    k('-n','fleets','patch','celldfleet','beta','--type=merge','-p',json.dumps({'spec':{'replicas':3}}))
+                    wait_for(lambda:settled(3),'PersistentFleet same-host reactivation '+str(cycle),timeout=300)
+                    assert get('pvc','data-beta-2')['metadata']['uid']==retained_uid
+                    assert get('pod','beta-2')['spec']['nodeName']==retained_host
+                k('-n','fleets','patch','celldfleet','beta','--type=merge','-p',json.dumps({'spec':{'capacity':{'mode':'Automatic','minReplicas':2,'maxReplicas':3,'minSamples':2,'sampleIntervalSeconds':30,'scaleInStabilizationSeconds':60,'scaleInCooldownSeconds':60,'cpuLowMillicores':200,'cpuHighMillicores':500,'memoryLowMiB':700,'memoryHighMiB':1000}}}))
+                wait_for(lambda:settled(2),'PersistentFleet live automatic contraction',timeout=420)
+                assert json.loads(curl('beta-client','beta','/?cell=integration&id=ack',8080))['stored'] is True
+                print(k('get','celldstoragereservations','-o','json'),flush=True)
+                return
             # Manual additive capacity uses the durable journal, across a leader restart.
             for fleet_name, kind in (('alpha','deployment'),('beta','statefulset')):
                 before=get(kind,fleet_name)
@@ -367,7 +405,7 @@ nodes:
             print('PASS: controller restart preserves initial workload; all integration assertions passed',flush=True)
         except BaseException:
             if config.exists():
-                for args in [('get','pods','-A','-o','wide'),('-n','fleets','get','celldfleets','-o','yaml'),('-n','fleets','get','events','--sort-by=.lastTimestamp')]:
+                for args in [('get','pods','-A','-o','wide'),('-n','fleets','get','celldfleets','-o','yaml'),('get','celldstoragereservations','-o','json'),('-n','fleets','get','events','--sort-by=.lastTimestamp')]:
                     try: print(k(*args),flush=True)
                     except RuntimeError as err: print(err,flush=True)
             if (tmp/'operator.log').exists():print((tmp/'operator.log').read_text(),flush=True)
@@ -387,6 +425,8 @@ nodes:
                 if created:
                     print('Cleaning up only cluster',name,flush=True)
                     run(['kind','delete','cluster','--name',name,'--kubeconfig',str(config)],env=env,timeout=180)
+                if launcher_image:
+                    run(['docker','image','rm',launcher_image],timeout=60)
 
 if __name__=='__main__':
     def interrupted(signum, frame):

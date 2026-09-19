@@ -26,6 +26,7 @@ const (
 
 type Options struct {
 	OperatorNamespace string
+	LauncherImage     string
 	// Explicit test-only configuration; never inferred from kubeconfig or AWS environment.
 	LocalTest bool
 }
@@ -142,6 +143,16 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 		pod.Containers[0].Resources.Requests[corev1.ResourceEphemeralStorage] = size
 		pod.Containers[0].Resources.Limits[corev1.ResourceEphemeralStorage] = size
 	}
+	if s.Profile == "PersistentFleet" && opts.LauncherImage != "" {
+		pod.SchedulingGates = []corev1.PodSchedulingGate{{Name: launcherGate}}
+		pod.InitContainers = []corev1.Container{{Name: "install-launcher", Image: opts.LauncherImage, ImagePullPolicy: corev1.PullIfNotPresent, Command: []string{"/celld-launcher", "install", "/launcher/celld-launcher"}, VolumeMounts: []corev1.VolumeMount{{Name: "launcher", MountPath: "/launcher"}}, SecurityContext: pod.Containers[0].SecurityContext.DeepCopy()}}
+		pod.Volumes = append(pod.Volumes, corev1.Volume{Name: "launcher", EmptyDir: &corev1.EmptyDirVolumeSource{}}, corev1.Volume{Name: "launcher-key", Secret: &corev1.SecretVolumeSource{SecretName: launcherSecretName(f), DefaultMode: new(int32(0o440))}})
+		c := &pod.Containers[0]
+		c.Command = []string{"/launcher/celld-launcher"}
+		c.Env = append(c.Env, corev1.EnvVar{Name: "POD_UID", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.uid"}}}, corev1.EnvVar{Name: "NODE_NAME", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "spec.nodeName"}}})
+		c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: "launcher", MountPath: "/launcher", ReadOnly: true}, corev1.VolumeMount{Name: "launcher-key", MountPath: "/launcher-key", ReadOnly: true})
+		c.Ports = append(c.Ports, corev1.ContainerPort{Name: "launcher", ContainerPort: 8083})
+	}
 	return corev1.PodTemplateSpec{Labels: labels(f), Spec: pod}
 }
 
@@ -176,7 +187,7 @@ func workload(f *fleet.CelldFleet, opts Options) client.Object {
 					Name:   "data",
 					Labels: labels(f),
 					Spec: corev1.PersistentVolumeClaimSpec{
-						AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+						AccessModes:      persistentAccessModes(opts),
 						StorageClassName: new(f.Spec.Storage.StorageClassName),
 						Resources:        corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse(fmt.Sprintf("%dGi", f.Spec.Storage.SizeGiB))}},
 					},
@@ -246,6 +257,9 @@ func prerequisites(f *fleet.CelldFleet, opts Options) []client.Object {
 				},
 			},
 		},
+	}
+	if f.Spec.Profile == "PersistentFleet" && opts.LauncherImage != "" {
+		policy.Spec.Ingress = append(policy.Spec.Ingress, networkingv1.NetworkPolicyIngressRule{From: []networkingv1.NetworkPolicyPeer{operator}, Ports: []networkingv1.NetworkPolicyPort{port(8083)}})
 	}
 	if opts.LocalTest {
 		policy.Spec.Egress = append(policy.Spec.Egress, networkingv1.NetworkPolicyEgressRule{

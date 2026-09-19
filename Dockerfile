@@ -10,7 +10,10 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -ldflags="-s -w -X main.version=$VERSION" -o /out/celld-operator ./cmd/celld-operator
 
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o /out/celld-launcher ./cmd/celld-launcher
+
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/celld-operator /celld-operator
+COPY --from=build /out/celld-launcher /celld-launcher
 USER 65532:65532
 ENTRYPOINT ["/celld-operator"]

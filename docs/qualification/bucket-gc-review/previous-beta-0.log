@@ -1,0 +1,15 @@
+2026-09-19T01:13:18.010173Z  INFO celld: append routed event="log_append_router" collect_ms=0 append_ms=0 body_len=97
+2026-09-19T01:13:18.668764Z  INFO celld: append routed event="log_append_router" collect_ms=0 append_ms=0 body_len=97
+2026-09-19T01:13:18.740373Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1134920 idle_us=1134812 stall_us=0 apply_us=0 scan_us=97 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-19T01:13:19.299555Z  INFO celld::actor: node lease attempt started event="node_lease_attempt_started" node=beta-0 attempt="renew" prior_authority_headroom_ms=3730
+2026-09-19T01:13:19.784755Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1044344 idle_us=1044201 stall_us=0 apply_us=0 scan_us=126 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-19T01:13:20.041620Z  INFO celld: append routed event="log_append_router" collect_ms=0 append_ms=0 body_len=97
+2026-09-19T01:13:20.838573Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1053744 idle_us=1053327 stall_us=0 apply_us=0 scan_us=404 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-19T01:13:20.975490Z  INFO celld: append routed event="log_append_router" collect_ms=0 append_ms=0 body_len=97
+2026-09-19T01:13:21.191510Z  WARN celld::actor: node lease attempt did not apply event="node_lease_attempt" node=beta-0 attempt="renew" outcome="ambiguous" elapsed_ms=1892 prior_authority_headroom_ms=1838 candidate_headroom_ms=8108
+2026-09-19T01:13:21.900111Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1041407 idle_us=1041276 stall_us=0 apply_us=0 scan_us=113 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-19T01:13:22.429772Z  INFO celld::actor: node lease attempt started event="node_lease_attempt_started" node=beta-0 attempt="renew" prior_authority_headroom_ms=600
+2026-09-19T01:13:23.441136Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1643546 idle_us=1643482 stall_us=0 apply_us=0 scan_us=59 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-19T01:13:23.536491Z  INFO celld: append routed event="log_append_router" collect_ms=0 append_ms=0 body_len=97
+2026-09-19T01:13:23.579239Z  WARN celld: HTTP connections failed event="http_connection_failures" total=1 since_last=1 cause="incomplete_message" cause_total=1 surface="public" peer=Some(192.168.198.192:49370) error=connection closed before message completed
+2026-09-19T01:13:23.767405Z  WARN celld::actor: SELF-FENCE: node lease not renewed within TTL — halting event="node_lease_watchdog_fence" code=3

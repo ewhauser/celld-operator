@@ -1,5 +1,7 @@
 # Shutdown evidence for repeated peer-disk contraction
 
+Follow-up: [the launcher-managed graceful PersistentFleet path](persistent-fleet-lifecycle.md) implements a restricted same-host contract. The earlier analysis below remains relevant to unwrapped invocations and uncertain failures.
+
 Current implementation: [shared lifecycle safety](shared-lifecycle-safety.md). Production collection is now wired; exact identity/fencing and mode-specific removal qualification remain blocked.
 Implementation follow-up: [step 1 adapter, real local experiments, and remaining release gates](qualification/README.md). The earlier source conclusions below are historical; the follow-up distinguishes observations from unqualified hypotheses.
 

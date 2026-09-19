@@ -81,18 +81,27 @@ func (a *Adapter) InspectBucket(ctx context.Context, r Reader, req Request, now 
 	return BucketObservation{ObservedAt: at}, nil
 }
 
+// BucketExpiryInvalidatedError revokes prior expiry observations for the
+// expected generation after contrary live-lease or replacement evidence.
+type BucketExpiryInvalidatedError struct{ Node, Generation, Reason string }
+
+func (e *BucketExpiryInvalidatedError) Error() string {
+	return e.Reason
+}
+
 // BucketMember describes an operator-configured Bucket generation. Retired means
 // absent from desired Kubernetes membership, NOT physically stopped.
 type BucketMember struct {
 	Node, Generation string
 	Retired          bool
-	// Resolved records previously completed positive expiry and settling.
+	// Resolved records durably observed positive expiry; survivor settling is
+	// independently enforced by the controller.
 	Resolved bool
 }
 
 // InspectBucketMembership supports repeated removals without erasing historical
 // sessions. New retired generations need positively read expired leases. Only
-// durably resolved historical records may subsequently disappear through GC.
+// records with durably observed expiry may subsequently disappear through GC.
 func (a *Adapter) InspectBucketMembership(ctx context.Context, r Reader, members []BucketMember, now func() time.Time) (BucketObservation, error) {
 	started := now()
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -124,7 +133,10 @@ func (a *Adapter) InspectBucketMembership(ctx context.Context, r Reader, members
 		}
 		seen[node.Name] = true
 		s, ok := expected[node.Name]
-		if !ok || node.Generation != s.Generation || node.Epoch != 0 || node.LogState != "" {
+		if ok && node.Generation != s.Generation {
+			return BucketObservation{}, &BucketExpiryInvalidatedError{Node: s.Node, Generation: s.Generation, Reason: "bucket generation replaced"}
+		}
+		if !ok || node.Epoch != 0 || node.LogState != "" {
 			return BucketObservation{}, errors.New("unknown bucket generation or peer recovery obligation")
 		}
 		if now().UnixMilli() < 0 {
@@ -132,7 +144,7 @@ func (a *Adapter) InspectBucketMembership(ctx context.Context, r Reader, members
 		}
 		live := node.ExpiresMS > uint64(now().UnixMilli())
 		if s.Retired && live {
-			return BucketObservation{}, errors.New("retired bucket process still has a live lease")
+			return BucketObservation{}, &BucketExpiryInvalidatedError{Node: node.Name, Generation: node.Generation, Reason: "retired bucket process still has a live lease"}
 		}
 		if !s.Retired && (!live || !fresh(time.UnixMilli(node.SampledMS), now(), 5*time.Second)) {
 			return BucketObservation{}, errors.New("current bucket lease or sample unavailable")

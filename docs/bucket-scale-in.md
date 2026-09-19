@@ -84,7 +84,7 @@ physical process identity. Unknown or replaced generations remain blockers.
 8. Retain all admitted generations in `BucketHistory`, including logically
    retired ones. Subsequent additions receive fresh Pod UIDs. Later contractions
    recheck the full history, allowing repeated shrink/grow without discarding old
-   evidence. Pinned `dead_node_gc.rs:399` deletes no-log dead records after a CAS tombstone. Once positive expiry and settling have been durably recorded, a later complete listing may omit that resolved generation. Absence cannot resolve a new retirement; unreadable listed records still block. Renewed historical leases block the next assessment. Reappearing
+   evidence. Pinned `dead_node_gc.rs:399` deletes no-log dead records after a CAS tombstone. Persist the first successful positive-expiry assessment in the operation candidates before settling. A later complete listing may omit that exact generation during settling or after completion; full fresh survivor, live-lease and log/loss checks still run. This avoids requiring a runtime-GCed object to outlive the ten-second settling window. Absence cannot resolve a new retirement; unreadable listed records still block. Renewed historical leases block the next assessment. Reappearing
    retired identities and replaced generations are not adopted.
 
 The journal writes version **5** and reads versions 1–5. Older binaries reject
@@ -132,3 +132,18 @@ NetworkPolicy, the unchanged runtime and Metrics Server. See the recorded
 - A successful metadata scan is not an application-wide readback proof. The
   source-level acknowledgement rule provides the safety argument; local client
   ledgers are bounded counterexample tests, not a universal durability proof.
+
+The pinned runtime can also GC a lease before the operator ever observes it
+expired. This remains blocked: no missing record, elapsed time, or prior live
+lease is promoted into positive expiry proof. Restarting a controller after the
+record has already disappeared cannot manufacture that evidence. Supporting
+that ordering needs another durable runtime evidence contract or authenticated
+transport history; higher polling frequency is not a proof.
+
+Journal v6 distinguishes `ExpiryObserved` (positive expiry authority validated
+after the replica effect, not full settling) from `Retired` (membership state). A typed renewed-lease or generation-replacement
+observation durably sets `ExpiryInvalidated` for the exact generation in both
+operation candidates and fully settled history. A subsequent missing record
+cannot reuse that superseded proof. Only another successful complete assessment
+with positively expired metadata reestablishes the authority; renewal also resets
+the settling window. Unknown or canceled admission never sets `ExpiryObserved`.

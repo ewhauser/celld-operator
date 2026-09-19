@@ -1,0 +1,16 @@
+[
+  {
+    "scenario": "peer-only-owner-loss-and-donor-retirement",
+    "owner": "c",
+    "donor": "a",
+    "survivor": "b",
+    "acknowledged_while_store_paused": true,
+    "owner_killed_before_store_restart": true,
+    "donor_launcher_stopped": true,
+    "candidate_complete": true,
+    "loss": [],
+    "recovery_seconds": 16.198,
+    "acknowledged": 1,
+    "missing": []
+  }
+]

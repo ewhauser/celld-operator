@@ -1,5 +1,7 @@
 # PersistentFleet execution and retained-disk reuse
 
+Follow-up: [the launcher-managed graceful PersistentFleet path](persistent-fleet-lifecycle.md) implements a restricted same-host contract. The earlier analysis below remains relevant to unwrapped invocations and uncertain failures.
+
 18 September 2026. **Implementation remains blocked; this is not a completed
 scale-in feature or a testing-only release gate.** No production removal or
 reactivation path was enabled in this investigation. Bucket behavior is unchanged.

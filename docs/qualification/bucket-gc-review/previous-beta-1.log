@@ -1,0 +1,15 @@
+2026-09-19T01:13:20.522396Z  INFO celld: append routed event="log_append_router" collect_ms=0 append_ms=0 body_len=97
+2026-09-19T01:13:20.861652Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1025764 idle_us=1025610 stall_us=0 apply_us=0 scan_us=137 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-19T01:13:21.863303Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1001602 idle_us=1000864 stall_us=0 apply_us=0 scan_us=720 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-19T01:13:22.949172Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1085827 idle_us=1085718 stall_us=0 apply_us=0 scan_us=97 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-19T01:13:23.025607Z  WARN celld::actor: node lease attempt did not apply event="node_lease_attempt" node=beta-1 attempt="renew" outcome="ambiguous" elapsed_ms=2968 prior_authority_headroom_ms=3632 candidate_headroom_ms=7032
+2026-09-19T01:13:23.587826Z  INFO celld: append routed event="log_append_router" collect_ms=1 append_ms=0 body_len=97
+2026-09-19T01:13:23.948831Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1021841 idle_us=1021770 stall_us=0 apply_us=0 scan_us=63 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-19T01:13:24.960545Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1011223 idle_us=1011122 stall_us=0 apply_us=0 scan_us=91 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-19T01:13:25.501691Z  INFO celld::actor: node lease attempt started event="node_lease_attempt_started" node=beta-1 attempt="renew" prior_authority_headroom_ms=1156
+2026-09-19T01:13:25.971131Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1010515 idle_us=1010401 stall_us=0 apply_us=0 scan_us=106 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-19T01:13:26.130207Z  WARN celld::actor: node lease attempt did not apply event="node_lease_attempt" node=beta-1 attempt="renew" outcome="ambiguous" elapsed_ms=629 prior_authority_headroom_ms=527 candidate_headroom_ms=9371
+2026-09-19T01:13:26.459515Z  INFO celld::actor: node lease attempt started event="node_lease_attempt_started" node=beta-1 attempt="renew" prior_authority_headroom_ms=198
+2026-09-19T01:13:26.585691Z  WARN celld::actor: SELF-FENCE: node lease not renewed within TTL — halting event="node_lease_watchdog_fence" code=3
+2026-09-19T01:13:27.157122Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1185941 idle_us=1184687 stall_us=0 apply_us=0 scan_us=1245 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-19T01:13:27.158814Z  WARN celld::actor: node lease attempt did not apply event="node_lease_attempt" node=beta-1 attempt="renew" outcome="ambiguous" elapsed_ms=699 prior_authority_headroom_ms=0 candidate_headroom_ms=9301

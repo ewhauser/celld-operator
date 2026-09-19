@@ -1,0 +1,139 @@
+Creating isolated cluster celld-step2-cd461a5f
+Pulling into disposable node: ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8
+Pulling into disposable node: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+Pulling into disposable node: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+Pulling into disposable node: curlimages/curl:8.12.1
+PASS: create two isolated test buckets
+PASS: qualification app deployed to bucket-alpha
+PASS: qualification app deployed to bucket-beta
+PASS: pre-existing PVC blocks initial StatefulSet creation
+PASS: both runtime profiles ready through operator reconciliation
+PASS: strict replicas use distinct nodes within the configured zone
+PASS: strict placement blocks a missing eligible zone
+PASS: probe same-fleet running
+PASS: probe client running
+PASS: probe client-beta running
+PASS: probe untrusted running
+PASS: probe operator running
+PASS: application writes readable only in their own fleet storage scope
+PASS: same-fleet/operator peer access, cross-fleet/untrusted/client peer denial, ClusterIP health routing
+PASS: cross-namespace storage conflict blocked
+PASS: schema rejects invalid specs and lifecycle mutations
+PASS: additional probe and bucket override are reported as unsafe drift
+PASS: restored original template matches normalized API defaults
+PASS: probe beta-client running
+PASS: PersistentFleet growth 0
+PASS: PersistentFleet graceful retirement 0
+PASS: PersistentFleet same-host reactivation 0
+PASS: PersistentFleet growth 1
+PASS: PersistentFleet graceful retirement 1
+PASS: PersistentFleet same-host reactivation 1
+PASS: PersistentFleet live automatic contraction
+{
+    "apiVersion": "v1",
+    "items": [
+        {
+            "apiVersion": "celld.example.com/v1alpha1",
+            "kind": "CelldStorageReservation",
+            "metadata": {
+                "annotations": {
+                    "celld.example.com/creation-claim-uids": "{}",
+                    "celld.example.com/lifecycle-journal": "{\"Inventory\":{\"Sessions\":[{\"Node\":\"c2eb7a8b-1eb5-4e10-9905-d7c182a42c21\",\"Generation\":\"30c26cce611d1b7d01e7e1506aabd3119304774a7ca46da1bbdc11b539a4d4c0\",\"Pod\":\"alpha-d9ccc5ffd-5rlhg\",\"PodUID\":\"c2eb7a8b-1eb5-4e10-9905-d7c182a42c21\",\"Container\":\"c2eb7a8b-1eb5-4e10-9905-d7c182a42c21/containerd://6c1345602ed6da5a4ca5952c4a01363433d4eb4eb36e3b4375a861101dd66064/0\",\"Host\":\"celld-step2-cd461a5f-worker\",\"Epoch\":0,\"FirstSeen\":\"2026-09-19T00:24:42.386849227Z\",\"LastSeen\":\"2026-09-19T00:30:31.430687093Z\",\"Current\":true,\"Association\":\"ObservedUnverified\"},{\"Node\":\"e2378f9f-99b2-4349-804e-58c2899f6a07\",\"Generation\":\"6ccf1853b6ef078121b5567f5087cb72fb70f76758df6b3360f2e72a55effc31\",\"Pod\":\"alpha-d9ccc5ffd-n4bvt\",\"PodUID\":\"e2378f9f-99b2-4349-804e-58c2899f6a07\",\"Container\":\"e2378f9f-99b2-4349-804e-58c2899f6a07/containerd://a70428bd8ae8d40b78ad2602c70d4dbb65a9feedce68c8edafcf327fd9867a52/0\",\"Host\":\"celld-step2-cd461a5f-worker2\",\"Epoch\":0,\"FirstSeen\":\"2026-09-19T00:24:42.386850519Z\",\"LastSeen\":\"2026-09-19T00:30:31.430688635Z\",\"Current\":true,\"Association\":\"ObservedUnverified\"}],\"CheckedAt\":\"2026-09-19T00:30:31.428842732Z\",\"Blocker\":\"SessionBindingUnqualified\"},\"Request\":null,\"RuntimeImage\":\"ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8\",\"Version\":6,\"Initial\":2,\"Applied\":2,\"WorkloadUID\":\"81784229-fae9-45a4-b94a-33e577802255\",\"Operation\":null,\"Sessions\":null,\"Claims\":{},\"Loss\":\"\",\"History\":null,\"Capacity\":null,\"BucketHistory\":null,\"PersistentHistory\":null}",
+                    "celld.example.com/workload-creation-attempted": "true"
+                },
+                "creationTimestamp": "2026-09-19T00:24:26Z",
+                "generation": 1,
+                "name": "s3-3e3c6c589bf95c28c9dc27cca2758c2991eb0031bff576ff1ad01e71",
+                "resourceVersion": "3429",
+                "uid": "44506ed5-08e8-4dad-8448-fe4d33d69dd2"
+            },
+            "spec": {
+                "bucket": "bucket-alpha",
+                "fleetName": "alpha",
+                "fleetNamespace": "fleets",
+                "fleetUID": "761250cd-2e6b-4872-ac61-5cd83711a61b",
+                "initialReplicas": 2,
+                "specHash": "cb58f6fe18a15514ae6834bd919c3e39b8aea472d46fe6e860a21406af745fc9"
+            }
+        },
+        {
+            "apiVersion": "celld.example.com/v1alpha1",
+            "kind": "CelldStorageReservation",
+            "metadata": {
+                "annotations": {
+                    "celld.example.com/creation-claim-uids": "{}",
+                    "celld.example.com/lifecycle-journal": "{\"Inventory\":{\"Sessions\":null,\"CheckedAt\":\"0001-01-01T00:00:00Z\",\"Blocker\":\"RecoveryInventoryUnavailable\"},\"Request\":null,\"RuntimeImage\":\"ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8\",\"Version\":6,\"Initial\":2,\"Applied\":2,\"WorkloadUID\":\"c12c0cf3-76cb-453a-a461-b7e1ecaa420f\",\"Operation\":null,\"Sessions\":null,\"Claims\":{},\"Loss\":\"\",\"History\":null,\"Capacity\":null,\"BucketHistory\":null,\"PersistentHistory\":null}",
+                    "celld.example.com/workload-creation-attempted": "true"
+                },
+                "creationTimestamp": "2026-09-19T00:24:48Z",
+                "generation": 1,
+                "name": "s3-56487ad297b0f7750cecacd1a7913098b33524065175aca8a8793286",
+                "resourceVersion": "1759",
+                "uid": "dfd960bc-71ea-45cf-b7a1-abfe347dfcc6"
+            },
+            "spec": {
+                "bucket": "bucket-unavailable",
+                "fleetName": "unavailable",
+                "fleetNamespace": "fleets",
+                "fleetUID": "e598fb19-2ffc-486f-908b-4abddc681f59",
+                "initialReplicas": 2,
+                "specHash": "15f100cdcc625287d6fac8ee4a7a54a3bf3c41627f50d9ec490d405db467cbb0"
+            }
+        },
+        {
+            "apiVersion": "celld.example.com/v1alpha1",
+            "kind": "CelldStorageReservation",
+            "metadata": {
+                "annotations": {
+                    "celld.example.com/launcher-creation": "78cf776eb11799d805260654ffa93b3047ce5f556035cf794656b94e6169ecf7",
+                    "celld.example.com/launcher-key-digest": "7c50c983ef1f25fa92905359ab6cc31a4095f4506727cd80be42d2e6214a7439"
+                },
+                "creationTimestamp": "2026-09-19T00:24:24Z",
+                "generation": 1,
+                "name": "s3-5f1884e17c1adfcac935b4ade827d47209f4a15d74c7b435226da93b",
+                "resourceVersion": "1398",
+                "uid": "71110445-815d-4fa6-84d5-1549705fd985"
+            },
+            "spec": {
+                "bucket": "new-bucket",
+                "fleetName": "collision",
+                "fleetNamespace": "fleets",
+                "fleetUID": "34af8c62-5648-436c-b3e1-7e591a2642b3",
+                "initialReplicas": 2,
+                "specHash": "2221386c90e369158b3d06e047a3b71b9480ef1ed0c5e705f1f7342e48304d0b"
+            }
+        },
+        {
+            "apiVersion": "celld.example.com/v1alpha1",
+            "kind": "CelldStorageReservation",
+            "metadata": {
+                "annotations": {
+                    "celld.example.com/creation-claim-uids": "{\"data-beta-0\":\"4f71f1a0-8166-4b20-bec3-2d10b37fdea9\",\"data-beta-1\":\"63409e15-ddc3-4290-9548-540d28399a9a\"}",
+                    "celld.example.com/launcher-creation": "ee1790430f9903bd8c3a0ca5992a712ac9b3dc07926088a10959c9ed0f98f120",
+                    "celld.example.com/launcher-key-digest": "094d45026663165fdbc59f5b4e72fcadc9c45083a5becf49093c3dc1a8501e94",
+                    "celld.example.com/lifecycle-journal": "{\"Inventory\":{\"Sessions\":[{\"Node\":\"beta-0\",\"Generation\":\"8a85605e024b3b34807152bf1c9d6afbd897a57352e9730aebad64f37b8134ae\",\"Pod\":\"beta-0\",\"PodUID\":\"dd5755d7-8db6-41f8-a4f2-1d1e3f5f9385\",\"Container\":\"dd5755d7-8db6-41f8-a4f2-1d1e3f5f9385/containerd://7db3d8a12e9e878bdccb79e9a261377b3e1b169167c083a9e3ecf7e72e31ac0a/0\",\"Host\":\"celld-step2-cd461a5f-worker2\",\"Epoch\":1,\"FirstSeen\":\"2026-09-19T00:24:42.593784458Z\",\"LastSeen\":\"2026-09-19T00:30:34.036559991Z\",\"Current\":true,\"Association\":\"ObservedUnverified\"},{\"Node\":\"beta-1\",\"Generation\":\"d7d43a843b5bb55d37ab92c33a3d741063a3e19b788c699dedee4c38a6060cc8\",\"Pod\":\"beta-1\",\"PodUID\":\"ea405f27-d6f7-467a-8431-6a8a93c2dd7b\",\"Container\":\"ea405f27-d6f7-467a-8431-6a8a93c2dd7b/containerd://6d2824d8e3a7ce44da92bd73ace80d556d5c5f3284b2e1b54e90721263212c77/0\",\"Host\":\"celld-step2-cd461a5f-worker\",\"Epoch\":0,\"FirstSeen\":\"2026-09-19T00:24:42.593786333Z\",\"LastSeen\":\"2026-09-19T00:24:42.694291363Z\",\"Current\":true,\"Association\":\"ObservedUnverified\"},{\"Node\":\"beta-1\",\"Generation\":\"d7d43a843b5bb55d37ab92c33a3d741063a3e19b788c699dedee4c38a6060cc8\",\"Pod\":\"beta-1\",\"PodUID\":\"ea405f27-d6f7-467a-8431-6a8a93c2dd7b\",\"Container\":\"ea405f27-d6f7-467a-8431-6a8a93c2dd7b/containerd://6d2824d8e3a7ce44da92bd73ace80d556d5c5f3284b2e1b54e90721263212c77/0\",\"Host\":\"celld-step2-cd461a5f-worker\",\"Epoch\":1,\"FirstSeen\":\"2026-09-19T00:24:47.714859479Z\",\"LastSeen\":\"2026-09-19T00:30:34.036561366Z\",\"Current\":true,\"Association\":\"ObservedUnverified\"},{\"Node\":\"beta-2\",\"Generation\":\"f7874bc9c427d43ea8356d99a8b5b8df01786c6964bb9dd93b24f07335687c6c\",\"Pod\":\"beta-2\",\"PodUID\":\"46d509dd-85db-4994-b05e-b9ed08dd42e9\",\"Container\":\"46d509dd-85db-4994-b05e-b9ed08dd42e9/containerd://a8420f0ac02c8914d6a71ba6e80a240254982af3742ccacc1a893279d72c8d36/0\",\"Host\":\"celld-step2-cd461a5f-control-plane\",\"Epoch\":1,\"FirstSeen\":\"2026-09-19T00:26:05.178279988Z\",\"LastSeen\":\"2026-09-19T00:26:34.719161495Z\",\"Current\":false,\"Association\":\"ObservedUnverified\"},{\"Node\":\"beta-2\",\"Generation\":\"f7874bc9c427d43ea8356d99a8b5b8df01786c6964bb9dd93b24f07335687c6c\",\"Pod\":\"\",\"PodUID\":\"\",\"Container\":\"\",\"Host\":\"\",\"Epoch\":1,\"FirstSeen\":\"2026-09-19T00:26:39.862438569Z\",\"LastSeen\":\"2026-09-19T00:27:10.319669355Z\",\"Current\":false,\"Association\":\"UnknownPodGeneration\"},{\"Node\":\"beta-2\",\"Generation\":\"c884c4b8eb0146b48ba8c3cf419c04306d9d670dd06fd2a470b8be04b690f32b\",\"Pod\":\"beta-2\",\"PodUID\":\"20ef22b6-a81f-4c4e-99c7-49e643456d6f\",\"Container\":\"20ef22b6-a81f-4c4e-99c7-49e643456d6f/containerd://5d4b8ac0b9f42630861116e6ab64e72006da85af308684b8aa5f38aefba0ce9f/0\",\"Host\":\"celld-step2-cd461a5f-control-plane\",\"Epoch\":1,\"FirstSeen\":\"2026-09-19T00:27:15.457562134Z\",\"LastSeen\":\"2026-09-19T00:27:43.655988834Z\",\"Current\":false,\"Association\":\"ObservedUnverified\"},{\"Node\":\"beta-2\",\"Generation\":\"c884c4b8eb0146b48ba8c3cf419c04306d9d670dd06fd2a470b8be04b690f32b\",\"Pod\":\"\",\"PodUID\":\"\",\"Container\":\"\",\"Host\":\"\",\"Epoch\":1,\"FirstSeen\":\"2026-09-19T00:27:48.804098998Z\",\"LastSeen\":\"2026-09-19T00:28:19.389447008Z\",\"Current\":false,\"Association\":\"UnknownPodGeneration\"},{\"Node\":\"beta-2\",\"Generation\":\"ae85edf42c40d056ddeba150928074284da9a937017df02353c14919fca22897\",\"Pod\":\"beta-2\",\"PodUID\":\"2f02a540-8cbb-4cf5-b87a-b608df46a958\",\"Container\":\"2f02a540-8cbb-4cf5-b87a-b608df46a958/containerd://dab4ba268eff63b7c57bbebd21ed6142a5e2e5dc4e94da7ed838acfbc1ca3f19/0\",\"Host\":\"celld-step2-cd461a5f-control-plane\",\"Epoch\":1,\"FirstSeen\":\"2026-09-19T00:28:24.526769511Z\",\"LastSeen\":\"2026-09-19T00:30:13.227423535Z\",\"Current\":false,\"Association\":\"ObservedUnverified\"},{\"Node\":\"beta-2\",\"Generation\":\"ae85edf42c40d056ddeba150928074284da9a937017df02353c14919fca22897\",\"Pod\":\"\",\"PodUID\":\"\",\"Container\":\"\",\"Host\":\"\",\"Epoch\":1,\"FirstSeen\":\"2026-09-19T00:30:18.377085229Z\",\"LastSeen\":\"2026-09-19T00:30:34.036561949Z\",\"Current\":false,\"Association\":\"UnknownPodGeneration\"}],\"CheckedAt\":\"2026-09-19T00:30:34.035574936Z\",\"Blocker\":\"HistoricalSessionUnresolved\"},\"Request\":null,\"RuntimeImage\":\"ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8\",\"Version\":6,\"Initial\":2,\"Applied\":2,\"WorkloadUID\":\"d10bd477-d1ad-428f-a630-ef8770c98117\",\"Operation\":null,\"Sessions\":null,\"Claims\":{\"data-beta-0\":\"4f71f1a0-8166-4b20-bec3-2d10b37fdea9\",\"data-beta-1\":\"63409e15-ddc3-4290-9548-540d28399a9a\",\"data-beta-2\":\"2db49591-a644-497c-9967-9040dc0d3f78\"},\"Loss\":\"\",\"History\":[{\"ID\":\"fdc88726-7da3-45ad-bbe3-d7e955827540\",\"TargetPod\":\"\",\"TargetUID\":\"\",\"TargetGeneration\":\"\",\"From\":2,\"To\":3,\"EvidenceAt\":\"0001-01-01T00:00:00Z\",\"Outcome\":\"\"},{\"ID\":\"38d44085-b5b3-467a-9aa2-fa65ebbf0d45\",\"TargetPod\":\"beta-2\",\"TargetUID\":\"46d509dd-85db-4994-b05e-b9ed08dd42e9\",\"TargetGeneration\":\"f7874bc9c427d43ea8356d99a8b5b8df01786c6964bb9dd93b24f07335687c6c\",\"From\":3,\"To\":2,\"EvidenceAt\":\"2026-09-19T00:26:54.64823981Z\",\"Outcome\":\"LauncherStoppedRecoveredFollowerRetiredSameHostReuseOnly\"},{\"ID\":\"11ede7b5-8ed9-4681-81c0-d053584958dd\",\"TargetPod\":\"\",\"TargetUID\":\"\",\"TargetGeneration\":\"\",\"From\":2,\"To\":3,\"EvidenceAt\":\"2026-09-19T00:27:15.573008593Z\",\"Outcome\":\"SameHostRetainedVolumeReactivated\"},{\"ID\":\"8c086c42-5099-4c4e-aadc-7d6ab64c1f9b\",\"TargetPod\":\"beta-2\",\"TargetUID\":\"20ef22b6-a81f-4c4e-99c7-49e643456d6f\",\"TargetGeneration\":\"c884c4b8eb0146b48ba8c3cf419c04306d9d670dd06fd2a470b8be04b690f32b\",\"From\":3,\"To\":2,\"EvidenceAt\":\"2026-09-19T00:28:03.200339267Z\",\"Outcome\":\"LauncherStoppedRecoveredFollowerRetiredSameHostReuseOnly\"},{\"ID\":\"1b8fef08-b318-4cbd-ba2c-399d0ca11ea7\",\"TargetPod\":\"\",\"TargetUID\":\"\",\"TargetGeneration\":\"\",\"From\":2,\"To\":3,\"EvidenceAt\":\"2026-09-19T00:28:24.641782685Z\",\"Outcome\":\"SameHostRetainedVolumeReactivated\"},{\"ID\":\"cc3b8bd4-0ea1-4a63-bde9-842d15b8f7bd\",\"TargetPod\":\"beta-2\",\"TargetUID\":\"2f02a540-8cbb-4cf5-b87a-b608df46a958\",\"TargetGeneration\":\"ae85edf42c40d056ddeba150928074284da9a937017df02353c14919fca22897\",\"From\":3,\"To\":2,\"EvidenceAt\":\"2026-09-19T00:30:32.786221813Z\",\"Outcome\":\"LauncherStoppedRecoveredFollowerRetiredSameHostReuseOnly\"}],\"Capacity\":{\"Load\":{\"dd5755d7-8db6-41f8-a4f2-1d1e3f5f9385/containerd://7db3d8a12e9e878bdccb79e9a261377b3e1b169167c083a9e3ecf7e72e31ac0a/0\":{\"CPU\":6,\"MemoryMiB\":20,\"Pressure\":false},\"ea405f27-d6f7-467a-8431-6a8a93c2dd7b/containerd://6d2824d8e3a7ce44da92bd73ace80d556d5c5f3284b2e1b54e90721263212c77/0\":{\"CPU\":6,\"MemoryMiB\":25,\"Pressure\":false}},\"Addition\":null,\"IneffectiveBatches\":0,\"Actionable\":false,\"Config\":\"bf069a7e350e7c53de81f85fa85860d19d64440ceda496c760e6f8f6c3d053df\",\"Membership\":\"a27d3135e52ed806aeab398bb25bbf4832fc7383280506ee3a8a0287b184031b\",\"LastObservation\":\"2026-09-19T00:30:04.457035647Z\",\"HighSince\":\"0001-01-01T00:00:00Z\",\"LowSince\":\"0001-01-01T00:00:00Z\",\"PendingSince\":\"0001-01-01T00:00:00Z\",\"LastAction\":\"2026-09-19T00:30:32.798344038Z\",\"HighSamples\":0,\"LowSamples\":0,\"Stamps\":{\"2f02a540-8cbb-4cf5-b87a-b608df46a958/containerd://dab4ba268eff63b7c57bbebd21ed6142a5e2e5dc4e94da7ed838acfbc1ca3f19/0\":{\"Runtime\":\"2026-09-19T00:30:04.453Z\",\"Metrics\":\"2026-09-19T00:29:45Z\"},\"dd5755d7-8db6-41f8-a4f2-1d1e3f5f9385/containerd://7db3d8a12e9e878bdccb79e9a261377b3e1b169167c083a9e3ecf7e72e31ac0a/0\":{\"Runtime\":\"2026-09-19T00:30:04.453Z\",\"Metrics\":\"2026-09-19T00:29:47Z\"},\"ea405f27-d6f7-467a-8431-6a8a93c2dd7b/containerd://6d2824d8e3a7ce44da92bd73ace80d556d5c5f3284b2e1b54e90721263212c77/0\":{\"Runtime\":\"2026-09-19T00:30:04.453Z\",\"Metrics\":\"2026-09-19T00:29:50Z\"}},\"ManualTarget\":0,\"LastManual\":3,\"Decision\":{\"mode\":\"Automatic\",\"reason\":\"PolicyChanged\",\"message\":\"Policy or membership changed; a new stabilization window is required\",\"desiredReplicas\":2,\"usefulReplicas\":2,\"coveredReplicas\":2}},\"BucketHistory\":null,\"PersistentHistory\":[{\"Node\":\"beta-0\",\"PodUID\":\"dd5755d7-8db6-41f8-a4f2-1d1e3f5f9385\",\"Container\":\"dd5755d7-8db6-41f8-a4f2-1d1e3f5f9385/containerd://7db3d8a12e9e878bdccb79e9a261377b3e1b169167c083a9e3ecf7e72e31ac0a/0\",\"Host\":\"celld-step2-cd461a5f-worker2\",\"HostUID\":\"79ab9979-a99d-432d-8ba2-cd71cef9f876\",\"Hostname\":\"celld-step2-cd461a5f-worker2\",\"BootID\":\"b9e9493f-73b0-4a89-be59-534af2c0400d\",\"Zone\":\"us-east-1a\",\"Invocation\":\"dff1c131344555d145490aec5685f36c90046ede019403a42f11cdefac1e0e1c\",\"Generation\":\"8a85605e024b3b34807152bf1c9d6afbd897a57352e9730aebad64f37b8134ae\",\"ClaimUID\":\"4f71f1a0-8166-4b20-bec3-2d10b37fdea9\",\"VolumeUID\":\"b1a93a26-f64f-4648-9911-2ddfc9bb497d\",\"VolumeHandle\":\"local-hostPath:/var/local-path-provisioner/pvc-4f71f1a0-8166-4b20-bec3-2d10b37fdea9_fleets_data-beta-0\",\"Epoch\":1,\"Ensemble\":[\"beta-1\"],\"Stopped\":false,\"Retired\":false},{\"Node\":\"beta-1\",\"PodUID\":\"ea405f27-d6f7-467a-8431-6a8a93c2dd7b\",\"Container\":\"ea405f27-d6f7-467a-8431-6a8a93c2dd7b/containerd://6d2824d8e3a7ce44da92bd73ace80d556d5c5f3284b2e1b54e90721263212c77/0\",\"Host\":\"celld-step2-cd461a5f-worker\",\"HostUID\":\"a5b6fefc-3c40-4033-bf26-aaa7083ce531\",\"Hostname\":\"celld-step2-cd461a5f-worker\",\"BootID\":\"b9e9493f-73b0-4a89-be59-534af2c0400d\",\"Zone\":\"us-east-1a\",\"Invocation\":\"0a0a5e16dc0dddbb6461c2433f90532a518c9a3bc84f34423de1abdde622c7c8\",\"Generation\":\"d7d43a843b5bb55d37ab92c33a3d741063a3e19b788c699dedee4c38a6060cc8\",\"ClaimUID\":\"63409e15-ddc3-4290-9548-540d28399a9a\",\"VolumeUID\":\"375ddaa2-31cb-446e-a5fb-b528f266ebae\",\"VolumeHandle\":\"local-hostPath:/var/local-path-provisioner/pvc-63409e15-ddc3-4290-9548-540d28399a9a_fleets_data-beta-1\",\"Epoch\":1,\"Ensemble\":[\"beta-0\"],\"Stopped\":false,\"Retired\":false},{\"Node\":\"beta-2\",\"PodUID\":\"46d509dd-85db-4994-b05e-b9ed08dd42e9\",\"Container\":\"46d509dd-85db-4994-b05e-b9ed08dd42e9/containerd://a8420f0ac02c8914d6a71ba6e80a240254982af3742ccacc1a893279d72c8d36/0\",\"Host\":\"celld-step2-cd461a5f-control-plane\",\"HostUID\":\"ccc4a340-6dc4-4674-9676-be0c2a8a63c4\",\"Hostname\":\"celld-step2-cd461a5f-control-plane\",\"BootID\":\"b9e9493f-73b0-4a89-be59-534af2c0400d\",\"Zone\":\"us-east-1a\",\"Invocation\":\"4e7162a708f38229d0d9b3bcb28283563460340dbad171ddf66dfe933eb11987\",\"Generation\":\"f7874bc9c427d43ea8356d99a8b5b8df01786c6964bb9dd93b24f07335687c6c\",\"ClaimUID\":\"2db49591-a644-497c-9967-9040dc0d3f78\",\"VolumeUID\":\"52d2fd4b-a67d-44ec-a227-64bfcc9511c3\",\"VolumeHandle\":\"local-hostPath:/var/local-path-provisioner/pvc-2db49591-a644-497c-9967-9040dc0d3f78_fleets_data-beta-2\",\"Epoch\":1,\"Ensemble\":[\"beta-0\",\"beta-1\"],\"Stopped\":true,\"Retired\":true},{\"Node\":\"beta-2\",\"PodUID\":\"20ef22b6-a81f-4c4e-99c7-49e643456d6f\",\"Container\":\"20ef22b6-a81f-4c4e-99c7-49e643456d6f/containerd://5d4b8ac0b9f42630861116e6ab64e72006da85af308684b8aa5f38aefba0ce9f/0\",\"Host\":\"celld-step2-cd461a5f-control-plane\",\"HostUID\":\"ccc4a340-6dc4-4674-9676-be0c2a8a63c4\",\"Hostname\":\"celld-step2-cd461a5f-control-plane\",\"BootID\":\"b9e9493f-73b0-4a89-be59-534af2c0400d\",\"Zone\":\"us-east-1a\",\"Invocation\":\"227c1d918eb5126bacb625a0ccdaf59c18b0836e36f7368cd5a9850c0cd275ff\",\"Generation\":\"c884c4b8eb0146b48ba8c3cf419c04306d9d670dd06fd2a470b8be04b690f32b\",\"ClaimUID\":\"2db49591-a644-497c-9967-9040dc0d3f78\",\"VolumeUID\":\"52d2fd4b-a67d-44ec-a227-64bfcc9511c3\",\"VolumeHandle\":\"local-hostPath:/var/local-path-provisioner/pvc-2db49591-a644-497c-9967-9040dc0d3f78_fleets_data-beta-2\",\"Epoch\":1,\"Ensemble\":[\"beta-0\",\"beta-1\"],\"Stopped\":true,\"Retired\":true},{\"Node\":\"beta-2\",\"PodUID\":\"2f02a540-8cbb-4cf5-b87a-b608df46a958\",\"Container\":\"2f02a540-8cbb-4cf5-b87a-b608df46a958/containerd://dab4ba268eff63b7c57bbebd21ed6142a5e2e5dc4e94da7ed838acfbc1ca3f19/0\",\"Host\":\"celld-step2-cd461a5f-control-plane\",\"HostUID\":\"ccc4a340-6dc4-4674-9676-be0c2a8a63c4\",\"Hostname\":\"celld-step2-cd461a5f-control-plane\",\"BootID\":\"b9e9493f-73b0-4a89-be59-534af2c0400d\",\"Zone\":\"us-east-1a\",\"Invocation\":\"8762a0993d845440f1136f96eff7f243f454ff2396e59d85f9b8ca35b76795d9\",\"Generation\":\"ae85edf42c40d056ddeba150928074284da9a937017df02353c14919fca22897\",\"ClaimUID\":\"2db49591-a644-497c-9967-9040dc0d3f78\",\"VolumeUID\":\"52d2fd4b-a67d-44ec-a227-64bfcc9511c3\",\"VolumeHandle\":\"local-hostPath:/var/local-path-provisioner/pvc-2db49591-a644-497c-9967-9040dc0d3f78_fleets_data-beta-2\",\"Epoch\":1,\"Ensemble\":[\"beta-0\",\"beta-1\"],\"Stopped\":true,\"Retired\":true}]}",
+                    "celld.example.com/workload-creation-attempted": "true"
+                },
+                "creationTimestamp": "2026-09-19T00:24:26Z",
+                "generation": 1,
+                "name": "s3-9bad1ca42408fb5333d02d1bdf11293e9e22c4411493f3fcba7b6419",
+                "resourceVersion": "3440",
+                "uid": "5c21a74a-7532-4a38-ab4d-8398d6d560af"
+            },
+            "spec": {
+                "bucket": "bucket-beta",
+                "fleetName": "beta",
+                "fleetNamespace": "fleets",
+                "fleetUID": "f654d355-35b5-40ef-8375-10bc66faabbb",
+                "initialReplicas": 2,
+                "specHash": "7389a4b2b79cac23eb43ed78730577d34f876de5183a2e022d2fd3f9dce1c9ed"
+            }
+        }
+    ],
+    "kind": "List",
+    "metadata": {
+        "resourceVersion": ""
+    }
+}
+
+Cleaning up only cluster celld-step2-cd461a5f

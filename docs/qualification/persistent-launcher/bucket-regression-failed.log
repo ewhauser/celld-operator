@@ -1,0 +1,526 @@
+Creating isolated cluster celld-step2-4afb3646
+Pulling into disposable node: ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8
+Pulling into disposable node: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+Pulling into disposable node: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+Pulling into disposable node: curlimages/curl:8.12.1
+PASS: create two isolated test buckets
+PASS: qualification app deployed to bucket-alpha
+PASS: qualification app deployed to bucket-beta
+PASS: pre-existing PVC blocks initial StatefulSet creation
+PASS: both runtime profiles ready through operator reconciliation
+PASS: strict replicas use distinct nodes within the configured zone
+PASS: strict placement blocks a missing eligible zone
+PASS: probe same-fleet running
+PASS: probe client running
+PASS: probe client-beta running
+PASS: probe untrusted running
+PASS: probe operator running
+PASS: application writes readable only in their own fleet storage scope
+PASS: same-fleet/operator peer access, cross-fleet/untrusted/client peer denial, ClusterIP health routing
+PASS: cross-namespace storage conflict blocked
+PASS: schema rejects invalid specs and lifecycle mutations
+PASS: additional probe and bucket override are reported as unsafe drift
+PASS: restored original template matches normalized API defaults
+PASS: journaled scale-out after controller restart: alpha
+NAMESPACE            NAME                                                         READY   STATUS             RESTARTS        AGE     IP                NODE                                 NOMINATED NODE   READINESS GATES
+celld-system         celld-operator-6dc85d66f9-zrd8w                              1/1     Running            0               5m35s   192.168.142.6     celld-step2-4afb3646-control-plane   <none>           <none>
+celld-system         operator                                                     1/1     Running            0               6m23s   192.168.138.9     celld-step2-4afb3646-worker          <none>           0/1
+celld-test-store     deploy-bucket-alpha                                          0/1     Completed          0               7m36s   192.168.142.1     celld-step2-4afb3646-control-plane   <none>           <none>
+celld-test-store     deploy-bucket-beta                                           0/1     Completed          0               7m34s   192.168.142.2     celld-step2-4afb3646-control-plane   <none>           <none>
+celld-test-store     minio                                                        1/1     Running            0               7m40s   192.168.116.129   celld-step2-4afb3646-worker2         <none>           <none>
+celld-test-store     seed                                                         0/1     Completed          0               7m39s   192.168.116.130   celld-step2-4afb3646-worker2         <none>           <none>
+fleets               alpha-7dc96455c-dhq7z                                        1/1     Running            0               6m53s   192.168.138.6     celld-step2-4afb3646-worker          <none>           <none>
+fleets               alpha-7dc96455c-xdxxl                                        1/1     Running            0               6m53s   192.168.116.133   celld-step2-4afb3646-worker2         <none>           <none>
+fleets               beta-0                                                       1/1     Running            0               6m53s   192.168.116.135   celld-step2-4afb3646-worker2         <none>           <none>
+fleets               beta-1                                                       1/1     Running            0               6m53s   192.168.138.7     celld-step2-4afb3646-worker          <none>           <none>
+fleets               client                                                       1/1     Running            0               6m30s   192.168.138.8     celld-step2-4afb3646-worker          <none>           0/1
+fleets               client-beta                                                  1/1     Running            0               6m27s   192.168.116.137   celld-step2-4afb3646-worker2         <none>           0/1
+fleets               unavailable-c97556c8d-d9hr9                                  0/1     CrashLoopBackOff   5 (2m28s ago)   6m32s   192.168.116.136   celld-step2-4afb3646-worker2         <none>           <none>
+fleets               unavailable-c97556c8d-z4m5h                                  0/1     Pending            0               6m32s   <none>            <none>                               <none>           <none>
+fleets               untrusted                                                    1/1     Running            0               6m25s   192.168.142.5     celld-step2-4afb3646-control-plane   <none>           0/1
+kube-system          calico-kube-controllers-78576cf5c8-xzrcb                     1/1     Running            0               10m     192.168.138.1     celld-step2-4afb3646-worker          <none>           <none>
+kube-system          calico-node-4xspk                                            1/1     Running            0               10m     172.18.0.5        celld-step2-4afb3646-worker2         <none>           <none>
+kube-system          calico-node-r4hwj                                            1/1     Running            0               10m     172.18.0.4        celld-step2-4afb3646-control-plane   <none>           <none>
+kube-system          calico-node-vknzk                                            1/1     Running            0               10m     172.18.0.3        celld-step2-4afb3646-worker          <none>           <none>
+kube-system          coredns-7c65d6cfc9-cbnps                                     1/1     Running            0               10m     192.168.138.2     celld-step2-4afb3646-worker          <none>           <none>
+kube-system          coredns-7c65d6cfc9-gjw6c                                     1/1     Running            0               10m     192.168.138.4     celld-step2-4afb3646-worker          <none>           <none>
+kube-system          etcd-celld-step2-4afb3646-control-plane                      1/1     Running            0               10m     172.18.0.4        celld-step2-4afb3646-control-plane   <none>           <none>
+kube-system          kube-apiserver-celld-step2-4afb3646-control-plane            1/1     Running            0               10m     172.18.0.4        celld-step2-4afb3646-control-plane   <none>           <none>
+kube-system          kube-controller-manager-celld-step2-4afb3646-control-plane   1/1     Running            0               10m     172.18.0.4        celld-step2-4afb3646-control-plane   <none>           <none>
+kube-system          kube-proxy-888gk                                             1/1     Running            0               10m     172.18.0.4        celld-step2-4afb3646-control-plane   <none>           <none>
+kube-system          kube-proxy-9kvxc                                             1/1     Running            0               10m     172.18.0.3        celld-step2-4afb3646-worker          <none>           <none>
+kube-system          kube-proxy-dbrln                                             1/1     Running            0               10m     172.18.0.5        celld-step2-4afb3646-worker2         <none>           <none>
+kube-system          kube-scheduler-celld-step2-4afb3646-control-plane            1/1     Running            0               10m     172.18.0.4        celld-step2-4afb3646-control-plane   <none>           <none>
+kube-system          metrics-server-bf688598-2h5bt                                1/1     Running            0               7m26s   192.168.116.132   celld-step2-4afb3646-worker2         <none>           <none>
+local-path-storage   local-path-provisioner-6fdc965494-m2kbh                      1/1     Running            0               10m     192.168.138.3     celld-step2-4afb3646-worker          <none>           <none>
+
+apiVersion: v1
+items:
+- apiVersion: celld.example.com/v1alpha1
+  kind: CelldFleet
+  metadata:
+    annotations:
+      kubectl.kubernetes.io/last-applied-configuration: |
+        {"apiVersion":"celld.example.com/v1alpha1","kind":"CelldFleet","metadata":{"annotations":{},"name":"alpha","namespace":"fleets"},"spec":{"placement":{"azCount":1,"zones":["us-east-1a"]},"profile":"Bucket","qualification":"Experimental","replicas":2,"serviceAccountName":"runtime","storage":{"bucket":"bucket-alpha","region":"us-east-1","sizeGiB":1}}}
+    creationTimestamp: "2026-09-19T00:13:33Z"
+    finalizers:
+    - celld.example.com/lifecycle-protection
+    generation: 3
+    name: alpha
+    namespace: fleets
+    resourceVersion: "3271"
+    uid: d280ff43-d6da-4e76-9e17-490f03312bce
+  spec:
+    placement:
+      azCount: 1
+      mode: Strict
+      zones:
+      - us-east-1a
+    profile: Bucket
+    qualification: Experimental
+    replicas: 1
+    serviceAccountName: runtime
+    storage:
+      bucket: bucket-alpha
+      region: us-east-1
+      sizeGiB: 1
+  status:
+    conditions:
+    - lastTransitionTime: "2026-09-19T00:13:33Z"
+      message: unresolved bucket writer record missing
+      observedGeneration: 3
+      reason: BucketRecoveryBlocked
+      status: "False"
+      type: MaintenancePaused
+    - lastTransitionTime: "2026-09-19T00:13:33Z"
+      message: unresolved bucket writer record missing
+      observedGeneration: 3
+      reason: BucketRecoveryBlocked
+      status: "False"
+      type: Deleting
+    - lastTransitionTime: "2026-09-19T00:15:24Z"
+      message: unresolved bucket writer record missing
+      observedGeneration: 3
+      reason: BucketRecoveryBlocked
+      status: "True"
+      type: Ready
+    - lastTransitionTime: "2026-09-19T00:15:47Z"
+      message: unresolved bucket writer record missing
+      observedGeneration: 3
+      reason: BucketRecoveryBlocked
+      status: "False"
+      type: InfrastructureReady
+    - lastTransitionTime: "2026-09-19T00:15:47Z"
+      message: unresolved bucket writer record missing
+      observedGeneration: 3
+      reason: BucketRecoveryBlocked
+      status: "False"
+      type: Progressing
+    - lastTransitionTime: "2026-09-19T00:15:47Z"
+      message: unresolved bucket writer record missing
+      observedGeneration: 3
+      reason: BucketRecoveryBlocked
+      status: "True"
+      type: Blocked
+    - lastTransitionTime: "2026-09-19T00:13:33Z"
+      message: Production automatic contraction and uncertain-node PersistentFleet
+        recovery remain unqualified; upgrades, restarts and deletion are blocked
+      observedGeneration: 3
+      reason: QualificationIncomplete
+      status: "True"
+      type: LifecycleBlocked
+    - lastTransitionTime: "2026-09-19T00:13:33Z"
+      message: Local prototype only; AWS, retained-EBS recovery, fencing, follower
+        AZ diversity and restart safety remain unqualified
+      observedGeneration: 3
+      reason: QualificationIncomplete
+      status: "False"
+      type: ProductionQualified
+    lifecycle:
+      deadline: "2026-09-19T00:45:26Z"
+      evidenceBlocker: HistoricalSessionUnresolved
+      evidenceCheckedAt: "2026-09-19T00:20:24Z"
+      from: 3
+      operationID: ec41c81d-0260-444d-879b-f5f89a78badf
+      phase: Recovering
+      sessionCount: 4
+      to: 2
+    observedGeneration: 3
+    readyReplicas: 2
+    reservation: s3-3e3c6c589bf95c28c9dc27cca2758c2991eb0031bff576ff1ad01e71
+- apiVersion: celld.example.com/v1alpha1
+  kind: CelldFleet
+  metadata:
+    annotations:
+      kubectl.kubernetes.io/last-applied-configuration: |
+        {"apiVersion":"celld.example.com/v1alpha1","kind":"CelldFleet","metadata":{"annotations":{},"name":"beta","namespace":"fleets"},"spec":{"placement":{"azCount":1,"zones":["us-east-1a"]},"profile":"PersistentFleet","qualification":"Experimental","replicas":2,"serviceAccountName":"runtime","storage":{"bucket":"bucket-beta","region":"us-east-1","sizeGiB":1,"storageClassName":"retained"}}}
+    creationTimestamp: "2026-09-19T00:13:33Z"
+    finalizers:
+    - celld.example.com/lifecycle-protection
+    generation: 1
+    name: beta
+    namespace: fleets
+    resourceVersion: "3277"
+    uid: b717234f-7c3f-4d2d-aa09-104dbe818519
+  spec:
+    placement:
+      azCount: 1
+      mode: Strict
+      zones:
+      - us-east-1a
+    profile: PersistentFleet
+    qualification: Experimental
+    replicas: 2
+    serviceAccountName: runtime
+    storage:
+      bucket: bucket-beta
+      region: us-east-1
+      sizeGiB: 1
+      storageClassName: retained
+  status:
+    conditions:
+    - lastTransitionTime: "2026-09-19T00:13:33Z"
+      message: Initial infrastructure and runtime readiness observed; this is not
+        production or durability qualification
+      observedGeneration: 1
+      reason: Provisioned
+      status: "False"
+      type: MaintenancePaused
+    - lastTransitionTime: "2026-09-19T00:13:33Z"
+      message: Initial infrastructure and runtime readiness observed; this is not
+        production or durability qualification
+      observedGeneration: 1
+      reason: Provisioned
+      status: "False"
+      type: Deleting
+    - lastTransitionTime: "2026-09-19T00:13:53Z"
+      message: Initial infrastructure and runtime readiness observed; this is not
+        production or durability qualification
+      observedGeneration: 1
+      reason: Provisioned
+      status: "True"
+      type: Ready
+    - lastTransitionTime: "2026-09-19T00:15:08Z"
+      message: Initial infrastructure and runtime readiness observed; this is not
+        production or durability qualification
+      observedGeneration: 1
+      reason: Provisioned
+      status: "True"
+      type: InfrastructureReady
+    - lastTransitionTime: "2026-09-19T00:13:53Z"
+      message: Initial infrastructure and runtime readiness observed; this is not
+        production or durability qualification
+      observedGeneration: 1
+      reason: Provisioned
+      status: "False"
+      type: Progressing
+    - lastTransitionTime: "2026-09-19T00:15:08Z"
+      message: Initial infrastructure and runtime readiness observed; this is not
+        production or durability qualification
+      observedGeneration: 1
+      reason: Provisioned
+      status: "False"
+      type: Blocked
+    - lastTransitionTime: "2026-09-19T00:13:33Z"
+      message: Production automatic contraction and uncertain-node PersistentFleet
+        recovery remain unqualified; upgrades, restarts and deletion are blocked
+      observedGeneration: 1
+      reason: QualificationIncomplete
+      status: "True"
+      type: LifecycleBlocked
+    - lastTransitionTime: "2026-09-19T00:13:33Z"
+      message: Local prototype only; AWS, retained-EBS recovery, fencing, follower
+        AZ diversity and restart safety remain unqualified
+      observedGeneration: 1
+      reason: QualificationIncomplete
+      status: "False"
+      type: ProductionQualified
+    lifecycle:
+      evidenceBlocker: SessionBindingUnqualified
+      evidenceCheckedAt: "2026-09-19T00:20:25Z"
+      sessionCount: 3
+    observedGeneration: 1
+    readyReplicas: 2
+    reservation: s3-9bad1ca42408fb5333d02d1bdf11293e9e22c4411493f3fcba7b6419
+- apiVersion: celld.example.com/v1alpha1
+  kind: CelldFleet
+  metadata:
+    annotations:
+      kubectl.kubernetes.io/last-applied-configuration: |
+        {"apiVersion":"celld.example.com/v1alpha1","kind":"CelldFleet","metadata":{"annotations":{},"name":"collision","namespace":"fleets"},"spec":{"placement":{"azCount":1,"zones":["us-east-1a"]},"profile":"PersistentFleet","qualification":"Experimental","replicas":2,"serviceAccountName":"runtime","storage":{"bucket":"new-bucket","region":"us-east-1","sizeGiB":1,"storageClassName":"retained"}}}
+    creationTimestamp: "2026-09-19T00:13:30Z"
+    finalizers:
+    - celld.example.com/lifecycle-protection
+    generation: 1
+    name: collision
+    namespace: fleets
+    resourceVersion: "1401"
+    uid: 27dcfc4e-57b5-4786-8634-d34994e16585
+  spec:
+    placement:
+      azCount: 1
+      mode: Strict
+      zones:
+      - us-east-1a
+    profile: PersistentFleet
+    qualification: Experimental
+    replicas: 2
+    serviceAccountName: runtime
+    storage:
+      bucket: new-bucket
+      region: us-east-1
+      sizeGiB: 1
+      storageClassName: retained
+  status:
+    conditions:
+    - lastTransitionTime: "2026-09-19T00:13:30Z"
+      message: PVC data-collision-0 already exists; initial provisioning cannot verify
+        retained disk identity or adopt existing claims
+      observedGeneration: 1
+      reason: StorageIdentityConflict
+      status: "False"
+      type: MaintenancePaused
+    - lastTransitionTime: "2026-09-19T00:13:30Z"
+      message: PVC data-collision-0 already exists; initial provisioning cannot verify
+        retained disk identity or adopt existing claims
+      observedGeneration: 1
+      reason: StorageIdentityConflict
+      status: "False"
+      type: Deleting
+    - lastTransitionTime: "2026-09-19T00:13:30Z"
+      message: PVC data-collision-0 already exists; initial provisioning cannot verify
+        retained disk identity or adopt existing claims
+      observedGeneration: 1
+      reason: StorageIdentityConflict
+      status: "False"
+      type: Ready
+    - lastTransitionTime: "2026-09-19T00:13:30Z"
+      message: PVC data-collision-0 already exists; initial provisioning cannot verify
+        retained disk identity or adopt existing claims
+      observedGeneration: 1
+      reason: StorageIdentityConflict
+      status: "False"
+      type: InfrastructureReady
+    - lastTransitionTime: "2026-09-19T00:13:30Z"
+      message: PVC data-collision-0 already exists; initial provisioning cannot verify
+        retained disk identity or adopt existing claims
+      observedGeneration: 1
+      reason: StorageIdentityConflict
+      status: "False"
+      type: Progressing
+    - lastTransitionTime: "2026-09-19T00:13:30Z"
+      message: PVC data-collision-0 already exists; initial provisioning cannot verify
+        retained disk identity or adopt existing claims
+      observedGeneration: 1
+      reason: StorageIdentityConflict
+      status: "True"
+      type: Blocked
+    - lastTransitionTime: "2026-09-19T00:13:30Z"
+      message: Production automatic contraction and uncertain-node PersistentFleet
+        recovery remain unqualified; upgrades, restarts and deletion are blocked
+      observedGeneration: 1
+      reason: QualificationIncomplete
+      status: "True"
+      type: LifecycleBlocked
+    - lastTransitionTime: "2026-09-19T00:13:30Z"
+      message: Local prototype only; AWS, retained-EBS recovery, fencing, follower
+        AZ diversity and restart safety remain unqualified
+      observedGeneration: 1
+      reason: QualificationIncomplete
+      status: "False"
+      type: ProductionQualified
+    observedGeneration: 1
+- apiVersion: celld.example.com/v1alpha1
+  kind: CelldFleet
+  metadata:
+    annotations:
+      kubectl.kubernetes.io/last-applied-configuration: |
+        {"apiVersion":"celld.example.com/v1alpha1","kind":"CelldFleet","metadata":{"annotations":{},"name":"unavailable","namespace":"fleets"},"spec":{"placement":{"azCount":2,"zones":["us-east-1a","us-east-1b"]},"profile":"Bucket","qualification":"Experimental","replicas":2,"serviceAccountName":"runtime","storage":{"bucket":"bucket-unavailable","region":"us-east-1","sizeGiB":1}}}
+    creationTimestamp: "2026-09-19T00:13:54Z"
+    finalizers:
+    - celld.example.com/lifecycle-protection
+    generation: 1
+    name: unavailable
+    namespace: fleets
+    resourceVersion: "1762"
+    uid: e8192c37-33de-4242-b047-067a145a5640
+  spec:
+    placement:
+      azCount: 2
+      mode: Strict
+      zones:
+      - us-east-1a
+      - us-east-1b
+    profile: Bucket
+    qualification: Experimental
+    replicas: 2
+    serviceAccountName: runtime
+    storage:
+      bucket: bucket-unavailable
+      region: us-east-1
+      sizeGiB: 1
+  status:
+    conditions:
+    - lastTransitionTime: "2026-09-19T00:13:54Z"
+      message: Waiting for ready replicas; inspect Pod scheduling, PVC binding and
+        runtime readiness. Capacity is externally provisioned
+      observedGeneration: 1
+      reason: Provisioning
+      status: "False"
+      type: MaintenancePaused
+    - lastTransitionTime: "2026-09-19T00:13:54Z"
+      message: Waiting for ready replicas; inspect Pod scheduling, PVC binding and
+        runtime readiness. Capacity is externally provisioned
+      observedGeneration: 1
+      reason: Provisioning
+      status: "False"
+      type: Deleting
+    - lastTransitionTime: "2026-09-19T00:13:54Z"
+      message: Waiting for ready replicas; inspect Pod scheduling, PVC binding and
+        runtime readiness. Capacity is externally provisioned
+      observedGeneration: 1
+      reason: Provisioning
+      status: "False"
+      type: Ready
+    - lastTransitionTime: "2026-09-19T00:13:54Z"
+      message: Waiting for ready replicas; inspect Pod scheduling, PVC binding and
+        runtime readiness. Capacity is externally provisioned
+      observedGeneration: 1
+      reason: Provisioning
+      status: "True"
+      type: InfrastructureReady
+    - lastTransitionTime: "2026-09-19T00:13:54Z"
+      message: Waiting for ready replicas; inspect Pod scheduling, PVC binding and
+        runtime readiness. Capacity is externally provisioned
+      observedGeneration: 1
+      reason: Provisioning
+      status: "True"
+      type: Progressing
+    - lastTransitionTime: "2026-09-19T00:13:54Z"
+      message: Waiting for ready replicas; inspect Pod scheduling, PVC binding and
+        runtime readiness. Capacity is externally provisioned
+      observedGeneration: 1
+      reason: Provisioning
+      status: "False"
+      type: Blocked
+    - lastTransitionTime: "2026-09-19T00:13:54Z"
+      message: Production automatic contraction and uncertain-node PersistentFleet
+        recovery remain unqualified; upgrades, restarts and deletion are blocked
+      observedGeneration: 1
+      reason: QualificationIncomplete
+      status: "True"
+      type: LifecycleBlocked
+    - lastTransitionTime: "2026-09-19T00:13:54Z"
+      message: Local prototype only; AWS, retained-EBS recovery, fencing, follower
+        AZ diversity and restart safety remain unqualified
+      observedGeneration: 1
+      reason: QualificationIncomplete
+      status: "False"
+      type: ProductionQualified
+    lifecycle:
+      evidenceBlocker: RecoveryInventoryUnavailable
+    observedGeneration: 1
+    reservation: s3-56487ad297b0f7750cecacd1a7913098b33524065175aca8a8793286
+kind: List
+metadata:
+  resourceVersion: ""
+
+LAST SEEN   TYPE      REASON                            OBJECT                                   MESSAGE
+6m56s       Normal    NoPods                            poddisruptionbudget/collision            No matching pods found
+6m53s       Normal    SuccessfulCreate                  statefulset/beta                         create Pod beta-0 in StatefulSet beta successful
+6m53s       Normal    Pulled                            pod/alpha-7dc96455c-xdxxl                Container image "ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8" already present on machine
+6m53s       Normal    Provisioning                      persistentvolumeclaim/data-beta-0        External provisioner is provisioning volume for claim "fleets/data-beta-0"
+6m53s       Normal    SuccessfulCreate                  statefulset/beta                         create Pod beta-1 in StatefulSet beta successful
+6m53s       Normal    ExternalProvisioning              persistentvolumeclaim/data-beta-1        Waiting for a volume to be created either by the external provisioner 'rancher.io/local-path' or manually by the system administrator. If volume creation is delayed, please verify that the provisioner is running and correctly registered.
+6m53s       Normal    Scheduled                         pod/alpha-7dc96455c-dhq7z                Successfully assigned fleets/alpha-7dc96455c-dhq7z to celld-step2-4afb3646-worker
+6m53s       Normal    Pulled                            pod/alpha-7dc96455c-dhq7z                Container image "ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8" already present on machine
+6m53s       Normal    Created                           pod/alpha-7dc96455c-dhq7z                Created container celld
+6m53s       Normal    Provisioning                      persistentvolumeclaim/data-beta-1        External provisioner is provisioning volume for claim "fleets/data-beta-1"
+6m53s       Normal    Created                           pod/alpha-7dc96455c-xdxxl                Created container celld
+6m53s       Normal    ExternalProvisioning              persistentvolumeclaim/data-beta-0        Waiting for a volume to be created either by the external provisioner 'rancher.io/local-path' or manually by the system administrator. If volume creation is delayed, please verify that the provisioner is running and correctly registered.
+6m53s       Normal    Scheduled                         pod/alpha-7dc96455c-xdxxl                Successfully assigned fleets/alpha-7dc96455c-xdxxl to celld-step2-4afb3646-worker2
+6m53s       Normal    NoPods                            poddisruptionbudget/beta                 No matching pods found
+6m53s       Normal    Started                           pod/alpha-7dc96455c-xdxxl                Started container celld
+6m53s       Normal    WaitForFirstConsumer              persistentvolumeclaim/data-beta-0        waiting for first consumer to be created before binding
+6m53s       Normal    SuccessfulCreate                  replicaset/alpha-7dc96455c               Created pod: alpha-7dc96455c-xdxxl
+6m53s       Normal    SuccessfulCreate                  replicaset/alpha-7dc96455c               Created pod: alpha-7dc96455c-dhq7z
+6m53s       Normal    WaitForFirstConsumer              persistentvolumeclaim/data-beta-1        waiting for first consumer to be created before binding
+6m53s       Normal    ScalingReplicaSet                 deployment/alpha                         Scaled up replica set alpha-7dc96455c to 2
+6m53s       Normal    NoPods                            poddisruptionbudget/alpha                No matching pods found
+6m52s       Normal    Started                           pod/alpha-7dc96455c-dhq7z                Started container celld
+6m51s       Normal    ProvisioningSucceeded             persistentvolumeclaim/data-beta-1        Successfully provisioned volume pvc-a773e760-cd94-4a3c-9392-d4b9fa22c30b
+6m50s       Normal    Scheduled                         pod/beta-1                               Successfully assigned fleets/beta-1 to celld-step2-4afb3646-worker
+6m50s       Normal    Pulled                            pod/beta-1                               Container image "ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8" already present on machine
+6m50s       Normal    ProvisioningSucceeded             persistentvolumeclaim/data-beta-0        Successfully provisioned volume pvc-55171be0-38d8-41fd-b3fe-905b52b108c8
+6m50s       Normal    Started                           pod/beta-1                               Started container celld
+6m50s       Normal    Created                           pod/beta-1                               Created container celld
+6m49s       Normal    Started                           pod/beta-0                               Started container celld
+6m49s       Normal    Scheduled                         pod/beta-0                               Successfully assigned fleets/beta-0 to celld-step2-4afb3646-worker2
+6m49s       Normal    Created                           pod/beta-0                               Created container celld
+6m49s       Normal    Pulled                            pod/beta-0                               Container image "ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8" already present on machine
+6m43s       Warning   Unhealthy                         pod/alpha-7dc96455c-dhq7z                Readiness probe failed: Get "http://192.168.138.6:8080/.well-known/celld/health": dial tcp 192.168.138.6:8080: connect: connection refused
+6m43s       Warning   Unhealthy                         pod/alpha-7dc96455c-xdxxl                Readiness probe failed: Get "http://192.168.116.133:8080/.well-known/celld/health": dial tcp 192.168.116.133:8080: connect: connection refused
+6m40s       Warning   Unhealthy                         pod/beta-1                               Readiness probe failed: Get "http://192.168.138.7:8080/.well-known/celld/health": dial tcp 192.168.138.7:8080: connect: connection refused
+6m39s       Warning   Unhealthy                         pod/beta-0                               Readiness probe failed: Get "http://192.168.116.135:8080/.well-known/celld/health": dial tcp 192.168.116.135:8080: connect: connection refused
+6m38s       Warning   Unhealthy                         pod/beta-1                               Readiness probe failed: HTTP probe failed with statuscode: 503
+6m32s       Normal    Scheduled                         pod/unavailable-c97556c8d-d9hr9          Successfully assigned fleets/unavailable-c97556c8d-d9hr9 to celld-step2-4afb3646-worker2
+6m32s       Normal    SuccessfulCreate                  replicaset/unavailable-c97556c8d         Created pod: unavailable-c97556c8d-d9hr9
+6m32s       Normal    Scheduled                         pod/same-fleet                           Successfully assigned fleets/same-fleet to celld-step2-4afb3646-control-plane
+6m32s       Normal    SuccessfulCreate                  replicaset/unavailable-c97556c8d         Created pod: unavailable-c97556c8d-z4m5h
+6m32s       Normal    NoPods                            poddisruptionbudget/unavailable          No matching pods found
+6m32s       Normal    ScalingReplicaSet                 deployment/unavailable                   Scaled up replica set unavailable-c97556c8d to 2
+6m31s       Normal    Pulled                            pod/same-fleet                           Container image "curlimages/curl:8.12.1" already present on machine
+6m31s       Normal    Created                           pod/same-fleet                           Created container probe
+6m31s       Normal    Started                           pod/same-fleet                           Started container probe
+6m30s       Normal    Scheduled                         pod/client                               Successfully assigned fleets/client to celld-step2-4afb3646-worker
+6m29s       Normal    Created                           pod/client                               Created container probe
+6m29s       Normal    Started                           pod/client                               Started container probe
+6m29s       Normal    Pulled                            pod/client                               Container image "curlimages/curl:8.12.1" already present on machine
+6m27s       Normal    Started                           pod/client-beta                          Started container probe
+6m27s       Normal    Created                           pod/client-beta                          Created container probe
+6m27s       Normal    Pulled                            pod/client-beta                          Container image "curlimages/curl:8.12.1" already present on machine
+6m27s       Normal    Scheduled                         pod/client-beta                          Successfully assigned fleets/client-beta to celld-step2-4afb3646-worker2
+6m25s       Normal    Created                           pod/untrusted                            Created container probe
+6m25s       Normal    Scheduled                         pod/untrusted                            Successfully assigned fleets/untrusted to celld-step2-4afb3646-control-plane
+6m25s       Normal    Started                           pod/untrusted                            Started container probe
+6m25s       Normal    Pulled                            pod/untrusted                            Container image "curlimages/curl:8.12.1" already present on machine
+6m12s       Warning   Unhealthy                         pod/unavailable-c97556c8d-d9hr9          Readiness probe failed: Get "http://192.168.116.136:8080/.well-known/celld/health": dial tcp 192.168.116.136:8080: connect: connection refused
+6m8s        Normal    Killing                           pod/same-fleet                           Stopping container probe
+5m58s       Normal    Pulled                            pod/unavailable-c97556c8d-d9hr9          Container image "ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8" already present on machine
+5m58s       Normal    Created                           pod/unavailable-c97556c8d-d9hr9          Created container celld
+5m58s       Normal    Started                           pod/unavailable-c97556c8d-d9hr9          Started container celld
+5m38s       Warning   CalculateExpectedPodCountFailed   poddisruptionbudget/alpha                Failed to calculate the number of expected pods: celldfleets.celld.example.com does not implement the scale subresource
+5m18s       Normal    ScalingReplicaSet                 deployment/alpha                         Scaled up replica set alpha-7dc96455c to 3 from 2
+5m18s       Normal    Scheduled                         pod/alpha-7dc96455c-cvkkf                Successfully assigned fleets/alpha-7dc96455c-cvkkf to celld-step2-4afb3646-control-plane
+5m18s       Normal    SuccessfulCreate                  replicaset/alpha-7dc96455c               Created pod: alpha-7dc96455c-cvkkf
+5m18s       Normal    Created                           pod/alpha-7dc96455c-cvkkf                Created container celld
+5m18s       Normal    Pulled                            pod/alpha-7dc96455c-cvkkf                Container image "ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8" already present on machine
+5m18s       Normal    Started                           pod/alpha-7dc96455c-cvkkf                Started container celld
+5m8s        Warning   Unhealthy                         pod/alpha-7dc96455c-cvkkf                Readiness probe failed: Get "http://192.168.142.7:8080/.well-known/celld/health": dial tcp 192.168.142.7:8080: connect: connection refused
+4m59s       Normal    ScalingReplicaSet                 deployment/alpha                         Scaled down replica set alpha-7dc96455c to 2 from 3
+4m59s       Normal    Killing                           pod/alpha-7dc96455c-cvkkf                Stopping container celld
+4m59s       Normal    SuccessfulDelete                  replicaset/alpha-7dc96455c               Deleted pod: alpha-7dc96455c-cvkkf
+4m58s       Warning   FailedScheduling                  pod/unavailable-c97556c8d-z4m5h          0/3 nodes are available: 3 node(s) didn't match pod topology spread constraints. preemption: 0/3 nodes are available: 3 No preemption victims found for incoming pod.
+80s         Warning   BackOff                           pod/unavailable-c97556c8d-d9hr9          Back-off restarting failed container celld in pod unavailable-c97556c8d-d9hr9_fleets(fbb6a83a-7c5e-483e-8fc2-996acaa03e24)
+54s         Normal    WaitForFirstConsumer              persistentvolumeclaim/data-collision-0   waiting for first consumer to be created before binding
+
+
+Found 2 pods, using pod/celld-operator-6dc85d66f9-zrd8w
+{"time":"2026-09-19T00:14:52.031692658Z","level":"INFO","msg":"starting server","name":"health probe","addr":"[::]:8082"}
+{"time":"2026-09-19T00:14:52.031738034Z","level":"INFO","msg":"Attempting to acquire leader lease...","logger":"leaderelection","lock":"celld-system/celld-operator.celld.example.com"}
+{"time":"2026-09-19T00:15:08.164054705Z","level":"INFO","msg":"Successfully acquired lease","logger":"leaderelection","lock":"celld-system/celld-operator.celld.example.com"}
+{"time":"2026-09-19T00:15:08.16459639Z","level":"INFO","msg":"Starting EventSource","controller":"celldfleet","controllerGroup":"celld.example.com","controllerKind":"CelldFleet","source":"kind source: *v1alpha1.CelldFleet"}
+{"time":"2026-09-19T00:15:08.372531063Z","level":"INFO","msg":"Starting Controller","controller":"celldfleet","controllerGroup":"celld.example.com","controllerKind":"CelldFleet"}
+{"time":"2026-09-19T00:15:08.372577231Z","level":"INFO","msg":"Starting workers","controller":"celldfleet","controllerGroup":"celld.example.com","controllerKind":"CelldFleet","worker count":4}
+
+Cleaning up only cluster celld-step2-4afb3646
+Traceback (most recent call last):
+  File "/Users/ewhauser/working/celld-operator/hack/integration/run.py", line 435, in <module>
+    main()
+    ~~~~^^
+  File "/Users/ewhauser/working/celld-operator/hack/integration/run.py", line 309, in main
+    wait_for(lambda:get(kind,fleet_name)['spec']['replicas']==1 and ready(fleet_name) and not get('celldfleet',fleet_name).get('status',{}).get('lifecycle',{}).get('operationID'),'two actual Bucket decrements completed',timeout=300)
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ewhauser/working/celld-operator/hack/integration/run.py", line 70, in wait_for
+    raise RuntimeError('Timed out: ' + description)
+RuntimeError: Timed out: two actual Bucket decrements completed

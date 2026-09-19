@@ -134,10 +134,10 @@ func TestOperationDeadlineAndCanceledContext(t *testing.T) {
 		t.Fatal("canceled context issued effect")
 	}
 }
-func TestJournalV1ThroughV5(t *testing.T) {
+func TestJournalV1ThroughV6(t *testing.T) {
 	r, f := lifecycleSetup(t, "Bucket")
 	j := getJournal(t, r, f)
-	for _, version := range []int{1, 2, 3, 4, 5} {
+	for _, version := range []int{1, 2, 3, 4, 5, 6} {
 		res := &fleet.CelldStorageReservation{}
 		if err := r.Get(t.Context(), client.ObjectKey{Name: reservationName(f)}, res); err != nil {
 			t.Fatal(err)
@@ -147,7 +147,7 @@ func TestJournalV1ThroughV5(t *testing.T) {
 			t.Fatal(err)
 		}
 		restored, err := readJournal(res)
-		if err != nil || restored.Version != 5 {
+		if err != nil || restored.Version != 6 {
 			t.Fatalf("legacy %d: %v", version, err)
 		}
 	}

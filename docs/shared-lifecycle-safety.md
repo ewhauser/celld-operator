@@ -1,5 +1,7 @@
 # Shared lifecycle safety implementation
 
+Follow-up: [the launcher-managed graceful PersistentFleet path](persistent-fleet-lifecycle.md) implements a restricted same-host contract. The earlier analysis below remains relevant to unwrapped invocations and uncertain failures.
+
 18 September 2026. This implements shared prerequisites, not either profile's
 removal executor or production qualification. Both profiles remain in scope. This document records the shared-prerequisite baseline; [the subsequent Bucket contract](bucket-scale-in.md) implements logical membership contraction. PersistentFleet remains unable to contract in the runnable operator.
 

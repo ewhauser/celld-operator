@@ -29,19 +29,20 @@ const operationKey = "celld.example.com/lifecycle-operation"
 // The reservation survives status loss and fleet deletion. Never prune session
 // history or PVC identities automatically. Exhausting annotation capacity blocks.
 type lifecycleJournal struct {
-	Inventory        recoveryInventory
-	Request          *disruptionRequest
-	RuntimeImage     string
-	Version          int
-	Initial, Applied int32
-	WorkloadUID      types.UID
-	Operation        *lifecycleOperation
-	Sessions         []v050.Session
-	Claims           map[string]types.UID
-	Loss             string
-	History          []lifecycleCompletion
-	Capacity         *capacity.State
-	BucketHistory    []bucketSession
+	Inventory         recoveryInventory
+	Request           *disruptionRequest
+	RuntimeImage      string
+	Version           int
+	Initial, Applied  int32
+	WorkloadUID       types.UID
+	Operation         *lifecycleOperation
+	Sessions          []v050.Session
+	Claims            map[string]types.UID
+	Loss              string
+	History           []lifecycleCompletion
+	Capacity          *capacity.State
+	BucketHistory     []bucketSession
+	PersistentHistory []persistentMember
 }
 type lifecycleCompletion struct {
 	ID, TargetPod, TargetUID, TargetGeneration string
@@ -61,6 +62,7 @@ type lifecycleOperation struct {
 	TargetPod, TargetUID, TargetGeneration string
 	Sessions                               []v050.Session
 	BucketCandidates                       []bucketSession
+	PersistentMembers                      []persistentMember
 	SettledAt                              time.Time
 }
 
@@ -117,11 +119,11 @@ func readJournal(res *fleet.CelldStorageReservation) (*lifecycleJournal, error) 
 	if j.RuntimeImage != Image {
 		return nil, errors.New("unsupported journal runtime image")
 	}
-	if (j.Version != 1 && j.Version != 2 && j.Version != 3 && j.Version != 4 && j.Version != 5) || j.Initial < 1 || j.Initial > 100 || j.Applied < 1 || j.Applied > 100 {
+	if (j.Version != 1 && j.Version != 2 && j.Version != 3 && j.Version != 4 && j.Version != 5 && j.Version != 6) || j.Initial < 1 || j.Initial > 100 || j.Applied < 1 || j.Applied > 100 {
 		return nil, errors.New("invalid lifecycle journal")
 	}
-	// Older binaries reject version 5 instead of ignoring lifecycle safety state.
-	j.Version = 5
+	// Older binaries reject version 6 instead of ignoring launcher and reactivation authority.
+	j.Version = 6
 	if req := j.Request; req != nil {
 		if req.ID == "" || req.SourceImage != j.RuntimeImage || req.WorkloadUID != j.WorkloadUID || (req.Kind != "Upgrade" && req.Kind != "Restart" && req.Kind != "Delete") {
 			return nil, errors.New("invalid disruption request")
@@ -131,12 +133,15 @@ func readJournal(res *fleet.CelldStorageReservation) (*lifecycleJournal, error) 
 		if !op.StartedAt.IsZero() && !op.Deadline.IsZero() && !op.Deadline.After(op.StartedAt) {
 			return nil, errors.New("invalid operation deadline")
 		}
-		if (op.Automatic && (j.Capacity == nil || op.PolicyHash == "" || op.ManualBaseline < 1 || op.ManualBaseline > 100)) || op.ID == "" || op.From != j.Applied || op.To < 1 || op.To > 100 || op.To == op.From || (op.To < op.From && op.To != op.From-1) || (op.Phase != "Intent" && op.Phase != "Prepared" && op.Phase != "Recovering" && op.Phase != "Blocked" && op.Phase != "Canceling") {
+		if (op.Automatic && (j.Capacity == nil || op.PolicyHash == "" || op.ManualBaseline < 1 || op.ManualBaseline > 100)) || op.ID == "" || op.From != j.Applied || op.To < 1 || op.To > 100 || op.To == op.From || (op.To < op.From && op.To != op.From-1) || (op.Phase != "Intent" && op.Phase != "Prepared" && op.Phase != "Recovering" && op.Phase != "Blocked" && op.Phase != "Canceling" && op.Phase != "Stopping" && op.Phase != "Retiring" && op.Phase != "Reactivating") {
 			return nil, errors.New("invalid lifecycle operation")
 		}
 	}
 	if j.Claims == nil {
 		j.Claims = map[string]types.UID{}
+	}
+	if err := validatePersistentJournal(&j); err != nil {
+		return nil, err
 	}
 	return &j, nil
 }
@@ -213,7 +218,7 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 		if initial == 0 {
 			initial = replicas(w)
 		}
-		j = &lifecycleJournal{Version: 5, RuntimeImage: Image, Initial: initial, Applied: replicas(w), WorkloadUID: w.GetUID(), Claims: map[string]types.UID{}}
+		j = &lifecycleJournal{Version: 6, RuntimeImage: Image, Initial: initial, Applied: replicas(w), WorkloadUID: w.GetUID(), Claims: map[string]types.UID{}}
 		// Creation records claim UIDs before workload creation. Verify those bindings;
 		// missing or replaced claims can never be adopted.
 		var created map[string]types.UID
@@ -265,6 +270,11 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 			return block("StorageIdentityConflict", "Retained PVC identity, ownership or deletion state changed: "+name)
 		}
 	}
+	if f.Spec.Profile == "PersistentFleet" && r.Options.LauncherImage != "" {
+		if err := r.schedulePersistent(ctx, f, j); err != nil {
+			return block("PersistentSchedulingBlocked", err.Error())
+		}
+	}
 	if r.Evidence != nil {
 		inventory, loss := r.Evidence.Observe(ctx, f, j.Inventory)
 		j.Inventory = inventory
@@ -307,6 +317,13 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 			}
 			return ctrl.Result{}, false, nil
 		}
+		if op.Phase == "Reactivating" || (f.Spec.Profile == "PersistentFleet" && op.To > op.From && slices.ContainsFunc(j.PersistentHistory, func(m persistentMember) bool {
+			return m.Retired && reactivatedNode(f.Name, m.Node, op.From, op.To)
+		})) {
+			// Replica issuance can survive a crash before Reactivating is saved.
+			// Preserve that authority too; pause cannot certify volume reuse.
+			return ctrl.Result{}, false, nil
+		}
 		if op.To > op.From {
 			j.History = append(j.History, completion(op, time.Time{}))
 			j.Applied, j.Operation = op.To, nil
@@ -339,7 +356,7 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 			}
 		}
 		op = &lifecycleOperation{ID: string(uuid.NewUUID()), Phase: "Intent", StartedAt: r.capacityNow(), Deadline: r.capacityNow().Add(operationBudget), From: j.Applied, To: target, WorkloadVersion: w.GetResourceVersion(), Automatic: automatic}
-		if op.To < op.From && f.Spec.Profile == "Bucket" && r.Evidence != nil {
+		if op.To < op.From && (f.Spec.Profile == "Bucket" || (f.Spec.Profile == "PersistentFleet" && r.Options.LauncherImage != "")) && r.Evidence != nil {
 			op.To = op.From - 1
 			op.Phase = "Blocked"
 			if automatic {
@@ -451,6 +468,15 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 			}
 		}
 		return r.contractBucket(ctx, f, res, j, w)
+	}
+	if f.Spec.Profile == "PersistentFleet" && op.To < op.From && r.Options.LauncherImage != "" && r.Evidence != nil {
+		// Persist negative stabilization observations even when preflight fails.
+		if j.Capacity != nil {
+			if err := r.saveJournal(ctx, res, j); err != nil {
+				return ctrl.Result{}, true, err
+			}
+		}
+		return r.contractPersistent(ctx, f, res, j, w)
 	}
 	if op.Phase == "Blocked" {
 		if op.Stalled {
@@ -646,10 +672,13 @@ func (r *Reconciler) expand(ctx context.Context, f *fleet.CelldFleet, res *fleet
 		result, reportErr := r.report(ctx, f, "ScaleOutBlocked", err.Error(), 0, false)
 		return result, true, reportErr
 	}
+	if op.Phase == "Reactivating" {
+		return r.finishReactivation(ctx, f, res, j, w)
+	}
 	if op.Phase == "Intent" {
 		for ordinal := op.From; ordinal < op.To; ordinal++ {
 			node := fmt.Sprintf("%s-%d", f.Name, ordinal)
-			if f.Spec.Profile == "PersistentFleet" {
+			if f.Spec.Profile == "PersistentFleet" && r.Options.LauncherImage == "" {
 				for _, session := range j.Inventory.Sessions {
 					if session.Node == node {
 						return fail(errors.New("observed runtime identity reactivation is unqualified: " + node))
@@ -657,9 +686,14 @@ func (r *Reconciler) expand(ctx context.Context, f *fleet.CelldFleet, res *fleet
 				}
 			}
 			for _, session := range j.Sessions {
-				if session.Node == node {
+				if session.Node == node && r.Options.LauncherImage == "" {
 					return fail(errors.New("retained runtime identity reactivation is unqualified: " + node))
 				}
+			}
+		}
+		if f.Spec.Profile == "PersistentFleet" && r.Options.LauncherImage != "" {
+			if err := validateReactivation(j, op.From, op.To, f.Name); err != nil {
+				return fail(err)
 			}
 		}
 		target := f.DeepCopy()
@@ -685,6 +719,10 @@ func (r *Reconciler) expand(ctx context.Context, f *fleet.CelldFleet, res *fleet
 	}
 	if err := r.applyReplicas(ctx, w, op); err != nil {
 		return fail(err)
+	}
+	if f.Spec.Profile == "PersistentFleet" && r.Options.LauncherImage != "" && slices.ContainsFunc(j.PersistentHistory, func(m persistentMember) bool { return m.Retired && reactivatedNode(f.Name, m.Node, op.From, op.To) }) {
+		op.Phase = "Reactivating"
+		return ctrl.Result{RequeueAfter: time.Second}, true, r.saveJournal(ctx, res, j)
 	}
 	j.History = append(j.History, completion(op, time.Time{}))
 	j.Applied, j.Operation = op.To, nil

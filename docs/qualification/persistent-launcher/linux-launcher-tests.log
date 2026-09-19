@@ -1,0 +1,17 @@
+=== RUN   TestPausedOwnerPreventsReplacement
+--- PASS: TestPausedOwnerPreventsReplacement (2.03s)
+=== RUN   TestProtocolRejectsForgedAndRetargetedStop
+--- PASS: TestProtocolRejectsForgedAndRetargetedStop (0.00s)
+=== RUN   TestCrossHostAndCleanMarkerBlock
+=== RUN   TestCrossHostAndCleanMarkerBlock/host
+=== RUN   TestCrossHostAndCleanMarkerBlock/marker
+--- PASS: TestCrossHostAndCleanMarkerBlock (0.04s)
+    --- PASS: TestCrossHostAndCleanMarkerBlock/host (0.02s)
+    --- PASS: TestCrossHostAndCleanMarkerBlock/marker (0.02s)
+=== RUN   TestLauncherHelper
+--- PASS: TestLauncherHelper (0.00s)
+=== RUN   TestKilledLauncherCannotUnlockSurvivingChild
+--- PASS: TestKilledLauncherCannotUnlockSurvivingChild (1.23s)
+=== RUN   TestRequestMACDomainSeparated
+--- PASS: TestRequestMACDomainSeparated (0.00s)
+PASS

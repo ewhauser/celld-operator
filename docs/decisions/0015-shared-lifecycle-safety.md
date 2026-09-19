@@ -1,6 +1,6 @@
 # ADR 0015 Shared evidence, deadlines and cancellation authority
 
-Status: Implemented shared prerequisites; Bucket completion amended by ADR 0016; PersistentFleet fencing remains blocked
+Status: Implemented shared prerequisites; Bucket completion amended by ADR 0016; graceful launcher-managed PersistentFleet amended by ADR 0017
 
 Use the production read-only primary S3 transport and persist observational
 session history without promoting observations into fencing certificates.
@@ -19,3 +19,5 @@ See [the implementation contract and exact external dependencies](../shared-life
 for evidence semantics, scope, interleavings and qualification limits.
 
 [ADR 0016](0016-bucket-preflight-and-completion-boundary.md) adopts Bucket logical membership completion, replaces its physical-process-termination requirement, and advances the journal to version 5. The stronger peer-log and fencing contract above continues to apply to PersistentFleet.
+
+[ADR 0017](0017-persistent-launcher-and-graceful-retirement.md) supplies a trusted launcher protocol for the restricted same-host graceful path. Uncertain physical/node failure remains blocked.

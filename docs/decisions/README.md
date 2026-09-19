@@ -28,4 +28,7 @@ Step 4: [ADR 0013: capacity collection and policy](0013-capacity-policy.md).
 
 Step 5: [ADR 0014: coordinated maintenance and retained deletion](0014-coordinated-maintenance.md).
 
-- [0015 Shared lifecycle safety](0015-shared-lifecycle-safety.md): evidence, deadlines and safe cancellation; production fencing remains blocked.
+- [0015 Shared lifecycle safety](0015-shared-lifecycle-safety.md): evidence, deadlines and safe cancellation; uncertain process/node fencing remains blocked.
+
+- [0016 Bucket completion](0016-bucket-preflight-and-completion-boundary.md): logical membership completion.
+- [0017 PersistentFleet launcher](0017-persistent-launcher-and-graceful-retirement.md): exact graceful termination, follower retirement and same-host retained-volume reuse.

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
+	"github.com/ewhauser/celld-operator/internal/launcher"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -37,6 +38,7 @@ type Reconciler struct {
 	NetworkPolicyEnforced bool
 	// localLifecycle is only supplied by in-package qualification tests. No production fence exists.
 	localLifecycle lifecycleEvidence
+	launcherCall   func(context.Context, *fleet.CelldFleet, *corev1.Pod, string, string) (launcher.State, error)
 	Evidence       *ProductionEvidence
 	Collector      capacityCollector
 	now            func() time.Time
@@ -127,6 +129,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		}
 		if reservation.Annotations[attemptAnnotation] != "" {
 			return r.report(ctx, f, "LifecycleBlocked", "Workload is missing after a recorded creation attempt; automatic recreation could reuse an unsafe identity or disk", 0, false)
+		}
+		if f.Spec.Profile == "PersistentFleet" && r.Options.LauncherImage != "" {
+			if err := r.createLauncherKey(ctx, f, reservation); err != nil {
+				return r.report(ctx, f, "LauncherIdentityBlocked", err.Error(), 0, false)
+			}
 		}
 		claims := initialClaims(f, desired)
 		if err := r.checkInitialClaims(ctx, claims); err != nil {
@@ -320,7 +327,7 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, reason, me
 	set("InfrastructureReady", provisioned || reason == "LifecycleProgress", reason, message)
 	set("Progressing", reason == "LifecycleProgress" || reason == "Provisioning", reason, message)
 	set("Blocked", !provisioned && reason != "LifecycleProgress", reason, message)
-	set("LifecycleBlocked", true, "QualificationIncomplete", "PersistentFleet fencing and production automatic Bucket contraction remain unqualified; upgrades, restarts and deletion are blocked")
+	set("LifecycleBlocked", true, "QualificationIncomplete", "Production automatic contraction and uncertain-node PersistentFleet recovery remain unqualified; upgrades, restarts and deletion are blocked")
 	set("ProductionQualified", false, "QualificationIncomplete", "Local prototype only; AWS, retained-EBS recovery, fencing, follower AZ diversity and restart safety remain unqualified")
 	if !equality.Semantic.DeepEqual(before.Status, f.Status) {
 		if err := r.Status().Patch(ctx, f, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); err != nil {

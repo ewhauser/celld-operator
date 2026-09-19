@@ -16,6 +16,12 @@ import (
 )
 
 func TestBucketManualContractionCrashReplayAndRenewingOldLease(t *testing.T) {
+	for _, contrary := range []string{"renewal", "replacement"} {
+		t.Run(contrary, func(t *testing.T) { testBucketManualContractionCrashReplay(t, contrary) })
+	}
+}
+
+func testBucketManualContractionCrashReplay(t *testing.T, contrary string) {
 	p, f, j, opts, reader := bucketPreflightSetup(t)
 	p.now = func() time.Time { return reader.now }
 	if err := p.client.Get(t.Context(), client.ObjectKeyFromObject(f), f); err != nil {
@@ -101,20 +107,52 @@ func TestBucketManualContractionCrashReplayAndRenewingOldLease(t *testing.T) {
 	if j.Operation == nil || !j.Operation.SettledAt.IsZero() {
 		t.Fatal("live removed lease accepted")
 	}
-	reader.expired = map[string]bool{"pod-2": true}
+	// A Retired bit from admission is not post-issue expiry authority.
+	for i := range j.Operation.BucketCandidates {
+		if j.Operation.BucketCandidates[i].Node == "pod-2" {
+			j.Operation.BucketCandidates[i].Retired = true
+		}
+	}
+	if err := r.saveJournal(t.Context(), res, j); err != nil {
+		t.Fatal(err)
+	}
+	// GC before any positive expiry observation remains unresolved.
+	reader.nodes = slices.DeleteFunc(reader.nodes, func(node string) bool { return node == "pod-2" })
 	step()
+	if j.Operation == nil || !j.Operation.SettledAt.IsZero() {
+		t.Fatal("missing unobserved lease became recovery proof")
+	}
+	reader.nodes = append(reader.nodes, "pod-2")
+	reader.expired = map[string]bool{"pod-2": true}
+	step() // durably capture exact generation's positive expiry
+	// The pinned runtime may delete the record immediately after that read.
+	// Reconstructing the controller must retain the observed fact, while still
+	// requiring the complete survivor and log scan throughout settling.
+	reader.nodes = slices.DeleteFunc(reader.nodes, func(node string) bool { return node == "pod-2" })
 	step()
 	if j.Operation.SettledAt.IsZero() {
 		t.Fatal("no settling after lease expiry")
 	}
 	// A lease renewal during settling revokes this observation, without claiming
 	// the prior absence or expiry ever proved physical termination.
+	reader.nodes = append(reader.nodes, "pod-2")
 	reader.expired["pod-2"] = false
+	if contrary == "replacement" {
+		reader.generation = map[string]string{"pod-2": "replacement-generation"}
+	}
 	step()
 	if !j.Operation.SettledAt.IsZero() {
 		t.Fatal("uncertainty did not reset settling")
 	}
+	reader.nodes = slices.DeleteFunc(reader.nodes, func(node string) bool { return node == "pod-2" })
+	step()
+	if !j.Operation.SettledAt.IsZero() {
+		t.Fatal("renewal then disappearance reused superseded expiry proof")
+	}
+	reader.nodes = append(reader.nodes, "pod-2")
 	reader.expired["pod-2"] = true
+	reader.generation = nil
+	step()
 	step()
 	reader.now = reader.now.Add(11 * time.Second)
 	step()
@@ -168,6 +206,21 @@ func TestBucketManualContractionCrashReplayAndRenewingOldLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	reader.expired["pod-1"] = true
+	// A fully settled historical member can also renew; its former completion
+	// must not authorize disappearance after this contrary observation.
+	reader.nodes = append(reader.nodes, "pod-2")
+	reader.expired["pod-2"] = false
+	step()
+	if !j.BucketHistory[2].ExpiryInvalidated {
+		t.Fatal("historical lease renewal did not persist invalidation")
+	}
+	reader.nodes = slices.DeleteFunc(reader.nodes, func(node string) bool { return node == "pod-2" })
+	step()
+	if !j.Operation.SettledAt.IsZero() {
+		t.Fatal("renewed historical member disappeared without new expiry proof")
+	}
+	reader.nodes = append(reader.nodes, "pod-2")
+	reader.expired["pod-2"] = true
 	step()
 	step()
 	reader.now = reader.now.Add(11 * time.Second)

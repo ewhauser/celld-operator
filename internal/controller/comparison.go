@@ -108,27 +108,29 @@ func normalizePod(p *corev1.PodSpec) {
 	if p.DeprecatedServiceAccount == "" {
 		p.DeprecatedServiceAccount = p.ServiceAccountName
 	}
-	for i := range p.Containers {
-		c := &p.Containers[i]
-		if c.TerminationMessagePath == "" {
-			c.TerminationMessagePath = corev1.TerminationMessagePathDefault
-		}
-		if c.TerminationMessagePolicy == "" {
-			c.TerminationMessagePolicy = corev1.TerminationMessageReadFile
-		}
-		for j := range c.Ports {
-			if c.Ports[j].Protocol == "" {
-				c.Ports[j].Protocol = corev1.ProtocolTCP
+	for _, containers := range [][]corev1.Container{p.Containers, p.InitContainers} {
+		for i := range containers {
+			c := &containers[i]
+			if c.TerminationMessagePath == "" {
+				c.TerminationMessagePath = corev1.TerminationMessagePathDefault
 			}
-		}
-		for j := range c.Env {
-			e := &c.Env[j]
-			if e.ValueFrom != nil && e.ValueFrom.FieldRef != nil && e.ValueFrom.FieldRef.APIVersion == "" {
-				e.ValueFrom.FieldRef.APIVersion = "v1"
+			if c.TerminationMessagePolicy == "" {
+				c.TerminationMessagePolicy = corev1.TerminationMessageReadFile
 			}
-		}
-		if c.ReadinessProbe != nil && c.ReadinessProbe.HTTPGet != nil && c.ReadinessProbe.HTTPGet.Scheme == "" {
-			c.ReadinessProbe.HTTPGet.Scheme = corev1.URISchemeHTTP
+			for j := range c.Ports {
+				if c.Ports[j].Protocol == "" {
+					c.Ports[j].Protocol = corev1.ProtocolTCP
+				}
+			}
+			for j := range c.Env {
+				e := &c.Env[j]
+				if e.ValueFrom != nil && e.ValueFrom.FieldRef != nil && e.ValueFrom.FieldRef.APIVersion == "" {
+					e.ValueFrom.FieldRef.APIVersion = "v1"
+				}
+			}
+			if c.ReadinessProbe != nil && c.ReadinessProbe.HTTPGet != nil && c.ReadinessProbe.HTTPGet.Scheme == "" {
+				c.ReadinessProbe.HTTPGet.Scheme = corev1.URISchemeHTTP
+			}
 		}
 	}
 }

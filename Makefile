@@ -13,6 +13,7 @@ check: build test lint
 build:
 	go build -o /dev/null $(GO_PACKAGES)
 	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/celld-operator ./cmd/celld-operator
+	CGO_ENABLED=0 go build -trimpath -o bin/celld-launcher ./cmd/celld-launcher
 
 test:
 	go test $(RACE) $(GO_PACKAGES)
@@ -61,3 +62,7 @@ integration: build
 .PHONY: integration-bucket
 integration-bucket:
 	python3 hack/integration/run.py --bucket-lifecycle
+
+.PHONY: integration-persistent
+integration-persistent:
+	python3 hack/integration/run.py --persistent-lifecycle
