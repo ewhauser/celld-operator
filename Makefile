@@ -66,15 +66,15 @@ manifests-check:
 	python3 hack/check-generated.py
 
 integration: build
-	python3 hack/integration/run.py
+	go run ./hack/integration
 
 .PHONY: integration-bucket
 integration-bucket:
-	python3 hack/integration/run.py --bucket-lifecycle
+	go run ./hack/integration --bucket-lifecycle
 
 .PHONY: integration-persistent
 integration-persistent:
-	python3 hack/integration/run.py --persistent-lifecycle
+	go run ./hack/integration --persistent-lifecycle
 
 .PHONY: chart-sync chart-check chart-package
 chart-sync:
@@ -91,26 +91,26 @@ chart-package: chart-check
 
 .PHONY: integration-ordered-bucket
 integration-ordered-bucket:
-	python3 hack/integration/run.py --ordered-bucket
+	go run ./hack/integration --ordered-bucket
 
 .PHONY: integration-maintenance
 integration-maintenance:
-	python3 hack/integration/run.py --maintenance
+	go run ./hack/integration --maintenance
 
 # Fault injection: manager crash points, cordon + pod deletion, toxiproxy S3 latency/partition.
 .PHONY: integration-faults
 integration-faults:
-	python3 hack/integration/run.py --faults
+	go run ./hack/integration --faults
 
 # PersistentFleet lifecycle with ReadWriteOncePod claims on the per-node hostpath CSI driver.
 .PHONY: integration-persistent-rwop
 integration-persistent-rwop:
-	python3 hack/integration/run.py --persistent-lifecycle --rwop-csi
+	go run ./hack/integration --persistent-lifecycle --rwop-csi
 
 # External capacity mode: a real HPA drives spec.replicas through /scale.
 .PHONY: integration-external
 integration-external:
-	python3 hack/integration/run.py --external
+	go run ./hack/integration --external
 
 # Documentation site (Astro + Starlight in site/). Pages are synced from docs/,
 # config/, charts/ and cmd/ on every build; nothing under site/src/content is
