@@ -73,6 +73,18 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	result, err := r.reconcileFleet(ctx, f)
+	if apierrors.IsForbidden(err) {
+		// The cluster role covers only the fleet API; every fleet namespace needs
+		// the namespaced Role from config/rbac/fleet-namespace.yaml. Report that
+		// instead of requeueing silently, and never touch namespace resources.
+		f.Default()
+		return r.report(ctx, f, "NamespaceAccessDenied", "Operator lacks the fleet-namespace Role in "+f.Namespace+"; apply config/rbac/fleet-namespace.yaml there ("+err.Error()+")", 0, false)
+	}
+	return result, err
+}
+
+func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (ctrl.Result, error) {
 	f.Default()
 	if !f.DeletionTimestamp.IsZero() {
 		return r.deleteFleet(ctx, f)
@@ -340,7 +352,9 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, reason, me
 	f.Status.ObservedGeneration = f.Generation
 	observed := emptyObject(workload(f, r.Options))
 	serving := false
-	if err := r.Get(ctx, client.ObjectKeyFromObject(f), observed); err != nil && !apierrors.IsNotFound(err) {
+	// A forbidden read means the fleet namespace lacks the operator Role; the
+	// caller reports that, and readiness is simply unknown (zero) meanwhile.
+	if err := r.Get(ctx, client.ObjectKeyFromObject(f), observed); err != nil && !apierrors.IsNotFound(err) && !apierrors.IsForbidden(err) {
 		return ctrl.Result{}, err
 	} else if err == nil && observed.GetLabels()[FleetLabel] == string(f.UID) && observed.GetDeletionTimestamp().IsZero() {
 		f.Status.AppliedReplicas = replicas(observed)

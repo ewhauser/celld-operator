@@ -56,6 +56,8 @@ Redirects and environment HTTP proxies are disabled for private runtime reads.
 PodMetrics decoding checks kind, API version, namespace, name, container name,
 required CPU/memory quantities and timestamp/window. Requests are read-only, with
 get/list on core Pods and get-only on metrics Pods; no node metrics privileges.
+(Pod update for scheduling gates and Pod deletion for maintenance were added by
+ADRs 0017 and 0014; all Pod verbs are granted per fleet namespace, not cluster-wide.)
 
 Samples carry separate runtime source/receipt and Metrics Server source/receipt
 timestamps plus the CPU measurement window. Runtime semantics use the pinned

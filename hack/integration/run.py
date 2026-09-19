@@ -111,9 +111,13 @@ nodes:
             # Manager manifest is validated, but run the native binary under the exact SA RBAC below.
             k('apply', '-f', str(ROOT / 'config/manager/operator.yaml'))
             k('-n', 'celld-system', 'scale', 'deployment/celld-operator', '--replicas=0')
-            for ns in ('fleets', 'other', 'celld-test-store'):
+            for ns in ('fleets', 'other', 'celld-test-store', 'unbound'):
                 k('create', 'namespace', ns)
                 k('-n', ns, 'create', 'serviceaccount', 'runtime')
+            # Fleet-namespace privileges are granted per namespace; `unbound`
+            # deliberately receives none.
+            for ns in ('fleets', 'other'):
+                k('-n', ns, 'apply', '-f', str(ROOT / 'config/rbac/fleet-namespace.yaml'))
             node_arch=json.loads(k('get','node',name+'-control-plane','-o','json'))['status']['nodeInfo']['architecture']
             nodes=(name+'-control-plane', name+'-worker', name+'-worker2')
             for index,image in enumerate((IMAGE, MINIO, MC, CURL)+((METRICS_SERVER,) if bucket_lifecycle else ())+((TOXIPROXY,) if args.faults else ())):
@@ -310,6 +314,9 @@ nodes:
             k('-n','fleets','delete','pod','same-fleet','--wait=true')
             apply(fleet('conflict','bucket-alpha',namespace='other'))
             wait_for(lambda:any(c['reason']=='StorageScopeConflict' for c in get('celldfleet','conflict','other').get('status',{}).get('conditions',[])),'cross-namespace storage conflict blocked')
+            apply(fleet('denied','bucket-denied',namespace='unbound'))
+            wait_for(lambda:any(c['reason']=='NamespaceAccessDenied' for c in get('celldfleet','denied','unbound').get('status',{}).get('conditions',[])),'fleet in a namespace without the fleet Role is reported, not reconciled')
+            assert not k('-n','unbound','get','deployment,service,networkpolicy','-o','name').strip()
             for mutate in ('upgrade','invalid-az','invalid-storage'):
                 bad=copy.deepcopy(alpha)
                 if mutate=='scale-in':bad['spec']['replicas']=1

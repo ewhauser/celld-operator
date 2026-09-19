@@ -1,0 +1,54 @@
+# Apply in every namespace that will hold CelldFleet resources:
+#   kubectl --context YOUR_EXPLICIT_CONTEXT -n FLEET_NAMESPACE apply -f config/rbac/fleet-namespace.yaml
+# The operator's cluster-wide role covers only the fleet API and cluster-scoped
+# storage/node objects. These namespaced verbs are the complete set the
+# controller uses inside a fleet namespace; nothing here is cluster-wide.
+# Adjust the subject namespace if the operator is installed elsewhere.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: celld-fleet-operator
+rules:
+  - apiGroups: ['']
+    resources: [serviceaccounts]
+    verbs: [get]
+  - apiGroups: ['']
+    resources: [services, persistentvolumeclaims]
+    verbs: [get, create]
+  - apiGroups: ['']
+    resources: [pods]
+    verbs: [get, list, update, delete]
+  - apiGroups: ['']
+    resources: [secrets, configmaps]
+    verbs: [get, create]
+  - apiGroups: [metrics.k8s.io]
+    resources: [pods]
+    verbs: [get]
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets]
+    verbs: [get, create, update, delete]
+  - apiGroups: [apps]
+    resources: [replicasets]
+    verbs: [get]
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [get, create]
+  - apiGroups: [policy]
+    resources: [poddisruptionbudgets]
+    verbs: [get, create]
+  - apiGroups: [events.k8s.io]
+    resources: [events]
+    verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: celld-fleet-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: celld-fleet-operator
+subjects:
+  - kind: ServiceAccount
+    name: celld-operator
+    namespace: celld-system

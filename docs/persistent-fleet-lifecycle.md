@@ -18,13 +18,13 @@ Bucket retains its existing launch command and volumes.
 
 The operator exclusively creates an immutable per-fleet Secret containing a
 random 32-byte authentication key, records its digest on the storage reservation,
-and fails on uncertain adoption or replacement. The new Kubernetes permissions
-are Secret get/create, PV/Node/StorageClass get, VolumeAttachment list, and Pod
-update (for scheduling gates). There is no
-Secret list/watch/delete, Pod delete, or EC2 permission. Because fleet namespaces
-are dynamic, the supplied ClusterRole grants get/create across namespaces;
-installations restricting managed namespaces should scope those bindings
-accordingly. Runtime service accounts still do not receive Kubernetes API tokens.
+and fails on uncertain adoption or replacement. The Kubernetes permissions this path
+adds are Secret get/create, PV/Node/StorageClass get, VolumeAttachment list, and
+Pod update (for scheduling gates). Secret and Pod verbs are granted only inside
+fleet namespaces through the namespaced Role in
+`config/rbac/fleet-namespace.yaml`; the ClusterRole holds no Secret, Pod or
+workload verbs at all. There is no Secret list/watch/delete or EC2 permission
+from this path. Runtime service accounts still do not receive Kubernetes API tokens.
 
 Port 8083 is private: NetworkPolicy admits only operator pods in the configured
 operator namespace, and no public Service exposes it. Every request and response

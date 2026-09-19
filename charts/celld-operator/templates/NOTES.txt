@@ -9,4 +9,8 @@ Provisioning remains blocked until networkPolicyEnforced=true after verifying CN
 {{- if not .Values.launcherImage }}
 Launcher-managed PersistentFleet lifecycle is disabled; set launcherImage to a qualified digest.
 {{- end }}
+{{- if not .Values.fleetNamespaces }}
+No fleet namespaces configured: set fleetNamespaces or apply config/rbac/fleet-namespace.yaml
+in each namespace that will hold CelldFleet resources.
+{{- end }}
 CRDs and retained fleet resources are not removed on Helm uninstall.

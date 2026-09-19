@@ -10,6 +10,9 @@ automatic capacity. Upgrade, restart and deletion requests occupy `Request` in
 that same journal; they never authorize a separate workload writer. There is no
 Pod deletion, eviction, template update, rollout annotation, storage cleanup or
 reservation release path. RBAC intentionally retains no delete privileges.
+(Superseded by the later maintenance and Bucket migration executors, which delete
+pods and workloads with UID preconditions; those verbs are granted only inside
+fleet namespaces by `config/rbac/fleet-namespace.yaml`, never cluster-wide.)
 
 ## Runtime transitions
 

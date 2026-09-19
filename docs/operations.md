@@ -15,6 +15,15 @@ helm upgrade --install celld charts/celld-operator \
   --set image.tag=YOUR_BUILT_TAG
 ```
 
+The cluster role covers only the fleet API and cluster-scoped storage and node
+objects. Every namespace that will hold fleets needs the namespaced Role and
+RoleBinding from `config/rbac/fleet-namespace.yaml`; list them in
+`fleetNamespaces` so the chart renders them, or apply the file into each
+namespace by hand. A fleet in a namespace without that Role reports
+`NamespaceAccessDenied` and nothing in the namespace is created. Workload and
+pod deletion privileges exist only inside those namespaces, for the maintenance
+executors; there is no cluster-wide delete.
+
 Use an immutable `image.digest` and matching `launcherImage` for PersistentFleet.
 Published release charts embed both as the same immutable image digest. The
 launcher binary is injected without modifying the celld image. Before enabling

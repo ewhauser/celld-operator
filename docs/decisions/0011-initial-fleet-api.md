@@ -56,7 +56,10 @@ Create NetworkPolicy, zero-voluntary-disruption PDB, ClusterIP application Servi
 and headless peer Service before creating the workload. Deployments use Recreate;
 StatefulSets use OnDelete and Parallel startup (avoids readiness join deadlocks).
 Neither strategy is an authorization to update a template: the operator never
-updates a workload. Its RBAC has only get/create on workloads. Existing mismatched
+updates a workload. Its RBAC has only get/create on workloads (superseded: ADR
+0012 added replica updates and ADR 0014's executors added namespaced deletion;
+since 19 September 2026 all workload verbs live in the per-namespace fleet Role,
+never in the ClusterRole). Existing mismatched
 objects are reported and never adopted or repaired by mutation. Compare complete
 controlled specs after normalizing explicitly known Kubernetes defaults and
 allocated Service addresses. Additional probes, environment entries, containers,

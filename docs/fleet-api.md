@@ -23,6 +23,8 @@ The operator requires a separate narrowly scoped read-only AWS identity for `nod
 ```sh
 kubectl --context YOUR_EXPLICIT_CONTEXT apply -f config/crd/
 kubectl --context YOUR_EXPLICIT_CONTEXT apply -f config/manager/operator.yaml
+# Grant the namespaced fleet Role in every namespace that will hold fleets.
+kubectl --context YOUR_EXPLICIT_CONTEXT -n YOUR_FLEET_NAMESPACE apply -f config/rbac/fleet-namespace.yaml
 # Only after verifying CNI enforcement, add --network-policy-enforced to operator args.
 # Customize the examples' namespaces, ServiceAccounts, buckets, region, AZs and class.
 kubectl --context YOUR_EXPLICIT_CONTEXT apply -f config/samples/bucket.yaml

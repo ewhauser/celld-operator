@@ -13,6 +13,10 @@ ec2Fencing:
   account: ''
   region: ''
 networkPolicyEnforced: false
+# Namespaces that will hold CelldFleet resources. The chart renders the
+# namespaced Role and RoleBinding from config/rbac/fleet-namespace.yaml into
+# each; the cluster role alone cannot reconcile a fleet.
+fleetNamespaces: []
 serviceAccount:
   annotations: {}
 resources:
