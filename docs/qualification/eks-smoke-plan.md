@@ -52,7 +52,7 @@ write ledger, and the exact IAM policy documents used.
 
 ## Shape of the harness
 
-`hack/eks/smoke.py`, mirroring `hack/integration/run.py`: explicit `--context`,
+`hack/eks/smoke.py`, mirroring the kind harness in `hack/integration`: explicit `--context`,
 `--namespace`, `--bucket-prefix`, `--operator-role-arn`, `--runtime-role-arn`
 flags with no defaults and no fallback to the AWS SDK default chain for
 discovery; every created Kubernetes object carries a run label; cleanup deletes

@@ -85,7 +85,7 @@ recovery observations require exact generation matches and no listed loss keys.
 
 ```sh
 .qualification-venv/bin/python hack/qualification/bucket_fencing.py --output .qualification-runs/bucket-fencing-new
-python3 hack/integration/run.py --bucket-lifecycle
+make integration-bucket
 ```
 
 The first command uses a synthetic idempotent sequence counter to distinguish
