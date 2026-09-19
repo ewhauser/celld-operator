@@ -25,6 +25,8 @@ CALICO_SHA = '9a575859428b822a224dedafc4238555b6b0f910f2abf12983f20f871860914e'
 MINIO = 'quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z'
 CURL = 'curlimages/curl:8.12.1'
 MC = 'quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z'
+TOXIPROXY = 'ghcr.io/shopify/toxiproxy:2.12.0'
+METRICS_SERVER = 'registry.k8s.io/metrics-server/metrics-server:v0.8.0'
 
 
 def run(args, **kwargs):
@@ -40,8 +42,9 @@ def main():
     parser.add_argument('--ordered-bucket',action='store_true')
     parser.add_argument('--persistent-lifecycle',action='store_true')
     parser.add_argument('--maintenance',action='store_true')
+    parser.add_argument('--faults',action='store_true',help='fault injection: manager crash points, node loss, S3 latency/partition via toxiproxy')
     args=parser.parse_args()
-    persistent_lifecycle=args.persistent_lifecycle or args.maintenance
+    persistent_lifecycle=args.persistent_lifecycle or args.maintenance or args.faults
     bucket_lifecycle=args.bucket_lifecycle or persistent_lifecycle or args.ordered_bucket
     name = 'celld-step2-' + uuid.uuid4().hex[:8]
     process = None
@@ -112,22 +115,57 @@ nodes:
                 k('create', 'namespace', ns)
                 k('-n', ns, 'create', 'serviceaccount', 'runtime')
             node_arch=json.loads(k('get','node',name+'-control-plane','-o','json'))['status']['nodeInfo']['architecture']
-            for index,image in enumerate((IMAGE, MINIO, MC, CURL)):
+            nodes=(name+'-control-plane', name+'-worker', name+'-worker2')
+            for index,image in enumerate((IMAGE, MINIO, MC, CURL)+((METRICS_SERVER,) if bucket_lifecycle else ())+((TOXIPROXY,) if args.faults else ())):
                 # Docker's containerd store may have only the local platform of
                 # a multiarch image. Export that platform explicitly; ordinary
                 # kind load docker-image can fail on absent sibling manifests.
                 cached=subprocess.run(['docker','image','inspect',image],capture_output=True,text=True,timeout=30)
+                archive=tmp/('cached-image-'+str(index)+'.tar')
                 if cached.returncode == 0 and '@sha256:' not in image:
-                    archive=tmp/('cached-image-'+str(index)+'.tar')
                     run(['docker','image','save','--platform','linux/'+node_arch,'-o',str(archive),image],timeout=180)
                     run(['kind','load','image-archive','--name',name,str(archive)],timeout=180)
                     archive.unlink()
+                elif cached.returncode == 0:
+                    # A digest reference has no tag for kind to import. Save the
+                    # full index (its digest is the pinned one) and name it in
+                    # containerd directly; the kubelet then finds the exact pin
+                    # without a registry round trip.
+                    run(['docker','image','save','-o',str(archive),image],timeout=180)
+                    for node in nodes:
+                        run(['docker','cp',str(archive),node+':/celld-cached-image.tar'],timeout=120)
+                        run(['docker','exec',node,'ctr','-n','k8s.io','images','import','--index-name',image,'--platform','linux/'+node_arch,'/celld-cached-image.tar'],timeout=300)
+                        run(['docker','exec',node,'rm','-f','/celld-cached-image.tar'],timeout=30)
+                    archive.unlink()
+                    print('Loaded pinned image from local cache:', image, flush=True)
+                    continue
                 print('Pulling into disposable node:', image, flush=True)
-                for node in (name+'-control-plane', name+'-worker', name+'-worker2'):
-                    run(['docker', 'exec', node, 'crictl', 'pull', image], timeout=300)
-            apply({'apiVersion':'v1','kind':'Pod','metadata':{'name':'minio','namespace':'celld-test-store','labels':{'app':'minio'}},'spec':{'containers':[{'name':'minio','image':MINIO,'args':['server','/data'],'env':[{'name':'MINIO_ROOT_USER','value':'qualification'},{'name':'MINIO_ROOT_PASSWORD','value':'qualification-only'}]}]}})
-            k('-n','celld-test-store','expose','pod','minio','--port=9000')
+                for node in nodes:
+                    # Registry throughput varies; a slow pull must not abort a long run.
+                    for attempt in range(3):
+                        try:
+                            run(['docker', 'exec', node, 'crictl', 'pull', image], timeout=600)
+                            break
+                        except (RuntimeError, subprocess.TimeoutExpired) as err:
+                            if attempt == 2: raise
+                            print('Retrying image pull on', node, 'after:', str(err)[:200], flush=True)
+            # Runtime egress admits store-namespace pods labeled app=minio. In
+            # faults mode the fixed `minio` name resolves to toxiproxy, which
+            # forwards to the real server under `minio-backend`.
+            apply({'apiVersion':'v1','kind':'Pod','metadata':{'name':'minio','namespace':'celld-test-store','labels':{'app':'minio','role':'backend'}},'spec':{'containers':[{'name':'minio','image':MINIO,'args':['server','/data'],'env':[{'name':'MINIO_ROOT_USER','value':'qualification'},{'name':'MINIO_ROOT_PASSWORD','value':'qualification-only'}]}]}})
+            def service(svc,role,ports):
+                apply({'apiVersion':'v1','kind':'Service','metadata':{'name':svc,'namespace':'celld-test-store'},'spec':{'selector':{'app':'minio','role':role},'ports':[{'name':'p'+str(p),'port':p,'targetPort':p} for p in ports]}})
             k('-n','celld-test-store','wait','--for=condition=Ready','pod/minio','--timeout=120s')
+            if args.faults:
+                service('minio-backend','backend',[9000])
+                apply({'apiVersion':'v1','kind':'ConfigMap','metadata':{'name':'toxiproxy','namespace':'celld-test-store'},'data':{'toxiproxy.json':json.dumps([{'name':'minio','listen':'0.0.0.0:9000','upstream':'minio-backend.celld-test-store.svc:9000','enabled':True}])}})
+                apply({'apiVersion':'v1','kind':'Pod','metadata':{'name':'toxiproxy','namespace':'celld-test-store','labels':{'app':'minio','role':'proxy'}},'spec':{'containers':[{'name':'toxiproxy','image':TOXIPROXY,'args':['-config','/config/toxiproxy.json','-host','0.0.0.0'],'volumeMounts':[{'name':'config','mountPath':'/config','readOnly':True}]}],'volumes':[{'name':'config','configMap':{'name':'toxiproxy'}}]}})
+                service('minio','proxy',[9000])
+                service('toxiproxy-api','proxy',[8474])
+                apply({'apiVersion':'v1','kind':'Pod','metadata':{'name':'toxi-ctl','namespace':'celld-test-store'},'spec':{'containers':[{'name':'ctl','image':CURL,'command':['/bin/sh','-c','sleep 7200']}]}})
+                k('-n','celld-test-store','wait','--for=condition=Ready','pod/toxiproxy','pod/toxi-ctl','--timeout=120s')
+            else:
+                service('minio','backend',[9000])
             k('-n','celld-test-store','run','seed','--restart=Never','--image='+MC,'--command','--','/bin/sh','-c','attempt=0; until mc alias set local http://minio:9000 qualification qualification-only; do attempt=$((attempt+1)); test "$attempt" -lt 30 || exit 1; sleep 2; done; mc mb local/bucket-alpha local/bucket-beta')
             wait_for(lambda: succeeded('seed','celld-test-store'),'create two isolated test buckets')
             arch=json.loads(k('get','node',name+'-control-plane','-o','json'))['status']['nodeInfo']['architecture']
@@ -173,15 +211,22 @@ nodes:
                     patch['spec']['template']['spec']['containers'][0]['args'].append('--launcher-image='+launcher_image)
                 k('-n','celld-system','patch','deployment','celld-operator','--type=strategic','-p',json.dumps(patch))
                 k('-n','celld-system','rollout','status','deployment/celld-operator','--timeout=120s')
+                operator_args=list(patch['spec']['template']['spec']['containers'][0]['args'])
                 with urllib.request.urlopen('https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.8.0/components.yaml',timeout=60) as response:
                     metrics=response.read()
                 assert hashlib.sha256(metrics).hexdigest()=='ff64d1a13b9ac3b0635f0dd985815fb44c23eed4706c04e5db1daadf6bc0a83b'
                 (tmp/'metrics.yaml').write_bytes(metrics)
                 k('apply','-f',str(tmp/'metrics.yaml'))
                 k('-n','kube-system','patch','deployment','metrics-server','--type=json','-p',json.dumps([{'op':'add','path':'/spec/template/spec/containers/0/args/-','value':'--kubelet-insecure-tls'}]))
-                k('-n','kube-system','rollout','status','deployment/metrics-server','--timeout=180s')
+                k('-n','kube-system','rollout','status','deployment/metrics-server','--timeout=300s')
             else:
                 process=subprocess.Popen([str(ROOT/'bin/celld-operator'),'--network-policy-enforced','--local-test'],env={**env,'KUBECONFIG':str(operator_path)},stdout=log,stderr=subprocess.STDOUT)
+            def set_operator_fault(point):
+                # Faults are explicit --local-test manager arguments; the rollout
+                # replaces the crash-looping pod when the fault is withdrawn.
+                fault=operator_args+(['--local-fault-point='+point] if point else [])
+                k('-n','celld-system','patch','deployment','celld-operator','--type=json','-p',json.dumps([{'op':'replace','path':'/spec/template/spec/containers/0/args','value':fault}]))
+                k('-n','celld-system','rollout','status','deployment/celld-operator','--timeout=180s')
             def restart_operator():
                 nonlocal process
                 if bucket_lifecycle:
@@ -288,6 +333,10 @@ nodes:
             if args.maintenance:
                 import maintenance
                 maintenance.exercise(k, get, wait_for, restart_operator, ready, curl)
+                return
+            if args.faults:
+                import faults
+                faults.exercise(k, apply, get, wait_for, ready, curl, probe, name, CURL, set_operator_fault)
                 return
             if persistent_lifecycle:
                 # Local-path RWO is deliberately local-test-only: test same-host

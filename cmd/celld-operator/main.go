@@ -37,6 +37,7 @@ func run() error {
 	enforced := fs.Bool("network-policy-enforced", false, "Administrator attests NetworkPolicy enforcement has been verified on this cluster")
 	localTest := fs.Bool("local-test", false, "Use disposable local MinIO test configuration; never enable on EKS")
 	localEvidence := fs.Bool("local-evidence", false, "Enable fixed disposable MinIO evidence transport; requires --local-test")
+	faultPoint := fs.String("local-fault-point", "", "Disposable harness only: exit the manager at a named lifecycle boundary (before-effect, after-effect); requires --local-test")
 	launcherImage := fs.String("launcher-image", "", "Digest-pinned operator image containing /celld-launcher; enables new RWOP PersistentFleet workloads")
 	fencingAccount := fs.String("ec2-fencing-account", "", "Opt-in AWS account for per-operation dedicated-node EC2 termination")
 	fencingRegion := fs.String("ec2-fencing-region", "", "Region of the exact instances eligible for opt-in fencing")
@@ -56,6 +57,9 @@ func run() error {
 	}
 	if *localEvidence && !*localTest {
 		return errors.New("--local-evidence requires --local-test")
+	}
+	if *faultPoint != "" && !*localTest {
+		return errors.New("--local-fault-point requires --local-test")
 	}
 	if (*fencingAccount == "") != (*fencingRegion == "") || (*localTest && *fencingAccount != "") {
 		return errors.New("EC2 fencing requires account and region and is prohibited in local test mode")
@@ -84,7 +88,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	reconciler := &controller.Reconciler{Collector: collector, Client: direct, Options: controller.Options{OperatorNamespace: *namespace, LocalTest: *localTest, LauncherImage: *launcherImage, FencingAccount: *fencingAccount, FencingRegion: *fencingRegion}, NetworkPolicyEnforced: *enforced}
+	reconciler := &controller.Reconciler{Collector: collector, Client: direct, Options: controller.Options{OperatorNamespace: *namespace, LocalTest: *localTest, LauncherImage: *launcherImage, FaultPoint: *faultPoint, FencingAccount: *fencingAccount, FencingRegion: *fencingRegion}, NetworkPolicyEnforced: *enforced}
 	if *fencingAccount != "" {
 		reconciler.Infrastructure, err = fencing.New(context.Background(), *fencingRegion)
 		if err != nil {

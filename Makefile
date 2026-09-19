@@ -96,3 +96,8 @@ integration-ordered-bucket:
 .PHONY: integration-maintenance
 integration-maintenance:
 	python3 hack/integration/run.py --maintenance
+
+# Fault injection: manager crash points, cordon + pod deletion, toxiproxy S3 latency/partition.
+.PHONY: integration-faults
+integration-faults:
+	python3 hack/integration/run.py --faults

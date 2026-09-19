@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"os"
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -30,6 +31,21 @@ type Options struct {
 	FencingAccount, FencingRegion string
 	// Explicit test-only configuration; never inferred from kubeconfig or AWS environment.
 	LocalTest bool
+	// FaultPoint names a lifecycle boundary at which the disposable harness manager
+	// exits (see faultPoint). Ignored unless LocalTest is set.
+	FaultPoint string
+}
+
+// faultPoint terminates the manager at a named lifecycle boundary so the kind
+// harness can prove crash-consistency of the journal and workload CAS. It is a
+// test-only injector honored solely with --local-test; controller-runtime
+// recovers panics, so a real process exit is required.
+func (r *Reconciler) faultPoint(name string) {
+	if !r.Options.LocalTest || r.Options.FaultPoint != name {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "celld-operator: injected crash at lifecycle fault point %q\n", name)
+	os.Exit(3)
 }
 
 func labels(f *fleet.CelldFleet) map[string]string {

@@ -712,7 +712,14 @@ func (r *Reconciler) applyReplicas(ctx context.Context, w client.Object, op *lif
 		w.SetAnnotations(map[string]string{})
 	}
 	w.GetAnnotations()[operationKey] = op.ID
-	return r.Update(ctx, w)
+	// Durable intent exists; the effect has not been issued.
+	r.faultPoint("before-effect")
+	if err := r.Update(ctx, w); err != nil {
+		return err
+	}
+	// The effect is durable on the workload; the journal has not recorded it.
+	r.faultPoint("after-effect")
+	return nil
 }
 
 func (r *Reconciler) expand(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, j *lifecycleJournal, w client.Object) (ctrl.Result, bool, error) {

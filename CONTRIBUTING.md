@@ -12,6 +12,7 @@ make check       # Build, race-enabled tests, and lint
 make build       # Build packages and bin/celld-operator
 make test        # go test -race ./...
 make test-envtest # Reconciler and journal tests against a real kube-apiserver/etcd (envtest)
+make integration-faults # Disposable kind: manager crash points, node loss, toxiproxy S3 latency/partition
 make vet         # Standalone go vet
 make fmt         # Apply goimports through the pinned lint tool
 make lint        # Full lint suite
