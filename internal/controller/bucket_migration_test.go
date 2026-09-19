@@ -351,7 +351,7 @@ func TestBucketMigrationInterruptedSettlingRestartsWindow(t *testing.T) {
 	}
 	p.r.Evidence.reader = original
 	p.step(t)
-	if p.j.BucketMigration.Phase != "Recovering" || p.j.BucketMigration.SettledAt != p.reader.now {
+	if p.j.BucketMigration.Phase != "Recovering" || !p.j.BucketMigration.SettledAt.Equal(p.reader.now) {
 		t.Fatal("did not restart settling")
 	}
 }

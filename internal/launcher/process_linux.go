@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -52,7 +51,7 @@ func zombieChildren(child int) []int {
 		if err != nil || pid == child || pid == self {
 			continue
 		}
-		stat, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "stat"))
+		stat, err := os.ReadFile("/proc/" + entry.Name() + "/stat")
 		if err != nil {
 			continue
 		}
