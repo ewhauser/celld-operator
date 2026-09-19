@@ -1,0 +1,79 @@
+---
+title: Your first fleet
+description: Adapt a sample CelldFleet, apply it, and watch it move from InfrastructureReady to Ready.
+sidebar:
+  order: 3
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+This walk-through creates a three-replica Bucket fleet. The PersistentFleet variant differs only in the storage block and the launcher prerequisite, noted at the end.
+
+<Steps>
+
+1. **Start from the sample** and replace the placeholders. The full set of samples is on the [sample manifests](../../api/samples/) page.
+
+   ```yaml title="my-fleet.yaml"
+   apiVersion: celld.example.com/v1alpha1
+   kind: CelldFleet
+   metadata:
+     name: my-fleet          # DNS label, at most 40 characters
+     namespace: fleets       # must hold the namespaced fleet Role
+   spec:
+     qualification: Experimental   # required literal
+     profile: Bucket
+     replicas: 3                   # at least placement.azCount
+     serviceAccountName: celld-runtime   # existing, bound to a runtime IAM role
+     storage:
+       bucket: my-fleet-dedicated-bucket # one bucket per fleet, no other writers
+       region: us-east-1               # immutable
+       sizeGiB: 10
+     placement:
+       azCount: 3
+       zones: [us-east-1a, us-east-1b, us-east-1c]
+       mode: Strict
+   ```
+
+   Only `replicas`, `capacity`, `runtimeImage` and `maintenance` can change after creation. Storage, placement, profile and the ServiceAccount are immutable; admission rejects the edit. Every field is described in the [CelldFleet API reference](../../api/celldfleet/).
+
+2. **Apply it.**
+
+   ```bash
+   kubectl --context YOUR_CONTEXT apply -f my-fleet.yaml
+   ```
+
+3. **Watch the conditions.** `InfrastructureReady` turns true as soon as the Deployment, Services, NetworkPolicy and PodDisruptionBudget match, even while Pods are still Pending. `Ready` turns true when the workload reports the requested number of runtime-ready replicas.
+
+   ```bash
+   kubectl --context YOUR_CONTEXT -n fleets get celldfleet my-fleet -o yaml
+   kubectl --context YOUR_CONTEXT -n fleets describe celldfleet my-fleet
+   ```
+
+4. **Find the storage reservation.** The operator created a cluster-scoped `CelldStorageReservation` bound to this fleet's UID and bucket. It is the journal. Never delete it to reuse the bucket.
+
+   ```bash
+   kubectl --context YOUR_CONTEXT get celldstoragereservations
+   ```
+
+5. **Connect a client.** The application Service is `my-fleet:8080` inside the namespace. Label client or ingress Pods in that namespace `celld.example.com/client-of: my-fleet`, or the NetworkPolicy drops their traffic. Port 8081 is private to fleet peers and the operator; never route it through ingress.
+
+</Steps>
+
+## If it stays Pending or Blocked
+
+| You see | Likely cause | Where to look |
+| --- | --- | --- |
+| `Blocked` with reason `NamespaceAccessDenied` | The namespace lacks the fleet Role. | [Install](../install/#install-with-helm), step 4 |
+| `Blocked` mentioning isolation or NetworkPolicy | `networkPolicyEnforced` is not attested. | [Install](../install/#install-with-helm), step 5 |
+| `Blocked` with `StorageIdentityConflict` | A PVC with the ordinal name already exists, or a retained claim's identity changed. The operator never adopts existing claims. | [Fleet API](../../contracts/fleet-api/) |
+| Pods Pending, `InfrastructureReady=True` | No node in a listed zone, or hostname anti-affinity cannot be satisfied. Strict placement does not relax. | Pod events |
+| Pods running, `Ready=False` | Runtime health returns 503; check the runtime's own logs and the bucket credentials. | Pod logs |
+| Conflicting reservation | The bucket is already reserved by another fleet UID. Choose another bucket; reservations are never freed. | [Lifecycle journal](../../concepts/lifecycle-journal/) |
+
+The complete list of condition types and blocker reasons is in the [conditions reference](../../reference/conditions/).
+
+## PersistentFleet differences
+
+Set `profile: PersistentFleet`, add `storage.storageClassName` pointing at a retained EBS StorageClass, and install the operator with `launcherImage`. Initial provisioning creates every ordinal PVC exclusively before the StatefulSet can consume it; a pre-existing claim with a matching name blocks for review rather than being adopted. Contraction below two live nodes is not available without coordinated downtime. Read [PersistentFleet lifecycle](../../contracts/persistent-fleet-lifecycle/) before scaling one.
+
+Next: [verify and observe](../verify/).

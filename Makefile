@@ -106,3 +106,13 @@ integration-faults:
 .PHONY: integration-persistent-rwop
 integration-persistent-rwop:
 	python3 hack/integration/run.py --persistent-lifecycle --rwop-csi
+
+# Documentation site (Astro + Starlight in site/). Pages are synced from docs/,
+# config/, charts/ and cmd/ on every build; nothing under site/src/content is
+# edited by hand except the start/, concepts/ and reference/ sections.
+.PHONY: site site-dev
+site:
+	cd site && pnpm install --frozen-lockfile && pnpm build
+
+site-dev:
+	cd site && pnpm install --frozen-lockfile && pnpm dev
