@@ -59,3 +59,9 @@ outside any operation may return onto its unchanged host incarnation and
 retained volume, with the old invocation recorded as superseded; the successor
 launcher's exclusive lock is the exclusion authority. Changed host or volume
 identity remains blocked. See [the lifecycle contract](../persistent-fleet-lifecycle.md).
+
+Launcher hardening (19 September 2026): request expiry is enforced in every
+phase, an operation binds only to a `Running` child, unrequested termination
+closes the binding window, the lock proof waits for inherited holders and
+verifies the same lock file by stored token, identity files are linked into
+place atomically, and PID 1 reaps orphaned descendants.

@@ -275,3 +275,63 @@ func TestPersistentSurvivorReplacementBlocksOnChangedHostIncarnation(t *testing.
 		})
 	}
 }
+
+// A donor whose pod disappears while the operation is Stopping (kubelet
+// termination, eviction) leaves no launcher that could ever accept the stop.
+// Once every request has expired the removal is provably unissued and cancels.
+func TestPersistentStoppingWithReplacedDonorCancelsAfterExpiry(t *testing.T) {
+	p := persistentSetup(t)
+	livenessPrep(t, p)
+	p.step(t)
+	p.step(t)
+	if p.j.Operation.Phase != "Stopping" {
+		t.Fatalf("expected Stopping, got %+v", p.j.Operation)
+	}
+	deadline := p.j.Operation.Deadline
+	ctx := t.Context()
+	old := &corev1.Pod{}
+	if err := p.r.Get(ctx, client.ObjectKey{Namespace: p.f.Namespace, Name: "persistent-2"}, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.r.Delete(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	replacement := old.DeepCopy()
+	replacement.UID = "persistent-2-b"
+	replacement.ResourceVersion = ""
+	replacement.Status.ContainerStatuses[0].ContainerID = "container-2b"
+	if err := p.r.Create(ctx, replacement); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.r.Status().Update(ctx, replacement); err != nil {
+		t.Fatal(err)
+	}
+	p.states["persistent-2"] = launcherStateFor(replacement, "invocation-2b", "generation-2b")
+	for range 2 {
+		if j := lifecycleOnce(t, p); j.Operation == nil || j.Operation.Phase != "Stopping" {
+			t.Fatalf("operation changed before the expiry margin: %+v", j.Operation)
+		}
+	}
+	if got := readyReason(t, p.r, p.f); got != "PersistentRecoveryBlocked" {
+		t.Fatalf("expected donor-changed block, got %s", got)
+	}
+	p.reader.now = deadline.Add(stopExpiryGrace)
+	var j *lifecycleJournal
+	for range 4 {
+		j = lifecycleOnce(t, p)
+		if j.Operation == nil {
+			break
+		}
+	}
+	if j.Operation != nil || j.Applied != 3 || replicas(p.w) != 3 {
+		t.Fatalf("replaced-donor Stopping operation was not canceled: %+v applied=%d replicas=%d", j.Operation, j.Applied, replicas(p.w))
+	}
+	if last := j.History[len(j.History)-1]; last.Outcome != "CanceledBeforeIssue" {
+		t.Fatalf("unexpected completion %+v", last)
+	}
+	for _, m := range j.PersistentHistory {
+		if m.Node == "persistent-2" && resolvedMember(m) {
+			t.Fatal("canceled operation resolved the old donor generation without evidence")
+		}
+	}
+}

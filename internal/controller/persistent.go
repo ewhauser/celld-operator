@@ -503,6 +503,13 @@ func (r *Reconciler) contractPersistent(ctx context.Context, f *fleet.CelldFleet
 		}
 		old := op.PersistentMembers[oldIndex]
 		if string(pod.UID) != old.PodUID || id != old.Container {
+			if !r.capacityNow().Before(op.Deadline.Add(stopExpiryGrace)) {
+				// The captured donor is gone and every stop request for it has
+				// expired; no Retiring authority was ever recorded. The removal is
+				// unissued and cancels; the old generation stays unresolved history.
+				op.Phase = "Canceling"
+				return save()
+			}
 			return fail(errors.New("donor invocation changed before stop"))
 		}
 		state, err := r.callLauncher(ctx, f, pod, "", "")

@@ -59,14 +59,18 @@ func query(t *testing.T, address string, key []byte, op, gen string) (State, err
 func awaitPhase(t *testing.T, address string, key []byte, phase string) State {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
+	var last State
 	for time.Now().Before(deadline) {
 		s, e := query(t, address, key, "", "")
 		if e == nil && s.Phase == phase {
 			return s
 		}
+		if e == nil {
+			last = s
+		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("phase %s not reached", phase)
+	t.Fatalf("phase %s not reached; last observed %+v", phase, last)
 	return State{}
 }
 func config(t *testing.T) Config {
@@ -198,7 +202,7 @@ func TestKilledLauncherCannotUnlockSurvivingChild(t *testing.T) {
 	_ = cmd.Wait()
 	// A surviving descendant is platform-dependent; explicitly confirm the
 	// lock owner survived rather than treating process absence as proof.
-	f, e := openLock(c.Root)
+	f, e := openLock(c.Root, true)
 	if e == nil {
 		_ = f.Close()
 		t.Skip("no descendant survived direct-child termination")

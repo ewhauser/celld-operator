@@ -69,10 +69,16 @@ for that child, and escalates that same handle after 25 seconds if necessary.
 It does not signal a numeric PID or process group after reaping; descendants
 that remain alive keep their inherited lock and prevent completion.
 It closes only its own lock descriptor and attempts an independent exclusive
-open. A remaining inherited holder keeps this attempt blocked. Only successful
-reacquisition allows `Stopped`; exit code 0 alone is irrelevant. The live
-launcher continues holding the new lock and serving the exact stopped response
-until Kubernetes removes the pod. Before publishing that response it creates and
+open, reporting `ReleasingInheritedLock` while a descendant still holds the
+inherited descriptor. For a requested stop that wait is unbounded (the pod
+exists until the controller decrements); after an unrequested termination it is
+capped at twenty seconds because no certificate is owed. Only successful
+reacquisition of the same file allows `Stopped`; exit code 0 alone is
+irrelevant. The re-open never creates the file and compares a token written
+into the lock at first acquisition, because inode numbers are recycled on common
+Linux filesystems: an unlinked or replaced lock file blocks instead of
+certifying. The live launcher continues holding the new lock and serving the
+exact stopped response until Kubernetes removes the pod. Before publishing that response it creates and
 fsyncs a permanent deny marker for the retired Pod UID. Every future invocation
 checks that marker after acquiring the volume lock and refuses to start celld for
 that UID. Markers remain across successive retained-volume reuse, so a delayed
@@ -90,6 +96,16 @@ compromise those native processes or read/forge the launcher credential; and
 namespace/storage administrators do not rewrite authority or bypass attachment
 fencing. A local lock does not fence a different kernel, unsafe EBS force-detach,
 or a copied filesystem. These events remain outside the supported path.
+
+Every operation-bearing request must carry an expiry between now and ten seconds
+ahead, in every phase; the controller sends at most three seconds, bounded by
+the operation deadline. A new operation binds only to a `Running` child. A
+launcher that is `Terminating` because kubelet signaled it, or that already
+exited or stopped without an operation, refuses later bindings, so an
+unrequested exit can never be certified for an operation. Identity files are
+written to a private name and linked into place; an empty identity file is
+reported as corruption rather than read as another host. While the launcher is
+PID 1 it reaps orphaned descendants, never the supervised child itself.
 
 ## Controller sequence
 

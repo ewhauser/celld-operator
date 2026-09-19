@@ -29,6 +29,16 @@ type Config struct {
 	Spacing                                   time.Duration
 	Stdout, Stderr                            io.Writer
 }
+
+// requestExpiryBound is the longest future expiry a request may carry: the
+// controller uses three seconds, plus tolerance for clock skew between pods.
+const requestExpiryBound = 10 * time.Second
+
+// lockProofBound caps the wait for inherited lock holders to release after a
+// termination the controller did not request; kubelet will kill this process
+// soon anyway and no certificate is owed. Requested stops wait indefinitely.
+const lockProofBound = 20 * time.Second
+
 type supervisor struct {
 	mu              sync.Mutex
 	state           State
@@ -63,7 +73,15 @@ func (s *supervisor) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.Operation != "" {
-		if (s.state.Phase == "Running" && req.NotAfterMS <= time.Now().UnixMilli()) || req.Generation != s.state.Generation || (s.state.Operation != "" && s.state.Operation != req.Operation) || (s.state.Phase != "Running" && s.state.Phase != "Stopping" && s.state.Phase != "Stopped") {
+		now := time.Now().UnixMilli()
+		// Every stop request expires: the controller bounds NotAfterMS to a few
+		// seconds and to its operation deadline, so a late replay is refused
+		// regardless of phase. A new operation binds only to a Running child;
+		// a supervisor already stopping for another reason (or stopped) answers
+		// only the operation it accepted while Running, never a later one.
+		expired := req.NotAfterMS <= now || req.NotAfterMS > now+requestExpiryBound.Milliseconds()
+		newBinding := s.state.Operation == ""
+		if expired || req.Generation != s.state.Generation || (s.state.Operation != "" && s.state.Operation != req.Operation) || (newBinding && s.state.Phase != "Running") {
 			http.Error(w, "invocation changed or unavailable", http.StatusConflict)
 			return
 		}
@@ -89,8 +107,16 @@ func (s *supervisor) phase(phase string, err error) {
 		s.state.Error = err.Error()
 	}
 }
-func openLock(root string) (*os.File, error) {
-	f, e := os.OpenFile(filepath.Join(root, ".celld-launcher.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+func openLock(root string, create bool) (*os.File, error) {
+	path := filepath.Join(root, ".celld-launcher.lock")
+	flags := os.O_RDWR
+	if create {
+		flags |= os.O_CREATE
+	}
+	f, e := os.OpenFile(path, flags, 0o600)
+	if errors.Is(e, os.ErrNotExist) {
+		return nil, fmt.Errorf("%w: %w", errLockReplaced, e)
+	}
 	if e != nil {
 		return nil, e
 	}
@@ -98,11 +124,52 @@ func openLock(root string) (*os.File, error) {
 		_ = f.Close()
 		return nil, e
 	}
+	// A lock on an unlinked inode excludes nobody. Certify only when the held
+	// descriptor is still the file every other opener will reach. Inode numbers
+	// are reused immediately on common Linux filesystems, so callers also compare
+	// the token stored inside the file (see lockToken).
+	held, e := f.Stat()
+	if e != nil {
+		_ = f.Close()
+		return nil, e
+	}
+	current, e := os.Stat(path)
+	if e != nil || !os.SameFile(held, current) {
+		_ = f.Close()
+		return nil, errLockReplaced
+	}
 	return f, nil
 }
-func waitLock(ctx context.Context, root string) (*os.File, error) {
+
+var errLockReplaced = errors.New("lock file was unlinked or replaced while held")
+
+// lockToken returns the random identity stored in the lock file, writing one
+// on first use. A recreated file has a different token, which no inode
+// comparison can promise on filesystems that recycle inode numbers.
+func lockToken(f *os.File) (string, error) {
+	b, err := io.ReadAll(io.LimitReader(f, 128))
+	if err != nil {
+		return "", err
+	}
+	if len(b) == 64 {
+		return string(b), nil
+	}
+	if len(b) != 0 {
+		return "", errors.New("lock file carries unexpected content")
+	}
+	token := Nonce()
+	if _, err := f.WriteAt([]byte(token), 0); err != nil {
+		return "", err
+	}
+	if err := f.Sync(); err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+func waitLock(ctx context.Context, root string, create bool) (*os.File, error) {
 	for {
-		f, e := openLock(root)
+		f, e := openLock(root, create)
 		if e == nil {
 			return f, nil
 		}
@@ -139,7 +206,11 @@ func Run(ctx context.Context, c Config) error {
 	server := &http.Server{Handler: s, ReadHeaderTimeout: 2 * time.Second, ReadTimeout: 3 * time.Second, WriteTimeout: 3 * time.Second, IdleTimeout: 5 * time.Second}
 	defer func() { _ = server.Close() }()
 	go func() { _ = server.Serve(listener) }()
-	lock, err := waitLock(ctx, c.Root)
+	lock, err := waitLock(ctx, c.Root, true)
+	if err != nil {
+		return err
+	}
+	token, err := lockToken(lock)
 	if err != nil {
 		return err
 	}
@@ -173,9 +244,16 @@ func Run(ctx context.Context, c Config) error {
 	hostIdentity := c.Host + "\n" + c.BootID
 	hostPath := filepath.Join(c.Root, ".celld-launcher-host")
 	old, err := os.ReadFile(hostPath)
-
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
+	}
+	if err == nil && len(old) == 0 {
+		// Identity files are written atomically, so an empty file is not a
+		// half-written record from this code; treat it as corruption, never as
+		// evidence about another host.
+		s.phase("Blocked", errors.New("host identity file is empty or corrupt"))
+		<-ctx.Done()
+		return ctx.Err()
 	}
 	// A disk nonce binds controller authority to this mounted filesystem. Existing
 	// legacy disks can acquire one only on their original host incarnation.
@@ -255,12 +333,21 @@ func Run(ctx context.Context, c Config) error {
 	s.mu.Unlock()
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
+	reaperCtx, stopReaper := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopReaper()
+	go reapOrphans(reaperCtx, cmd.Process.Pid)
 	// Signal the exact os.Process handle, never a numeric PID/group that could
 	// be recycled after Wait. Descendants retain FD3 and must release it before
 	// the independent lock acquisition can certify completion.
 	select {
 	case <-s.stop:
 	case <-ctx.Done():
+		// Termination the controller did not request. Close the binding window
+		// now: a stop request arriving during shutdown must not adopt this exit.
+		s.mu.Lock()
+		s.stopping = true
+		s.state.Phase = "Terminating"
+		s.mu.Unlock()
 	case err := <-done:
 		// An unsolicited exit cannot certify an operation. Retain the lock and
 		// report failure; no automatic child restart resurrects an invocation.
@@ -283,15 +370,36 @@ func Run(ctx context.Context, c Config) error {
 		return err
 	}
 	lock = nil
-	proofCtx, proofCancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	// Descendants may hold FD3 a little longer than the child. Keep waiting for
+	// a requested stop: the pod exists until the controller decrements, and
+	// certifying early would be wrong. Report the wait so operators can see it.
+	s.phase("ReleasingInheritedLock", nil)
+	proofCtx, proofCancel := context.WithCancel(context.WithoutCancel(ctx))
 	defer proofCancel()
-	proof, err := waitLock(proofCtx, c.Root)
+	if ctx.Err() != nil {
+		proofCtx, proofCancel = context.WithTimeout(context.WithoutCancel(ctx), lockProofBound)
+		defer proofCancel()
+	} else {
+		go func() {
+			<-ctx.Done()
+			proofCancel()
+		}()
+	}
+	proof, err := waitLock(proofCtx, c.Root, false)
 	if err != nil {
 		s.phase("Blocked", fmt.Errorf("child exited but inherited lock remains: %w", err))
 		<-ctx.Done()
 		return ctx.Err()
 	}
 	lock = proof
+	// The proof must be the very file the child inherited. If the path was
+	// unlinked or replaced meanwhile, locking the new file says nothing about
+	// holders of the old one, so no certificate can be issued.
+	if proofToken, e := lockToken(proof); e != nil || proofToken != token {
+		s.phase("Blocked", errLockReplaced)
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	// Persist only negative authority before publishing the live receipt. This
 	// file cannot certify termination to another process or reconstruct Stopped.
 	// A failure here leaves the supervisor blocked, with no positive receipt.
@@ -311,21 +419,33 @@ func Run(ctx context.Context, c Config) error {
 // Persist the restrictive host identity before allowing the first disk opener.
 // Its existence never serves as a positive stopped-process certificate.
 func persistHost(root, path string, body []byte) error {
-	f, e := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	// Write the full record to a private temporary name, then link it into place.
+	// Link fails if the path exists, preserving create-exclusive semantics, and
+	// never exposes a partially written file to a later opener.
+	temporary := path + ".tmp." + Nonce()
+	f, e := os.OpenFile(temporary, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if e != nil {
 		return e
 	}
 	if _, e = f.Write(body); e != nil {
 		_ = f.Close()
+		_ = os.Remove(temporary)
 		return e
 	}
 	if e = f.Sync(); e != nil {
 		_ = f.Close()
+		_ = os.Remove(temporary)
 		return e
 	}
 	if e := f.Close(); e != nil {
+		_ = os.Remove(temporary)
 		return e
 	}
+	if e := os.Link(temporary, path); e != nil {
+		_ = os.Remove(temporary)
+		return e
+	}
+	_ = os.Remove(temporary)
 	directory, e := os.Open(root)
 	if e != nil {
 		return e
