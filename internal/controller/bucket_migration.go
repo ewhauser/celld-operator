@@ -18,7 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const migrationKey = "celld.example.com/bucket-migration"
+const migrationKey = "celld.eric.dev/bucket-migration"
 
 type bucketMigration struct {
 	ID, Token, Phase     string

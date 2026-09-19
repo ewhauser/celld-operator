@@ -13,7 +13,7 @@ the reservation records the original replica count atomically at creation for ha
 verification, even before prerequisites or the workload exist. The journal copies
 this baseline while recording the actual initially provisioned count separately.
 
-The retained CelldStorageReservation annotation `celld.example.com/lifecycle-journal`
+The retained CelldStorageReservation annotation `celld.eric.dev/lifecycle-journal`
 is the authority, not fleet status or a leader-election Lease. Version 1 records
 workload UID, initial/applied counts, operation UUID, phase, from/to counts,
 workload resourceVersion, selected Pod name/UID and runtime generation, complete

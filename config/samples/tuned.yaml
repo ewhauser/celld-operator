@@ -1,7 +1,7 @@
 # Per-fleet tuning. Every field is optional and immutable after creation; the
 # operator never rolls out a changed pod template. Values are starting points,
 # not capacity guarantees, and the capacity policy's thresholds are independent.
-apiVersion: celld.example.com/v1alpha1
+apiVersion: celld.eric.dev/v1alpha1
 kind: CelldFleet
 metadata:
   name: agents

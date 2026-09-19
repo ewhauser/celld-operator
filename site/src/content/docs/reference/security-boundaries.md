@@ -32,7 +32,7 @@ Notable absences: no cluster-wide delete, no Secret list, watch or delete, no PV
 
 | Port | Who may reach it | Enforced by |
 | --- | --- | --- |
-| 8080 application | Pods in the fleet namespace labelled `celld.example.com/client-of: <fleet>` | Generated NetworkPolicy |
+| 8080 application | Pods in the fleet namespace labelled `celld.eric.dev/client-of: <fleet>` | Generated NetworkPolicy |
 | 8081 celld internal | Same-fleet peers and operator-namespace Pods labelled `app.kubernetes.io/name: celld-operator` | Generated NetworkPolicy |
 | 8083 launcher | Operator-namespace Pods only; no Service exposes it | Generated NetworkPolicy plus HMAC on every request and response |
 | 8082 operator health, 8084 operator metrics | Cluster-internal; restrict with your own policy | Your network policy |

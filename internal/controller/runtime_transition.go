@@ -12,7 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const runtimeTransitionKey = "celld.example.com/runtime-transition"
+const runtimeTransitionKey = "celld.eric.dev/runtime-transition"
 
 func canStopUpgrade(f *fleet.CelldFleet, j *lifecycleJournal, options Options) bool {
 	return coordinatedDowntime(f) && options.LauncherImage != "" && catalog.StoppedUpgrade(j.RuntimeImage, runtimeImage(f))

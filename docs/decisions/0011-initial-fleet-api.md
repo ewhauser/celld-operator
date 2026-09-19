@@ -6,10 +6,13 @@ Date: 2026-09-18
 
 ## API identity and placement
 
-Use the namespaced `celld.example.com/v1alpha1` CelldFleet API. The repository
-contains no evidence of ownership of a suitable API domain. `example.com` is an
-explicit provisional domain, not an assertion of ownership. Establish an owned
-domain before any stable release; this experimental API has no migration promise.
+Use the namespaced `celld.eric.dev/v1alpha1` CelldFleet API. The repository
+contained no evidence of ownership of a suitable API domain at the time, so
+`example.com` was used as an explicit provisional domain. Superseded on
+19 September 2026: the group is now `celld.eric.dev`, a domain the maintainer
+owns, renamed before any non-disposable install existed. The rename needed no
+migration because no persisted fleet or reservation predated it; this
+experimental API still has no migration promise for later changes.
 This adopts the Go/controller-runtime architecture proposed in ADR 0001.
 
 Require `qualification: Experimental`. Default replicas to three, disk size to

@@ -402,7 +402,7 @@ func TestPersistentLauncherCredentialCreationReplay(t *testing.T) {
 	}
 	// A foreign provisioning nonce never authorizes adopting the existing key.
 	delete(p.res.Annotations, launcherKeyDigest)
-	p.res.Annotations["celld.example.com/launcher-creation"] = "foreign"
+	p.res.Annotations["celld.eric.dev/launcher-creation"] = "foreign"
 	if err := p.r.Update(t.Context(), p.res); err != nil {
 		t.Fatal(err)
 	}
@@ -422,7 +422,7 @@ func TestPersistentPauseCannotCompleteReactivation(t *testing.T) {
 					t.Fatal(err)
 				}
 				claim.Labels = labels(p.f)
-				claim.Annotations = map[string]string{"celld.example.com/storage-reservation": p.res.Name}
+				claim.Annotations = map[string]string{"celld.eric.dev/storage-reservation": p.res.Name}
 				if err := p.r.Update(t.Context(), claim); err != nil {
 					t.Fatal(err)
 				}

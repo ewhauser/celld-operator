@@ -14,7 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const bucketZoneGate = "celld.example.com/bucket-zone"
+const bucketZoneGate = "celld.eric.dev/bucket-zone"
 
 func orderedBucket(f *fleet.CelldFleet) bool {
 	return f.Spec.Profile == "Bucket" && f.Spec.BucketWorkload == "Ordered"

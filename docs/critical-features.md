@@ -68,7 +68,9 @@ NetworkPolicy. The [version reference](../site/src/content/docs/reference/compat
 lists accepted runtime images. The installation guide uses a locally built image
 and repository chart; do not assume a development tag is published or pullable.
 
-The provisional API group is `celld.example.com`. A stable release requires an owned
-API domain, verified published artifacts, and completed cloud qualification.
+The API group is `celld.eric.dev`, under a domain the maintainer owns (renamed from
+the provisional `celld.example.com` on 19 September 2026, before any non-disposable
+install). A stable release still requires verified published artifacts and completed
+cloud qualification.
 [Contributor test reports](qualification/README.md) retain the detailed results and
 open checks, including [the EKS test plan](qualification/eks-smoke-plan.md).

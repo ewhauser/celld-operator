@@ -67,7 +67,7 @@ pass every lifecycle gate (see [External mode](capacity-policy.md#external-mode)
 updates follow the explicit [version transition](runtime-versions.md) procedure. Manual scale-out is journaled. Bucket reductions execute under [logical membership completion](bucket-scale-in.md); launcher-managed PersistentFleet reductions execute through the [graceful retirement path](persistent-fleet-lifecycle.md), and fleets without the launcher remain blocked by the fencing gates. See [ADR 0012](decisions/0012-restart-safe-manual-lifecycle.md) and [ADR 0017](decisions/0017-persistent-launcher-and-graceful-retirement.md).
 
 The application Service is `<fleet>:8080`; label authorized client/ingress pods
-in that namespace `celld.example.com/client-of: <fleet>`. Internal port 8081 is
+in that namespace `celld.eric.dev/client-of: <fleet>`. Internal port 8081 is
 private to same-fleet peers and the operator namespace's pods labeled
 `app.kubernetes.io/name: celld-operator`. Do not route the peer Service through
 external ingress. Public ingress, TLS and DNS remain user-managed. Runtime peer

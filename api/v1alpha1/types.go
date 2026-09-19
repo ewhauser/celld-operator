@@ -1,6 +1,6 @@
-// Package v1alpha1 contains the provisional, experimental fleet API.
+// Package v1alpha1 contains the experimental fleet API under the celld.eric.dev group.
 // +kubebuilder:object:generate=true
-// +groupName=celld.example.com
+// +groupName=celld.eric.dev
 package v1alpha1
 
 import (
@@ -9,7 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-var GroupVersion = schema.GroupVersion{Group: "celld.example.com", Version: "v1alpha1"}
+var GroupVersion = schema.GroupVersion{Group: "celld.eric.dev", Version: "v1alpha1"}
 var SchemeBuilder = runtime.NewSchemeBuilder(func(s *runtime.Scheme) error {
 	s.AddKnownTypes(GroupVersion, &CelldFleet{}, &CelldFleetList{}, &CelldStorageReservation{}, &CelldStorageReservationList{})
 	metav1.AddToGroupVersion(s, GroupVersion)

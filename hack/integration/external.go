@@ -21,7 +21,7 @@ import (
 //  4. Deleting the HPA and switching the policy off returns ownership to the user.
 func (h *harness) exerciseExternal() {
 	scale := func() object {
-		return decode(h.k("get", "--raw", "/apis/celld.example.com/v1alpha1/namespaces/fleets/celldfleets/alpha/scale"))
+		return decode(h.k("get", "--raw", "/apis/celld.eric.dev/v1alpha1/namespaces/fleets/celldfleets/alpha/scale"))
 	}
 	settled := func(count int64) bool {
 		return specReplicas(h.get("deployment", "alpha")) == count && h.ready("alpha") && len(sub(h.journal("alpha"), "Operation")) == 0
@@ -31,7 +31,7 @@ func (h *harness) exerciseExternal() {
 		return str(h.get("celldfleet", "alpha"), "status", "capacity", "reason") == "ExternalOwner"
 	})
 	view := scale()
-	assert(specReplicas(view) == 2 && num(view, "status", "replicas") == 2 && strings.HasPrefix(str(view, "status", "selector"), "celld.example.com/fleet-uid="), "%v", view)
+	assert(specReplicas(view) == 2 && num(view, "status", "replicas") == 2 && strings.HasPrefix(str(view, "status", "selector"), "celld.eric.dev/fleet-uid="), "%v", view)
 	fmt.Println("PASS: /scale reports spec, observed replicas and the fleet selector")
 
 	// Three nodes with strict hostname separation bound the fleet at three replicas.
@@ -39,7 +39,7 @@ func (h *harness) exerciseExternal() {
 		APIVersion: "autoscaling/v2", Kind: "HorizontalPodAutoscaler",
 		Name: "alpha", Namespace: "fleets",
 		Spec: autoscalingv2.HorizontalPodAutoscalerSpec{
-			ScaleTargetRef: autoscalingv2.CrossVersionObjectReference{APIVersion: "celld.example.com/v1alpha1", Kind: "CelldFleet", Name: "alpha"},
+			ScaleTargetRef: autoscalingv2.CrossVersionObjectReference{APIVersion: "celld.eric.dev/v1alpha1", Kind: "CelldFleet", Name: "alpha"},
 			MinReplicas:    new(int32(2)),
 			MaxReplicas:    3,
 			// Any CPU use exceeds 1% of the 250m request, so the HPA drives to max.

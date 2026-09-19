@@ -1,8 +1,8 @@
 # Installation and operations
 
 The chart is experimental. There must be one operator installation per cluster,
-with access to all fleet namespaces. The API group remains `celld.example.com`
-until an owned release domain is selected. CRDs and storage reservations are
+with access to all fleet namespaces. The API group is `celld.eric.dev`,
+a domain the maintainer owns; it needs no DNS record. CRDs and storage reservations are
 retained on uninstall; Helm does not upgrade CRDs automatically.
 
 ## Install

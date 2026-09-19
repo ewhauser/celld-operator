@@ -12,7 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const canceledOperationKey = "celld.example.com/canceled-operation"
+const canceledOperationKey = "celld.eric.dev/canceled-operation"
 const operationBudget = 30 * time.Minute
 
 // cancelRemoval first persists cancellation intent, then fences the old issuer on

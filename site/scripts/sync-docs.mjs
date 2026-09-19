@@ -75,8 +75,8 @@ for (const file of ['bucket', 'bucket-ordered', 'capacity-shadow', 'maintenance-
 	routeBySource.set(`config/samples/${file}.yaml`, `api/samples/#${file}`);
 }
 routeBySource.set('charts/celld-operator/values.yaml', 'api/helm-values/');
-routeBySource.set('config/crd/celld.example.com_celldfleets.yaml', 'api/celldfleet/');
-routeBySource.set('config/crd/celld.example.com_celldstoragereservations.yaml', 'api/celldstoragereservation/');
+routeBySource.set('config/crd/celld.eric.dev_celldfleets.yaml', 'api/celldfleet/');
+routeBySource.set('config/crd/celld.eric.dev_celldstoragereservations.yaml', 'api/celldstoragereservation/');
 
 // Link repository Markdown to handwritten guides without publishing duplicate copies.
 for (const section of ['start', 'configure', 'operate', 'troubleshoot', 'concepts', 'reference', 'contribute']) {
@@ -448,7 +448,7 @@ const flagsPage = () => {
 		'| `:8082` | Health probes `/healthz` and `/readyz`. |',
 		'| `--metrics-bind-address` | Prometheus metrics, disabled by default. The Helm chart uses port 8084. |',
 		'',
-		'Leader election uses a Lease named `celld-operator.celld.example.com` in `--operator-namespace`.',
+		'Leader election uses a Lease named `celld-operator.celld.eric.dev` in `--operator-namespace`.',
 		'',
 	].join('\n');
 	return { slug: 'operator-flags', markdown };
@@ -475,10 +475,10 @@ for (const page of pages) {
 writeFileSync(path.join(contentDir, 'contracts/critical-features.md'), `---\ntitle: Capabilities and limitations\npagefind: false\nprev: false\nnext: false\n---\n\nThe current feature matrix is now at [Capabilities and limitations](../../reference/limitations/).\n`);
 
 const generated = [
-	crdPage('config/crd/celld.example.com_celldfleets.yaml', 'celldfleet', [
+	crdPage('config/crd/celld.eric.dev_celldfleets.yaml', 'celldfleet', [
 		'A `CelldFleet` describes one celld fleet in a namespace: its profile, replica target, storage bucket, placement, optional capacity policy and maintenance requests. Only `replicas`, `capacity`, `runtimeImage`, `maintenance` and an authorized layout migration are mutable after creation. See the [fleet API contract](../../contracts/fleet-api/) for semantics and the [conditions reference](../../reference/conditions/) for what status reports.',
 	]),
-	crdPage('config/crd/celld.example.com_celldstoragereservations.yaml', 'celldstoragereservation', [
+	crdPage('config/crd/celld.eric.dev_celldstoragereservations.yaml', 'celldstoragereservation', [
 		'A `CelldStorageReservation` is the cluster-scoped, never garbage-collected tombstone that binds a bucket to exactly one fleet identity and carries the retained lifecycle journal. The operator creates it; administrators read it. Never delete one to reuse a bucket or a retained disk. See the [lifecycle journal concept](../../concepts/lifecycle-journal/) and [journal archives](../../contracts/journal-archives/).',
 	]),
 	samplesPage(),

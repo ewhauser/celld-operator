@@ -22,10 +22,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const journalKey = "celld.example.com/lifecycle-journal"
-const creationClaimsKey = "celld.example.com/creation-claim-uids"
-const lossFenceKey = "celld.example.com/recovery-loss-fence"
-const operationKey = "celld.example.com/lifecycle-operation"
+const journalKey = "celld.eric.dev/lifecycle-journal"
+const creationClaimsKey = "celld.eric.dev/creation-claim-uids"
+const lossFenceKey = "celld.eric.dev/recovery-loss-fence"
+const operationKey = "celld.eric.dev/lifecycle-operation"
 
 // The reservation survives status loss and fleet deletion. Never prune session
 // history or PVC identities automatically. Large journals use immutable archives.
@@ -250,7 +250,7 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 				return block("StorageIdentityConflict", err.Error())
 			}
 			createdUID, recorded := created[got.Name]
-			if !recorded || createdUID != got.UID || got.Labels[FleetLabel] != string(f.UID) || got.Annotations["celld.example.com/storage-reservation"] != res.Name || !got.DeletionTimestamp.IsZero() {
+			if !recorded || createdUID != got.UID || got.Labels[FleetLabel] != string(f.UID) || got.Annotations["celld.eric.dev/storage-reservation"] != res.Name || !got.DeletionTimestamp.IsZero() {
 				return block("StorageIdentityConflict", "Initial retained claim binding changed")
 			}
 			j.Claims[got.Name] = got.UID
@@ -273,7 +273,7 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 		if err := r.Get(ctx, types.NamespacedName{Namespace: f.Namespace, Name: name}, got); err != nil {
 			return block("StorageIdentityConflict", err.Error())
 		}
-		if got.UID != uid || !got.DeletionTimestamp.IsZero() || len(got.OwnerReferences) != 0 || got.Labels[FleetLabel] != string(f.UID) || got.Annotations["celld.example.com/storage-reservation"] != res.Name {
+		if got.UID != uid || !got.DeletionTimestamp.IsZero() || len(got.OwnerReferences) != 0 || got.Labels[FleetLabel] != string(f.UID) || got.Annotations["celld.eric.dev/storage-reservation"] != res.Name {
 			return block("StorageIdentityConflict", "Retained PVC identity, ownership or deletion state changed: "+name)
 		}
 	}

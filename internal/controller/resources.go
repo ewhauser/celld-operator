@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	FleetLabel = "celld.example.com/fleet-uid"
-	Finalizer  = "celld.example.com/lifecycle-protection"
+	FleetLabel = "celld.eric.dev/fleet-uid"
+	Finalizer  = "celld.eric.dev/lifecycle-protection"
 	Image      = "ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8"
 	// Wait on every container start, including the first restart. exec makes celld PID 1.
 	// This is spacing, not fencing an old process on an unreachable node.
@@ -289,7 +289,7 @@ func prerequisites(f *fleet.CelldFleet, opts Options) []client.Object {
 			Ingress: []networkingv1.NetworkPolicyIngressRule{
 				{From: []networkingv1.NetworkPolicyPeer{same, operator}, Ports: []networkingv1.NetworkPolicyPort{port(8081)}},
 				{
-					From:  []networkingv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"celld.example.com/client-of": f.Name}}}},
+					From:  []networkingv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"celld.eric.dev/client-of": f.Name}}}},
 					Ports: []networkingv1.NetworkPolicyPort{port(8080)},
 				},
 			},

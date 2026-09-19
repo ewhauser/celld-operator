@@ -24,10 +24,10 @@ instance tags after Kubernetes registration:
 
 | Tag | Required value |
 | --- | --- |
-| `celld.example.com/fleet-uid` | exact CelldFleet UID |
-| `celld.example.com/node-uid` | exact Kubernetes Node UID |
-| `celld.example.com/boot-id` | exact admitted Node boot ID |
-| `celld.example.com/fencing` | `terminate` |
+| `celld.eric.dev/fleet-uid` | exact CelldFleet UID |
+| `celld.eric.dev/node-uid` | exact Kubernetes Node UID |
+| `celld.eric.dev/boot-id` | exact admitted Node boot ID |
+| `celld.eric.dev/fencing` | `terminate` |
 
 The operator never adds these tags. Protect tag mutation and Pod scheduling on
 these nodes with infrastructure IAM/admission controls. A reboot changes the
@@ -39,7 +39,7 @@ Use taints/admission controls to enforce dedicated-node placement; privileged
 actors that bypass scheduling/cordoning remain outside this trust boundary.
 
 Authorize the **specific** stalled operation by setting the fleet annotation
-`celld.example.com/fence-operation` to its lifecycle operation ID. This annotation
+`celld.eric.dev/fence-operation` to its lifecycle operation ID. This annotation
 is a destructive-action request, never proof that fencing happened. A durable
 intent is saved before any EC2 mutation. Once recorded, reconciliation completes
 that intent rather than switching back to graceful same-host reuse. Removing the
@@ -63,8 +63,8 @@ Scope the operator role to one account/region and eligible dedicated fleet:
       "Action": "ec2:TerminateInstances",
       "Resource": "arn:aws:ec2:us-east-1:123456789012:instance/*",
       "Condition": {"StringEquals": {
-        "ec2:ResourceTag/celld.example.com/fencing": "terminate",
-        "ec2:ResourceTag/celld.example.com/fleet-uid": "REPLACE_WITH_FLEET_UID"
+        "ec2:ResourceTag/celld.eric.dev/fencing": "terminate",
+        "ec2:ResourceTag/celld.eric.dev/fleet-uid": "REPLACE_WITH_FLEET_UID"
       }}
     }
   ]

@@ -7,14 +7,14 @@ sidebar:
 
 Each fleet gets a ClusterIP application Service named after the fleet on TCP 8080 and a headless peer Service named FLEET-peers on TCP 8081. The operator creates both Services and a NetworkPolicy for fleet Pods. Your platform owns ingress, TLS, DNS and any client-side egress policy.
 
-The generated policy admits application traffic only from Pods **in the same namespace** labelled celld.example.com/client-of: FLEET. For example, add this label to a client Deployment's Pod template:
+The generated policy admits application traffic only from Pods **in the same namespace** labelled celld.eric.dev/client-of: FLEET. For example, add this label to a client Deployment's Pod template:
 
 ~~~yaml
 spec:
   template:
     metadata:
       labels:
-        celld.example.com/client-of: my-fleet
+        celld.eric.dev/client-of: my-fleet
 ~~~
 
 Point that client's application configuration at my-fleet:8080 in the fleet namespace. If clients run in another namespace, use an ingress or proxy Pod in the fleet namespace with the label; the generated policy does not grant cross-namespace client ingress. A separate policy may be needed to allow the client's **egress**.

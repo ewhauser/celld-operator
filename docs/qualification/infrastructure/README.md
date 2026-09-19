@@ -81,7 +81,7 @@ attachment/recovery, IAM/Pod Identity/IRSA and CNI behavior still require the
 [recorded AWS prerequisites](../README.md). Pod spread does not prove follower
 AZ diversity. Local-path PVC retention is not retained-EBS recovery.
 
-The API group is explicitly provisional. Specs are immutable, including additive
+The API group was provisional at the time of this run (since renamed to `celld.eric.dev`). Specs are immutable, including additive
 replica changes. Initial provisioning is useful, but scale-in, rolling updates,
 automatic teardown, controlled restarts and production enablement remain blocked.
 Reservations never automatically expire or transfer. Ordinary kubelet/workload

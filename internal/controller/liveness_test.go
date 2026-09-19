@@ -27,7 +27,7 @@ func livenessPrep(t *testing.T, p *persistentFixture) {
 			t.Fatal(err)
 		}
 		claim.Labels = labels(p.f)
-		claim.Annotations = map[string]string{"celld.example.com/storage-reservation": p.res.Name}
+		claim.Annotations = map[string]string{"celld.eric.dev/storage-reservation": p.res.Name}
 		if err := p.r.Update(ctx, claim); err != nil {
 			t.Fatal(err)
 		}

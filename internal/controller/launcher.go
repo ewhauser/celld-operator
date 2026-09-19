@@ -23,12 +23,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const launcherGate = "celld.example.com/exclusive-volume"
+const launcherGate = "celld.eric.dev/exclusive-volume"
 
 // launcherPort is the private launcher listener; tests point it at a local fake.
 var launcherPort = "8083"
 
-const launcherKeyDigest = "celld.example.com/launcher-key-digest"
+const launcherKeyDigest = "celld.eric.dev/launcher-key-digest"
 
 func launcherSecretName(f *fleet.CelldFleet) string { return f.Name + "-launcher" }
 func persistentAccessModes(opts Options) []corev1.PersistentVolumeAccessMode {
@@ -45,7 +45,7 @@ func (r *Reconciler) createLauncherKey(ctx context.Context, f *fleet.CelldFleet,
 		_, err := r.launcherKey(ctx, f)
 		return err
 	}
-	const creationKey = "celld.example.com/launcher-creation"
+	const creationKey = "celld.eric.dev/launcher-creation"
 	if res.Annotations == nil {
 		res.Annotations = map[string]string{}
 	}

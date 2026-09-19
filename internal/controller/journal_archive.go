@@ -15,8 +15,8 @@ import (
 
 const archivePageBytes = 128 * 1024
 const archiveMaxBytes = 16 * 1024 * 1024
-const archiveIdentityKey = "celld.example.com/journal-reservation-uid"
-const archiveDigestKey = "celld.example.com/journal-page-digest"
+const archiveIdentityKey = "celld.eric.dev/journal-reservation-uid"
+const archiveDigestKey = "celld.eric.dev/journal-page-digest"
 
 type journalPage struct {
 	Name, Digest string

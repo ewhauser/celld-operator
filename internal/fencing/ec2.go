@@ -14,10 +14,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 )
 
-const FleetTag = "celld.example.com/fleet-uid"
-const HostTag = "celld.example.com/node-uid"
-const BootTag = "celld.example.com/boot-id"
-const FenceTag = "celld.example.com/fencing"
+const FleetTag = "celld.eric.dev/fleet-uid"
+const HostTag = "celld.eric.dev/node-uid"
+const BootTag = "celld.eric.dev/boot-id"
+const FenceTag = "celld.eric.dev/fencing"
 
 // Binding is captured from an authenticated admitted runtime and retained disk.
 // Ownership tags are installed by trusted infrastructure provisioning, not this operator.

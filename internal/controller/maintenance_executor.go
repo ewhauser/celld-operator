@@ -443,7 +443,7 @@ func (r *Reconciler) authorizeMaintenanceAction(ctx context.Context, w client.Ob
 		w.SetAnnotations(map[string]string{})
 	}
 	key := fmt.Sprintf("%s/%d", m.ID, m.Index)
-	w.GetAnnotations()["celld.example.com/maintenance-action"] = key
+	w.GetAnnotations()["celld.eric.dev/maintenance-action"] = key
 	return r.Update(ctx, w)
 }
 

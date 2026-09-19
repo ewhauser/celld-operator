@@ -24,7 +24,7 @@ func initialClaims(f *fleet.CelldFleet, workload client.Object) []*corev1.Persis
 	for ordinal := int32(0); ordinal < f.Spec.Replicas; ordinal++ {
 		claim := sts.Spec.VolumeClaimTemplates[0].DeepCopy()
 		claim.ObjectMeta = metadata(f, fmt.Sprintf("data-%s-%d", f.Name, ordinal))
-		claim.Annotations = map[string]string{"celld.example.com/storage-reservation": reservationName(f)}
+		claim.Annotations = map[string]string{"celld.eric.dev/storage-reservation": reservationName(f)}
 		claims = append(claims, claim)
 	}
 	return claims

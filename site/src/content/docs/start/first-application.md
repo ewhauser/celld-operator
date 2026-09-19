@@ -51,6 +51,6 @@ else
 fi
 ```
 
-Both responses after the availability check should include `"stored":true` for `id=hello`. The PUT writes the Durable Object state once; the final GET reads it. Do not automatically retry a PUT whose outcome is uncertain. If the Service has no endpoint, return to [fleet verification](../verify/). If the request reaches celld but the app fails, check the deployment output and runtime Pod logs. For an in-cluster client or ingress, label its Pod `celld.example.com/client-of: my-fleet` in the `fleets` namespace; see [networking](../../configure/networking/).
+Both responses after the availability check should include `"stored":true` for `id=hello`. The PUT writes the Durable Object state once; the final GET reads it. Do not automatically retry a PUT whose outcome is uncertain. If the Service has no endpoint, return to [fleet verification](../verify/). If the request reaches celld but the app fails, check the deployment output and runtime Pod logs. For an in-cluster client or ingress, label its Pod `celld.eric.dev/client-of: my-fleet` in the `fleets` namespace; see [networking](../../configure/networking/).
 
 This confirms one application request through your fleet. It does not qualify EKS, S3 failure behavior, recovery or production durability; those gates are listed under [capability and qualification limits](../../reference/limitations/).

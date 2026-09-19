@@ -16,7 +16,7 @@ func (h *harness) exerciseMaintenance() {
 	} {
 		uid := uidOf(h.get("celldfleet", f.fleet))
 		// The UID is captured once so the pod query still works after deletion.
-		pods := func() []object { return h.listIn("fleets", "pods", "-l", "celld.example.com/fleet-uid="+uid) }
+		pods := func() []object { return h.listIn("fleets", "pods", "-l", "celld.eric.dev/fleet-uid="+uid) }
 		h.merge(f.fleet, `{"spec":{"capacity":null,"replicas":3,"maintenance":null}}`)
 		h.waitFor("maintenance fixture has three ready replicas: "+f.fleet, 360*time.Second, func() bool {
 			return specReplicas(h.get(f.kind, f.fleet)) == 3 && h.ready(f.fleet) && len(sub(h.journal(f.fleet), "Operation")) == 0
@@ -24,7 +24,7 @@ func (h *harness) exerciseMaintenance() {
 		assert(stored(h.app(f.probe, f.fleet, "PUT", "/?cell=maintenance&id=ack")), "maintenance write not acknowledged")
 		before := podUIDs(pods())
 		claims := map[string]string{}
-		for _, claim := range h.listIn("fleets", "pvc", "-l", "celld.example.com/fleet-uid="+uid) {
+		for _, claim := range h.listIn("fleets", "pvc", "-l", "celld.eric.dev/fleet-uid="+uid) {
 			claims[nameOf(claim)] = uidOf(claim)
 		}
 		token := "live-maintenance-" + f.fleet

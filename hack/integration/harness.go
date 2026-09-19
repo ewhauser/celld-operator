@@ -172,7 +172,7 @@ func (h *harness) reservations() []object {
 }
 
 func (h *harness) fleetPods(fleetName string) []object {
-	return h.listIn("fleets", "pods", "-l", "celld.example.com/fleet-uid="+uidOf(h.get("celldfleet", fleetName)))
+	return h.listIn("fleets", "pods", "-l", "celld.eric.dev/fleet-uid="+uidOf(h.get("celldfleet", fleetName)))
 }
 
 // merge applies a JSON merge patch to a fleet in the fleets namespace.

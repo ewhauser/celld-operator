@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	journalAnnotation   = "celld.example.com/lifecycle-journal"
-	operationAnnotation = "celld.example.com/lifecycle-operation"
+	journalAnnotation   = "celld.eric.dev/lifecycle-journal"
+	operationAnnotation = "celld.eric.dev/lifecycle-operation"
 )
 
 // exerciseFaults injects faults into the harness-owned kind cluster. It runs
@@ -151,7 +151,7 @@ func (h *harness) exerciseFaults() {
 	fmt.Println("PASS: Bucket node loss: no decrement while unavailable, write readable after recovery")
 
 	// ---- 4. node loss for a launcher-managed PersistentFleet replica ----
-	h.probe("beta-client", "fleets", map[string]string{"celld.example.com/client-of": "beta"})
+	h.probe("beta-client", "fleets", map[string]string{"celld.eric.dev/client-of": "beta"})
 	h.app("beta-client", "beta", "PUT", "/?cell=integration&id=ack")
 	h.waitFor("beta at baseline before node loss", 240*time.Second, func() bool { return settled("beta", 2) })
 	host := str(h.get("pod", "beta-1"), "spec", "nodeName")

@@ -45,7 +45,7 @@ func (h *harness) exerciseIsolation() {
 	// An old deterministic claim must never be adopted into a new bucket.
 	h.apply(&corev1.PersistentVolumeClaim{
 		APIVersion: "v1", Kind: "PersistentVolumeClaim",
-		Name: "data-collision-0", Namespace: "fleets", Labels: map[string]string{"celld.example.com/fleet-uid": "previous-fleet"},
+		Name: "data-collision-0", Namespace: "fleets", Labels: map[string]string{"celld.eric.dev/fleet-uid": "previous-fleet"},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			StorageClassName: new("retained"),
 			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
@@ -70,7 +70,7 @@ func (h *harness) exerciseIsolation() {
 		uid := uidOf(h.get("celldfleet", fleetName))
 		var selected []object
 		for _, pod := range pods {
-			if str(pod, "metadata", "labels", "celld.example.com/fleet-uid") == uid {
+			if str(pod, "metadata", "labels", "celld.eric.dev/fleet-uid") == uid {
 				selected = append(selected, pod)
 			}
 		}
@@ -94,9 +94,9 @@ func (h *harness) exerciseIsolation() {
 		return false
 	})
 	alphaUID := uidOf(h.get("celldfleet", "alpha"))
-	h.probe("same-fleet", "fleets", map[string]string{"celld.example.com/fleet-uid": alphaUID})
-	h.probe("client", "fleets", map[string]string{"celld.example.com/client-of": "alpha"})
-	h.probe("client-beta", "fleets", map[string]string{"celld.example.com/client-of": "beta"})
+	h.probe("same-fleet", "fleets", map[string]string{"celld.eric.dev/fleet-uid": alphaUID})
+	h.probe("client", "fleets", map[string]string{"celld.eric.dev/client-of": "alpha"})
+	h.probe("client-beta", "fleets", map[string]string{"celld.eric.dev/client-of": "beta"})
 	h.probe("untrusted", "fleets", map[string]string{})
 	h.probe("operator", operatorNS, map[string]string{"app.kubernetes.io/name": "celld-operator"})
 	h.curl(request{pod: "same-fleet", address: addresses["alpha"]})
@@ -165,7 +165,7 @@ func (h *harness) ordinalUIDs(fleetName string, count int) []string {
 func (h *harness) exercisePersistentLifecycle() {
 	// Local-path RWO is deliberately local-test-only: test same-host
 	// locks and scheduling, not CSI/RWOP/EBS attachment guarantees.
-	h.probe("beta-client", "fleets", map[string]string{"celld.example.com/client-of": "beta"})
+	h.probe("beta-client", "fleets", map[string]string{"celld.eric.dev/client-of": "beta"})
 	h.app("beta-client", "beta", "PUT", "/?cell=integration&id=ack")
 	settled := func(count int64) bool {
 		return specReplicas(h.get("statefulset", "beta")) == count && h.ready("beta") && h.noOperation("beta")
@@ -251,7 +251,7 @@ func (h *harness) exerciseBucketLifecycle() {
 	// completion uses the same recorded membership checks.
 	h.merge("alpha", `{"spec":{"maintenance":{"paused":true},"replicas":2}}`)
 	h.wait("Bucket pause fence installed", func() bool {
-		return annotation(h.get("deployment", "alpha"), "celld.example.com/maintenance-fence") == "paused"
+		return annotation(h.get("deployment", "alpha"), "celld.eric.dev/maintenance-fence") == "paused"
 	})
 	h.sleep(12 * time.Second)
 	assert(specReplicas(h.get("deployment", "alpha")) == 3, "paused removal changed replicas")
@@ -307,7 +307,7 @@ func (h *harness) exerciseBaseRemainder() {
 		before := h.get(kind, fleetName)
 		h.merge(fleetName, `{"spec":{"maintenance":{"paused":true}}}`)
 		h.wait("pause preserves serving readiness: "+fleetName, func() bool {
-			return annotation(h.get(kind, fleetName), "celld.example.com/maintenance-fence") == "paused" &&
+			return annotation(h.get(kind, fleetName), "celld.eric.dev/maintenance-fence") == "paused" &&
 				num(h.get("celldfleet", fleetName), "status", "readyReplicas") == 3 && h.ready(fleetName)
 		})
 		assert(same(sub(h.get(kind, fleetName), "spec"), sub(before, "spec")), "pause changed the workload")
@@ -331,7 +331,7 @@ func (h *harness) exerciseBaseRemainder() {
 		return hasReason(h.get("celldfleet", "beta"), "DeletionBlocked")
 	})
 	assert(uidOf(h.get("statefulset", "beta")) == uidOf(sts), "blocked deletion replaced the StatefulSet")
-	assert(len(h.listIn("fleets", "pvc", "-l", "celld.example.com/fleet-uid="+uidOf(h.get("celldfleet", "beta")))) == 3, "blocked deletion touched claims")
+	assert(len(h.listIn("fleets", "pvc", "-l", "celld.eric.dev/fleet-uid="+uidOf(h.get("celldfleet", "beta")))) == 3, "blocked deletion touched claims")
 	// Controller restart must preserve reservation/journal and workload UIDs.
 	deploymentUID := uidOf(h.get("deployment", "alpha"))
 	h.process.stop(false)

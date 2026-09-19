@@ -30,7 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-const attemptAnnotation = "celld.example.com/workload-creation-attempted"
+const attemptAnnotation = "celld.eric.dev/workload-creation-attempted"
 
 // Reconciler uses an uncached client for the durable reservation and creation journal.
 // Kubernetes Create is the cross-controller arbitration point; leader election is not the safety proof.

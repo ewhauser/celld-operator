@@ -14,7 +14,7 @@ The operator is installed, `fleets/celld-runtime` has access to your dedicated b
 1. **Save the fleet manifest as `my-fleet.yaml`.** Replace the bucket, region and zones with your own values. The listed zones must exist in your cluster and region; at least one eligible node is needed for each replica. The runtime image is omitted so the operator selects its pinned celld v0.5.0 digest.
 
    ```yaml title="my-fleet.yaml"
-   apiVersion: celld.example.com/v1alpha1
+   apiVersion: celld.eric.dev/v1alpha1
    kind: CelldFleet
    metadata:
      name: my-fleet
@@ -55,6 +55,6 @@ The operator is installed, `fleets/celld-runtime` has access to your dedicated b
 
 Look for `Ready=True`, `Blocked=False`, and `readyReplicas: 3` after reconciliation. `InfrastructureReady=True` only means the Kubernetes objects match; it can be true while Pods are Pending. `ProductionQualified=False` is expected for this experimental release. [Verify and observe](../verify/) explains those signals and where to look if they do not appear.
 
-The application Service is internal. Only client Pods in `fleets` labeled `celld.example.com/client-of: my-fleet` can reach it through the generated NetworkPolicy. Port 8081 is private to peers and the operator. For a retained-disk setup, read [PersistentFleet profile](../../concepts/profiles/) before creating it; it needs EBS CSI, a retained StorageClass and a digest-pinned launcher image.
+The application Service is internal. Only client Pods in `fleets` labeled `celld.eric.dev/client-of: my-fleet` can reach it through the generated NetworkPolicy. Port 8081 is private to peers and the operator. For a retained-disk setup, read [PersistentFleet profile](../../concepts/profiles/) before creating it; it needs EBS CSI, a retained StorageClass and a digest-pinned launcher image.
 
 Next: [deploy an application and send a request](../first-application/).

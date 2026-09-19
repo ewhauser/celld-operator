@@ -14,7 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const fenceRequestKey = "celld.example.com/fence-operation"
+const fenceRequestKey = "celld.eric.dev/fence-operation"
 
 type infrastructureFence struct {
 	Operation             string

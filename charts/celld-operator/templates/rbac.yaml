@@ -9,13 +9,13 @@ kind: ClusterRole
 metadata:
   name: {{ include "celld-operator.name" . }}
 rules:
-  - apiGroups: [celld.example.com]
+  - apiGroups: [celld.eric.dev]
     resources: [celldfleets]
     verbs: [get, list, watch, patch]
-  - apiGroups: [celld.example.com]
+  - apiGroups: [celld.eric.dev]
     resources: [celldfleets/status]
     verbs: [get, patch]
-  - apiGroups: [celld.example.com]
+  - apiGroups: [celld.eric.dev]
     resources: [celldstoragereservations]
     verbs: [get, create, update]
   - apiGroups: ['']

@@ -469,7 +469,7 @@ func TestPVCClaimCreationRaceAndPartialFailure(t *testing.T) {
 			if err := r.Get(t.Context(), types.NamespacedName{Namespace: f.Namespace, Name: "data-alpha-0"}, claim); err != nil {
 				t.Fatal(err)
 			}
-			if len(claim.OwnerReferences) != 0 || claim.Labels[FleetLabel] != string(f.UID) || claim.Annotations["celld.example.com/storage-reservation"] != reservationName(f) {
+			if len(claim.OwnerReferences) != 0 || claim.Labels[FleetLabel] != string(f.UID) || claim.Annotations["celld.eric.dev/storage-reservation"] != reservationName(f) {
 				t.Fatal("initial PVC is not independently retained and bound to fleet reservation")
 			}
 		})

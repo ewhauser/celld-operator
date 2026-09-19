@@ -15,7 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const maintenanceFenceKey = "celld.example.com/maintenance-fence"
+const maintenanceFenceKey = "celld.eric.dev/maintenance-fence"
 
 // Requests never authorize a workload mutation. A qualified executor must use
 // Operation, with exact target/session capture, before this can change.

@@ -104,7 +104,7 @@ func (h *harness) createCluster() {
 	h.k("taint", "nodes", h.nodes[0], "node-role.kubernetes.io/control-plane:NoSchedule-")
 	h.k("-n", "kube-system", "rollout", "status", "daemonset/calico-node", "--timeout=240s")
 	h.k("apply", "-f", filepath.Join(h.root, "config", "crd"))
-	h.k("wait", "--for=condition=Established", "crd/celldfleets.celld.example.com", "--timeout=60s")
+	h.k("wait", "--for=condition=Established", "crd/celldfleets.celld.eric.dev", "--timeout=60s")
 	// Manager manifest is validated, but run the native binary under the exact SA RBAC below.
 	h.k("apply", "-f", filepath.Join(h.root, "config", "manager", "operator.yaml"))
 	h.k("-n", operatorNS, "scale", "deployment/celld-operator", "--replicas=0")
@@ -415,7 +415,7 @@ func newFleet(name, bucket, profile, namespace string) *v1alpha1.CelldFleet {
 		storage.StorageClassName = "retained"
 	}
 	return &v1alpha1.CelldFleet{
-		APIVersion: "celld.example.com/v1alpha1", Kind: "CelldFleet",
+		APIVersion: "celld.eric.dev/v1alpha1", Kind: "CelldFleet",
 		Name: name, Namespace: namespace,
 		Spec: v1alpha1.CelldFleetSpec{
 			Qualification: "Experimental", Profile: profile, Replicas: 2, ServiceAccountName: "runtime",
@@ -434,9 +434,9 @@ func bucketFleet(name, bucket string) *v1alpha1.CelldFleet {
 func (h *harness) probe(name, ns string, labels map[string]string) {
 	pod := sleepPod(name, ns, curlImage, labels)
 	pod.Spec.Containers[0].Name = "probe"
-	pod.Spec.ReadinessGates = []corev1.PodReadinessGate{{ConditionType: "integration.celld.example.com/NotServing"}}
-	if uid, ok := labels["celld.example.com/fleet-uid"]; ok {
-		pod.OwnerReferences = []metav1.OwnerReference{{APIVersion: "celld.example.com/v1alpha1", Kind: "CelldFleet", Name: "alpha", UID: types.UID(uid), Controller: new(true)}}
+	pod.Spec.ReadinessGates = []corev1.PodReadinessGate{{ConditionType: "integration.celld.eric.dev/NotServing"}}
+	if uid, ok := labels["celld.eric.dev/fleet-uid"]; ok {
+		pod.OwnerReferences = []metav1.OwnerReference{{APIVersion: "celld.eric.dev/v1alpha1", Kind: "CelldFleet", Name: "alpha", UID: types.UID(uid), Controller: new(true)}}
 	}
 	h.apply(pod)
 	h.waitFor("probe "+name+" running", 90*time.Second, func() bool { return str(h.getIn(ns, "pod", name), "status", "phase") == "Running" })

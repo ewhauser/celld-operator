@@ -9,7 +9,7 @@ Use the context where you installed the operator. The chart requires one operato
 
 ```bash
 helm --kube-context YOUR_CONTEXT -n celld-system status celld
-kubectl --context YOUR_CONTEXT get crd celldfleets.celld.example.com
+kubectl --context YOUR_CONTEXT get crd celldfleets.celld.eric.dev
 kubectl --context YOUR_CONTEXT -n celld-system get deployment,pods
 kubectl --context YOUR_CONTEXT -n celld-system logs deployment/celld-celld-operator --tail=100
 kubectl --context YOUR_CONTEXT -n fleets describe celldfleet my-fleet

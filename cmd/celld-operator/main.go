@@ -80,7 +80,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	mgr, err := ctrl.NewManager(config, ctrl.Options{Scheme: scheme, LeaderElection: true, LeaderElectionID: "celld-operator.celld.example.com", LeaderElectionNamespace: *namespace, Metrics: metricsserver.Options{BindAddress: *metrics}, HealthProbeBindAddress: ":8082"})
+	mgr, err := ctrl.NewManager(config, ctrl.Options{Scheme: scheme, LeaderElection: true, LeaderElectionID: "celld-operator.celld.eric.dev", LeaderElectionNamespace: *namespace, Metrics: metricsserver.Options{BindAddress: *metrics}, HealthProbeBindAddress: ":8082"})
 	if err != nil {
 		return err
 	}
