@@ -549,7 +549,9 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 	if op.Stalled && (w.GetAnnotations()[operationKey] != op.ID || replicas(w) != op.To) && op.Phase != "Recovering" {
 		return block("OperationStalled", "Operation deadline exceeded before replica issuance; authority retained")
 	}
-	if maintenanceFence(f) == "" && f.Spec.Capacity != nil && j.Capacity != nil {
+	// External mode has no policy to evaluate while an operation is in flight; its
+	// decision keeps naming the /scale writer as the owner.
+	if maintenanceFence(f) == "" && f.Spec.Capacity != nil && j.Capacity != nil && !externalOwner(f) {
 		observation := capacity.Observation{At: r.capacityNow()}
 		if r.Collector != nil {
 			observation = r.Collector.Collect(ctx, f)

@@ -136,13 +136,15 @@ spec:
                     type: integer
                   mode:
                     default: Shadow
-                    description: Shadow reports recommendations only. ScaleOut permits
-                      bounded additions. Automatic also requests removals, which remain
-                      disabled against production evidence.
+                    description: |-
+                      Shadow reports recommendations only. ScaleOut permits bounded additions. Automatic also requests removals, which remain disabled against production evidence.
+                      External hands spec.replicas to one /scale writer (typically an HPA); the
+                      built-in policy computes nothing and the other policy fields are ignored.
                     enum:
                     - Shadow
                     - ScaleOut
                     - Automatic
+                    - External
                     type: string
                   provisioningTimeoutSeconds:
                     default: 600
@@ -577,6 +579,10 @@ spec:
                 description: Observed non-terminating Pods that are not ready yet.
                 format: int32
                 type: integer
+              labelSelector:
+                description: Serialized selector for exactly this fleet's Pods, for
+                  the /scale subresource.
+                type: string
               lifecycle:
                 description: Progress and retained findings for capacity and maintenance
                   operations.
@@ -680,6 +686,15 @@ spec:
                 description: Whether the Pod inventory was complete. False means counts
                   must not be interpreted as proof of no running processes.
                 type: boolean
+              replicas:
+                description: |-
+                  Replicas and LabelSelector serve the /scale subresource: non-terminal pods
+                  of this fleet, including terminating ones, and the selector that matches
+                  exactly them. They never express permission to scale.
+                  Zero is serialized so the scale view always carries a count, but the schema
+                  does not require it: a status written before this field existed stays valid.
+                format: int32
+                type: integer
               reservation:
                 description: Name of the cluster-scoped storage reservation holding
                   this fleet's recovery records.
@@ -698,4 +713,8 @@ spec:
     served: true
     storage: true
     subresources:
+      scale:
+        labelSelectorPath: .status.labelSelector
+        specReplicasPath: .spec.replicas
+        statusReplicasPath: .status.replicas
       status: {}

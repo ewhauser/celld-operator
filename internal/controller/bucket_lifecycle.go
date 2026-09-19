@@ -307,6 +307,9 @@ func (r *Reconciler) contractBucket(ctx context.Context, f *fleet.CelldFleet, re
 		if op.Automatic && !r.Options.LocalTest {
 			return report("BucketAutomaticUnqualified", "Automatic Bucket contraction awaits EKS/S3 release qualification; manual contraction uses the same safety checks")
 		}
+		if externalOwner(f) && !r.Options.LocalTest {
+			return report("ExternalContractionUnqualified", "Contraction requested through /scale by an external writer awaits the same EKS/S3 release qualification as Automatic mode; additions proceed")
+		}
 		if !op.Automatic && f.Spec.Replicas >= op.From {
 			return report("DesiredChanged", "Bucket removal intent retained until canceled or requested again")
 		}

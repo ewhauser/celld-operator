@@ -12,6 +12,7 @@ import (
 	"time"
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
+	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -604,5 +605,45 @@ func TestEnvtestTuningAdmission(t *testing.T) {
 	got.Spec.Replicas = 4
 	if err := c.Update(ctx, got); err != nil {
 		t.Fatalf("replicas rejected on a tuned fleet: %v", err)
+	}
+}
+
+// The /scale subresource is served by the API server from the CRD definition.
+// An HPA reads status.replicas and the selector and writes spec.replicas.
+func TestEnvtestScaleSubresource(t *testing.T) {
+	r, x := envtestSetup(t, "Bucket")
+	x.provision(t, r)
+	ctx := t.Context()
+	reconcile(t, r, x.fleet)
+	scale := &autoscalingv1.Scale{}
+	if err := r.SubResource("scale").Get(ctx, x.fleet, scale); err != nil {
+		t.Fatalf("scale subresource unavailable: %v", err)
+	}
+	if scale.Spec.Replicas != 3 || scale.Status.Selector != FleetLabel+"="+string(x.fleet.UID) {
+		t.Fatalf("scale view %+v", scale)
+	}
+	// No kubelet runs here, so no pods exist and status.replicas is zero; the
+	// field itself must be present for the autoscaler contract.
+	got := &fleet.CelldFleet{}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(x.fleet), got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Status.ReplicaObservationValid || got.Status.LabelSelector == "" {
+		t.Fatalf("scale status not projected: %+v", got.Status)
+	}
+	scale.Spec.Replicas = 4
+	if err := r.SubResource("scale").Update(ctx, x.fleet, client.WithSubResourceBody(scale)); err != nil {
+		t.Fatalf("scale update rejected: %v", err)
+	}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(x.fleet), got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Spec.Replicas != 4 {
+		t.Fatalf("scale write did not land in spec.replicas: %d", got.Spec.Replicas)
+	}
+	// A scale write below azCount is refused by the CRD's own validation.
+	scale.Spec.Replicas = 0
+	if err := r.SubResource("scale").Update(ctx, x.fleet, client.WithSubResourceBody(scale)); !apierrors.IsInvalid(err) {
+		t.Fatalf("invalid scale accepted: %v", err)
 	}
 }

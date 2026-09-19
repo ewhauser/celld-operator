@@ -73,12 +73,17 @@ func publishFleetMetrics(f *fleet.CelldFleet, now time.Time) {
 func (r *Reconciler) observeReplicaCounts(ctx context.Context, f *fleet.CelldFleet) {
 	f.Status.ObservedReplicas, f.Status.JoiningReplicas, f.Status.TerminatingReplicas = 0, 0, 0
 	f.Status.ReplicaObservationValid = false
+	// /scale contract: the selector matches exactly this fleet's pods.
+	f.Status.LabelSelector = metav1.FormatLabelSelector(selector(f))
 	pods := &corev1.PodList{}
 	if err := r.List(ctx, pods, client.InNamespace(f.Namespace), client.MatchingLabels(labels(f)), client.Limit(201)); err != nil || pods.Continue != "" {
 		return
 	}
 	for i := range pods.Items {
 		p := &pods.Items[i]
+		if p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
+			continue // terminal pods are not capacity for an autoscaler
+		}
 		f.Status.ObservedReplicas++
 		if !p.DeletionTimestamp.IsZero() {
 			f.Status.TerminatingReplicas++
@@ -87,6 +92,7 @@ func (r *Reconciler) observeReplicaCounts(ctx context.Context, f *fleet.CelldFle
 		}
 	}
 	f.Status.ReplicaObservationValid = true
+	f.Status.Replicas = f.Status.ObservedReplicas
 }
 func (r *Reconciler) recordConditionChange(f *fleet.CelldFleet, before []metav1.Condition) {
 	if r.Recorder == nil {

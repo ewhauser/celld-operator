@@ -19,7 +19,7 @@ Server. Strict configured AZ placement is unchanged.
 
 | Field under `capacity` | Default | Meaning |
 | --- | --- | --- |
-| mode | Shadow | Shadow, ScaleOut (explicit additions), Automatic (requests both directions) |
+| mode | Shadow | Shadow, ScaleOut (explicit additions), Automatic (requests both directions), External (one `/scale` writer owns `spec.replicas`) |
 | minReplicas / maxReplicas | 3 / 10 | Automatic bounds; minimum must cover the explicit AZ count |
 | scaleOutStep | 1 | At most this many additions per completed stable decision; 1–10 |
 | sampleIntervalSeconds | 15 | Minimum interval between counted observations |
@@ -103,3 +103,29 @@ evidence. Blocked upgrade/restart requests take precedence over new capacity
 operations after the current one completes. See [ADR 0014](decisions/0014-coordinated-maintenance.md).
 
 Bucket update: the shared executor now supports manual logical membership contraction and automatic execution in the fixed local qualification environment. Production automatic Bucket requests remain `BucketAutomaticUnqualified` until EKS/S3 release qualification. See [Bucket lifecycle](bucket-scale-in.md) for the full gates and history rules.
+
+## External mode
+
+`capacity.mode: External` hands `spec.replicas` to exactly one external writer
+through the `/scale` subresource, normally a HorizontalPodAutoscaler whose
+`scaleTargetRef` is the CelldFleet. The built-in policy computes nothing and
+collects no load samples in this mode; every other policy field is ignored, and
+`status.capacity` reports `ExternalOwner` with the desired and applied counts.
+The operator never writes `spec.replicas` back, so it cannot fight the HPA: a
+requested count it cannot apply stays visible as desired versus applied with the
+blocking condition and its age.
+
+`/scale` serves `spec.replicas`, `status.replicas` (non-terminal pods of the
+fleet, including terminating ones) and `status.labelSelector`, the selector for
+exactly this fleet's pods, which the HPA uses to find pod metrics. `kubectl scale`
+is an ordinary writer. A write through `/scale` is a `spec.replicas` edit and
+passes the same lifecycle gates as a manual edit: additions are journaled and
+applied; contraction requested by the external writer shares the production
+release gate of Automatic mode and reports `ExternalContractionUnqualified`
+until EKS/S3 qualification closes it, while the disposable local fixture runs
+the same executor. Never attach an HPA to the child Deployment or StatefulSet:
+it would bypass the journal, and the operator reports the resulting replica
+drift as `LifecycleBlocked`.
+
+See the [External example](../config/samples/capacity-external.yaml) with an
+HPA, and [ADR 0019](decisions/0019-external-capacity-mode.md).

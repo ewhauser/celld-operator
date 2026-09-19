@@ -22,6 +22,7 @@ These records capture the celld operator decisions agreed on 18 September 2026. 
 | [0016](0016-bucket-preflight-and-completion-boundary.md) | Bucket logical membership completion | Implemented experimental manual execution; automatic release-gated |
 | [0017](0017-persistent-launcher-and-graceful-retirement.md) | PersistentFleet launcher and graceful retirement | Implemented experimental same-host path; amended 19 September 2026 |
 | [0018](0018-per-fleet-tuning.md) | Per-fleet execution and lifecycle tuning, immutable at creation | Implemented |
+| [0019](0019-external-capacity-mode.md) | External capacity mode and the /scale subresource | Implemented; HPA-driven contraction release-gated |
 
 Read [runtime qualification](../runtime-qualification.md), [shutdown evidence](../shutdown-evidence.md), and [S3 recovery evidence](../s3-recovery-evidence.md) for implementation evidence and unresolved gates. The later S3 investigation corrects the earlier interpretation of sealed logs: sealing alone does not establish lossless recovery.
 

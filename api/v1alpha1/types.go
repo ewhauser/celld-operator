@@ -21,6 +21,7 @@ var AddToScheme = SchemeBuilder.AddToScheme
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=cf
+// +kubebuilder:subresource:scale:specpath=.spec.replicas,statuspath=.status.replicas,selectorpath=.status.labelSelector
 // +kubebuilder:validation:XValidation:rule="size(self.metadata.name) <= 40 && self.metadata.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')",message="fleet name must be a DNS label of at most 40 characters"
 // +kubebuilder:printcolumn:name="Ready",type=integer,JSONPath=`.status.readyReplicas`
 type CelldFleet struct {
@@ -286,6 +287,15 @@ type LifecycleStatus struct {
 }
 
 type CelldFleetStatus struct {
+	// Replicas and LabelSelector serve the /scale subresource: non-terminal pods
+	// of this fleet, including terminating ones, and the selector that matches
+	// exactly them. They never express permission to scale.
+	// Zero is serialized so the scale view always carries a count, but the schema
+	// does not require it: a status written before this field existed stays valid.
+	// +optional
+	Replicas int32 `json:"replicas"`
+	// Serialized selector for exactly this fleet's Pods, for the /scale subresource.
+	LabelSelector string `json:"labelSelector,omitempty"`
 	// Current operation or enabled policy target, otherwise spec.replicas; zero during deletion.
 	DesiredReplicas int32 `json:"desiredReplicas,omitempty"`
 	// Replica target currently applied to the owned Kubernetes workload.

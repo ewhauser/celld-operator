@@ -454,6 +454,9 @@ func (r *Reconciler) contractPersistent(ctx context.Context, f *fleet.CelldFleet
 		if op.Automatic && !r.Options.LocalTest {
 			return report("PersistentAutomaticUnqualified", "Automatic PersistentFleet contraction requires EKS/S3/EBS qualification")
 		}
+		if externalOwner(f) && !r.Options.LocalTest {
+			return report("ExternalContractionUnqualified", "Contraction requested through /scale by an external writer awaits the same EKS/S3/EBS release qualification as Automatic mode; additions proceed")
+		}
 		if !op.Automatic && f.Spec.Replicas >= op.From {
 			return report("DesiredChanged", "Persistent removal awaits matching intent or cancellation")
 		}

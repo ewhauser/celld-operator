@@ -32,6 +32,13 @@ Use the [scaling](../site/src/content/docs/operate/scaling.md),
 [runtime upgrade](../site/src/content/docs/operate/upgrade-runtime.md), and
 [deletion](../site/src/content/docs/operate/deletion.md) guides for commands and completion checks.
 
+- [x] Per-fleet execution and lifecycle tuning, immutable at creation, with the
+  historical constants as defaults. See [ADR 0018](decisions/0018-per-fleet-tuning.md).
+- [x] External capacity mode and the `/scale` subresource: one HPA owns
+  `spec.replicas`, the operator never writes it back, and HPA-requested
+  contraction shares the Automatic production gate. See [ADR 0019](decisions/0019-external-capacity-mode.md).
+
+
 ## Unsupported recovery and migration paths
 
 - Restarting an all-stopped PersistentFleet when required logs did not seal. Keep the disks and recovery records; no supported automatic retry exists.

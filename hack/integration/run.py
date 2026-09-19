@@ -53,9 +53,10 @@ def main():
     parser.add_argument('--maintenance',action='store_true')
     parser.add_argument('--faults',action='store_true',help='fault injection: manager crash points, node loss, S3 latency/partition via toxiproxy')
     parser.add_argument('--rwop-csi',action='store_true',help='serve PersistentFleet claims as ReadWriteOncePod through the per-node hostpath CSI driver instead of local-path RWO')
+    parser.add_argument('--external',action='store_true',help='External capacity mode: a HorizontalPodAutoscaler drives spec.replicas through the /scale subresource')
     args=parser.parse_args()
     persistent_lifecycle=args.persistent_lifecycle or args.maintenance or args.faults
-    bucket_lifecycle=args.bucket_lifecycle or persistent_lifecycle or args.ordered_bucket
+    bucket_lifecycle=args.bucket_lifecycle or persistent_lifecycle or args.ordered_bucket or args.external
     name = 'celld-step2-' + uuid.uuid4().hex[:8]
     process = None
     created = False
@@ -367,6 +368,10 @@ nodes:
             if args.faults:
                 import faults
                 faults.exercise(k, apply, get, wait_for, ready, curl, probe, name, CURL, set_operator_fault)
+                return
+            if args.external:
+                import external
+                external.exercise(k, apply, get, wait_for, ready, curl)
                 return
             if persistent_lifecycle:
                 # Local-path RWO is deliberately local-test-only: test same-host

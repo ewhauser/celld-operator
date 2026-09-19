@@ -1,0 +1,47 @@
+# External capacity mode: one HorizontalPodAutoscaler owns spec.replicas through
+# the CelldFleet /scale subresource. Never target the child Deployment.
+apiVersion: celld.example.com/v1alpha1
+kind: CelldFleet
+metadata:
+  name: agents
+  namespace: agents-prod
+spec:
+  qualification: Experimental
+  profile: Bucket
+  replicas: 3
+  serviceAccountName: agents-celld
+  storage:
+    bucket: agents-prod-celld
+    region: us-east-1
+  placement:
+    azCount: 3
+    zones: [us-east-1a, us-east-1b, us-east-1c]
+  capacity:
+    mode: External
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: agents
+  namespace: agents-prod
+spec:
+  scaleTargetRef:
+    apiVersion: celld.example.com/v1alpha1
+    kind: CelldFleet
+    name: agents
+  minReplicas: 3   # never below placement.azCount; the CRD rejects lower writes
+  maxReplicas: 30
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 600
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120

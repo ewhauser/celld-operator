@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       suite:
-        description: Suite to run (all, base, bucket, persistent, persistent-rwop, ordered-bucket, maintenance, faults)
+        description: Suite to run (all, base, bucket, persistent, persistent-rwop, ordered-bucket, maintenance, faults, external)
         default: all
         type: string
   pull_request:
@@ -31,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [base, bucket, persistent, persistent-rwop, ordered-bucket, maintenance, faults]
+        suite: [base, bucket, persistent, persistent-rwop, ordered-bucket, maintenance, faults, external]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - name: Select suite

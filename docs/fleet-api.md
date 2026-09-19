@@ -42,7 +42,7 @@ have the runtime's necessary bucket permissions; the production evidence reader 
 | `runtimeImage` | Requested celld release digest; see [runtime versions](runtime-versions.md) for accepted images and the one-way PersistentFleet upgrade |
 | `maintenance.paused` | False by default; suspend new and unissued actions, continue issued recovery |
 | `maintenance.restartToken` | Change the token to request a same-version restart; placement and shutdown checks must pass |
-| `capacity` | Optional shadow/automatic policy; see [capacity policy](capacity-policy.md) |
+| `capacity` | Optional policy: `Shadow`, `ScaleOut`, `Automatic`, or `External` (one `/scale` writer owns `spec.replicas`); see [capacity policy](capacity-policy.md) |
 | `serviceAccountName` | Existing account in the fleet namespace |
 | `storage.bucket` | Dedicated canonical bucket, lowercase letters/digits/hyphens |
 | `storage.region` | Explicit AWS region; immutable |
@@ -60,7 +60,10 @@ have the runtime's necessary bucket permissions; the production evidence reader 
 
 Fleet names must be DNS labels up to 40 characters. Only `replicas`, `capacity`, `runtimeImage`, `maintenance`, and an authorized Deployment-to-Ordered layout migration are mutable; `execution` and `lifecycle` tuning are fixed at creation because the operator never rolls out a changed pod template (see [ADR 0018](decisions/0018-per-fleet-tuning.md) and the [tuned example](../config/samples/tuned.yaml)).
 Invalid cross-field combinations fail admission; name/dependency errors also
-produce clear controller conditions. No `/scale` API is exposed. Storage resize, storage changes and placement changes are unsupported. Runtime
+produce clear controller conditions. The `/scale` subresource maps `spec.replicas`,
+`status.replicas` (non-terminal pods, including terminating ones) and
+`status.labelSelector`; writes through it are ordinary `spec.replicas` edits and
+pass every lifecycle gate (see [External mode](capacity-policy.md#external-mode)). Storage resize, storage changes and placement changes are unsupported. Runtime
 updates follow the explicit [version transition](runtime-versions.md) procedure. Manual scale-out is journaled. Bucket reductions execute under [logical membership completion](bucket-scale-in.md); launcher-managed PersistentFleet reductions execute through the [graceful retirement path](persistent-fleet-lifecycle.md), and fleets without the launcher remain blocked by the fencing gates. See [ADR 0012](decisions/0012-restart-safe-manual-lifecycle.md) and [ADR 0017](decisions/0017-persistent-launcher-and-graceful-retirement.md).
 
 The application Service is `<fleet>:8080`; label authorized client/ingress pods

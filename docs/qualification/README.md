@@ -180,3 +180,5 @@ Fault injection: [manager crash points, node loss and toxiproxy S3 latency/parti
 Cloud: [EKS smoke suite plan](eks-smoke-plan.md) (not implemented; defines the checks only the cloud can run).
 
 ReadWriteOncePod on kind: [PersistentFleet lifecycle on per-node CSI volumes](persistent-rwop/README.md).
+
+External capacity mode: [a real HPA driving spec.replicas through /scale on kind](external/README.md).

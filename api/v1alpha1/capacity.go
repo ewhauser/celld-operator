@@ -14,7 +14,9 @@ type CapacityPolicy struct {
 	RedistributionObservationSeconds int32 `json:"redistributionObservationSeconds,omitempty"`
 	// Shadow reports recommendations only. ScaleOut permits bounded additions. Automatic also requests removals, which remain disabled against production evidence.
 	// +kubebuilder:default=Shadow
-	// +kubebuilder:validation:Enum=Shadow;ScaleOut;Automatic
+	// External hands spec.replicas to one /scale writer (typically an HPA); the
+	// built-in policy computes nothing and the other policy fields are ignored.
+	// +kubebuilder:validation:Enum=Shadow;ScaleOut;Automatic;External
 	Mode string `json:"mode,omitempty"`
 	// Policy replica floor; must cover every configured availability zone. Manual overrides can exceed policy bounds.
 	// +kubebuilder:default=3
@@ -183,7 +185,7 @@ func (p *CapacityPolicy) Validate() error {
 	if p.RedistributionObservationSeconds < 30 || p.RedistributionObservationSeconds > 3600 {
 		return fmt.Errorf("capacity.redistributionObservationSeconds must be 30..3600")
 	}
-	if p.Mode != "Shadow" && p.Mode != "ScaleOut" && p.Mode != "Automatic" {
+	if p.Mode != "Shadow" && p.Mode != "ScaleOut" && p.Mode != "Automatic" && p.Mode != "External" {
 		return fmt.Errorf("invalid capacity mode")
 	}
 	if p.MinReplicas < 1 || p.MinReplicas > 100 {

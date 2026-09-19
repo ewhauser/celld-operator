@@ -107,6 +107,11 @@ integration-faults:
 integration-persistent-rwop:
 	python3 hack/integration/run.py --persistent-lifecycle --rwop-csi
 
+# External capacity mode: a real HPA drives spec.replicas through /scale.
+.PHONY: integration-external
+integration-external:
+	python3 hack/integration/run.py --external
+
 # Documentation site (Astro + Starlight in site/). Pages are synced from docs/,
 # config/, charts/ and cmd/ on every build; nothing under site/src/content is
 # edited by hand except the start/, concepts/ and reference/ sections.
