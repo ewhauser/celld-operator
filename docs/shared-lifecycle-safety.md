@@ -123,9 +123,12 @@ recovery; a timeout never substitutes for fencing or recovery completion.
 Request cancellation also propagates before any journal/replica write.
 
 An unsupported production removal is persisted in `Blocked`, without inventing
-a qualified target capture. It cannot transition into execution. New desired
-additions (manual or a fresh actionable capacity decision) can supersede a
-blocked/unissued removal through `Canceling`:
+a qualified target capture. It cannot transition into execution. A desired count
+above the operation's original count (a manual addition or a fresh actionable
+capacity decision) supersedes a blocked/unissued removal, and a manual removal is
+withdrawn when `spec.replicas` returns to at least its original count; a recorded
+automatic removal freezes instead of canceling when the policy merely stops
+recommending it. Every case goes through `Canceling`:
 
 1. Persist cancellation intent on the reservation.
 2. CAS a cancellation marker onto the workload, invalidating delayed old replica

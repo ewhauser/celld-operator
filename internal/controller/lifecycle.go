@@ -495,7 +495,14 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 	}
 	if op.To < op.From && (op.Phase == "Intent" || op.Phase == "Blocked") && maintenanceFence(f) == "" {
 		target, _ := r.capacityTarget(ctx, f, j)
-		if target > op.From {
+		// An addition supersedes any unissued removal. A manual removal is also
+		// withdrawn when spec.replicas returns to at least the original count:
+		// nobody wants it anymore. A recorded automatic removal is not withdrawn
+		// merely because the policy's current target equals the applied count
+		// (cooldown, stabilization); it freezes and rechecks before issuance.
+		// Every cancellation goes through the workload-CAS fence, so a delayed
+		// issuer cannot still win.
+		if target > op.From || (!op.Automatic && f.Spec.Replicas >= op.From) {
 			op.Phase = "Canceling"
 			return save(j)
 		}

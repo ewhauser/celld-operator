@@ -96,7 +96,10 @@ unwired. The controller does not accept externally supplied JSON as fencing proo
 
 A changed desired count never chooses another target mid-operation. Before an
 unissued removal, a reversal freezes the existing intent, because a delayed leader
-might still be attempting its CAS. An already-issued removal continues recovery
+might still be attempting its CAS (superseded by ADR 0015's cancellation fence:
+since 19 September 2026 a manual reversal to at least the original count withdraws
+the unissued manual removal through the workload CAS, the same path an addition
+uses; recorded automatic removals still freeze per ADR 0013). An already-issued removal continues recovery
 regardless of the new desired count. Uncertain recovery blocks all further
 contraction. Additive requests during recovery are conservatively queued rather
 than reusing a removed persistent identity before its recovery is established.
