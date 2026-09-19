@@ -257,13 +257,7 @@ func TestPersistentSurvivorReplacementBlocksOnChangedHostIncarnation(t *testing.
 			if err := x.reconcileLifecycle(t); err != nil {
 				t.Fatal(err)
 			}
-			// A rebooted host is an uncertain admitted member, reported before
-			// scheduling; a replaced claim is a scheduling identity failure.
-			want := "PersistentSchedulingBlocked"
-			if name == "node rebooted" {
-				want = "PersistentMemberUncertain"
-			}
-			if got := readyReason(t, x.r, x.f); got != want {
+			if got := readyReason(t, x.r, x.f); got != "PersistentSchedulingBlocked" {
 				t.Fatalf("%s admitted: %s", name, got)
 			}
 			if err := x.r.Get(ctx, client.ObjectKeyFromObject(gated), gated); err != nil {

@@ -24,7 +24,7 @@ func archiveFixture(t *testing.T) (*Reconciler, *fleet.CelldStorageReservation, 
 	if err := r.Get(t.Context(), client.ObjectKeyFromObject(res), res); err != nil {
 		t.Fatal(err)
 	}
-	j := &lifecycleJournal{Version: 9, RuntimeImage: Image, Initial: 3, Applied: 3, Claims: map[string]types.UID{}, Loss: "sticky loss"}
+	j := &lifecycleJournal{Version: 8, RuntimeImage: Image, Initial: 3, Applied: 3, Claims: map[string]types.UID{}, Loss: "sticky loss"}
 	for i := range 4000 {
 		j.History = append(j.History, lifecycleCompletion{ID: fmt.Sprintf("operation-%d", i), TargetGeneration: fmt.Sprintf("generation-%d", i), Outcome: "retired without discarding authority"})
 		j.Sessions = append(j.Sessions, v050.Session{Node: fmt.Sprintf("node-%d", i), Generation: fmt.Sprintf("generation-%d", i), Epoch: 1})

@@ -60,3 +60,18 @@ long as exactly one effect was issued.
 - Pinned digest images are imported into the nodes from the local Docker cache
   with `ctr images import --index-name`, so slow registries no longer abort a
   run; images absent from the cache are still pulled with retries.
+
+## Timing exposure in scenario 2 (19 September 2026, Go harness)
+
+A rerun through the Go port of the harness failed scenario 2 at "recovered
+manager issues the journaled contraction exactly once". The manager did issue
+the decrement after the fault was withdrawn; the operation then stayed in
+`Recovering` with `BucketRecoveryBlocked: unresolved bucket writer record
+missing`. While the manager was crash-looping, the runtime garbage-collected the
+retired replica's node record before any manager observed its expiry, which is
+the documented Bucket GC-before-positive-proof gap, not a regression. The Python
+run passed because its crash-loop window was shorter. The scenario is therefore
+timing-sensitive: a manager outage longer than the runtime's record GC window
+during an issued Bucket contraction blocks that operation until the runtime
+evidence contract changes. The leader-failover scenario has its own suite
+(`make integration-leader`) so it does not depend on this window.

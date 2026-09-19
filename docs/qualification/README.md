@@ -182,3 +182,5 @@ Cloud: [EKS smoke suite plan](eks-smoke-plan.md) (not implemented; defines the c
 ReadWriteOncePod on kind: [PersistentFleet lifecycle on per-node CSI volumes](persistent-rwop/README.md).
 
 External capacity mode: [a real HPA driving spec.replicas through /scale on kind](external/README.md).
+
+Leader loss: [standby completes an issued contraction once](leader/README.md).

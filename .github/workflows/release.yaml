@@ -26,6 +26,22 @@ jobs:
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
         run: python3 hack/package-release.py --version "$RELEASE_VERSION" --image ghcr.io/ewhauser/celld-operator --digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - name: Launcher and controller tests on both Linux architectures
+        # The launcher's lock inheritance and PID 1 behavior are Linux-specific and
+        # arch-independent only in principle; run the real suites under each arch
+        # inside the pinned runtime image, which supplies /bin/sh for the fixtures.
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            for pkg in launcher controller; do
+              CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go test -c -o "bin/tests/${pkg}-${arch}.test" "./internal/${pkg}"
+              docker run --rm --platform "linux/${arch}" \
+                -v "$PWD/bin/tests:/t:ro" -v "$PWD:/src:ro" -w "/src/internal/${pkg}" \
+                --entrypoint "/t/${pkg}-${arch}.test" \
+                ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8 -test.count=1
+            done
+          done
   publish:
     needs: validate
     runs-on: ubuntu-latest
@@ -68,6 +84,23 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
           provenance: mode=max
           sbom: true
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - name: Smoke test the published image on both architectures
+        # A multi-arch manifest proves nothing about either binary. Run each platform
+        # of the exact pushed digest: version banner and the launcher install path.
+        env:
+          IMAGE: ${{ steps.repository.outputs.image }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect "$IMAGE@$DIGEST" --format '{{range .Manifest.Manifests}}{{.Platform.OS}}/{{.Platform.Architecture}}{{"\n"}}{{end}}' | tee platforms.txt
+          grep -qx linux/amd64 platforms.txt && grep -qx linux/arm64 platforms.txt
+          for arch in amd64 arm64; do
+            version="$(docker run --rm --platform "linux/${arch}" "$IMAGE@$DIGEST" --version)"
+            test "$version" = "$RELEASE_VERSION"
+            docker run --rm --platform "linux/${arch}" --entrypoint /celld-launcher "$IMAGE@$DIGEST" install /home/nonroot/launcher/celld-launcher
+          done
       - name: Publish immutable chart and experimental release artifacts
         env:
           RELEASE_VERSION: ${{ github.ref_name }}

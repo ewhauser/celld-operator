@@ -183,8 +183,8 @@ fleet or an unsupported restart/image request can remain Ready while Blocked is
 also true. Workload status must cover its current generation; missing or replaced
 fleet identities cannot supply availability. `Ready` is not a recovery certificate.
 
-The journal is currently version 9. Every earlier version (1 through 8) is read
-conservatively and rewritten as 9 on the next durable write; an older operator
+The journal is currently version 8. Every earlier version (1 through 7) is read
+conservatively and rewritten as 8 on the next durable write; an older operator
 binary rejects a newer journal rather than ignoring authority it does not know.
 Downgrading after advancement is not a supported rollback procedure. The version
 steps and what each added are recorded in the ADRs; the compatibility rules and

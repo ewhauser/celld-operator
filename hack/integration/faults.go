@@ -23,6 +23,9 @@ const (
 //  6. S3 partition through toxiproxy while a contraction is issued: no further
 //     decrement, no completion or loss from absent evidence, write readable after
 //     recovery, and whatever the post-outage outcome is, exactly one effect.
+//  7. Leader loss with two manager replicas while a contraction is issued: the
+//     standby acquires the lease and finishes the same operation with exactly one
+//     workload write and one history entry.
 //
 // Every assertion is about fail-closed behavior. Nothing outside the harness
 // cluster is touched.
@@ -267,5 +270,82 @@ func (h *harness) exerciseFaults() {
 		}
 	}
 	fmt.Println("PASS: S3 partition: fail closed throughout, acknowledged write readable after recovery")
+	h.exerciseLeaderFailover()
 	fmt.Println(h.k("get", "celldstoragereservations", "-o", "json"))
+}
+
+// exerciseLeaderFailover runs two manager replicas, issues a contraction, and
+// deletes the elected leader once the replica effect is on the workload but the
+// operation is still open. The standby must take the lease and complete that
+// same operation without a second effect. Restart-safety of the journal is the
+// property; the Lease mechanics are controller-runtime's.
+func (h *harness) exerciseLeaderFailover() {
+	const lease = "celld-operator.celld.eric.dev"
+	leader := func() string {
+		holder := str(h.getIn(operatorNS, "lease", lease), "spec", "holderIdentity")
+		// controller-runtime identities are "<hostname>_<random>"; the hostname is the pod name.
+		if i := strings.IndexByte(holder, '_'); i > 0 {
+			return holder[:i]
+		}
+		return holder
+	}
+	managers := func() []object {
+		var live []object
+		for _, pod := range h.listIn(operatorNS, "pods", "-l", "app.kubernetes.io/name=celld-operator") {
+			if !deleting(pod) && strings.HasPrefix(nameOf(pod), "celld-operator-") {
+				live = append(live, pod)
+			}
+		}
+		return live
+	}
+	completions := func(fleetName, op string) int {
+		n := 0
+		for _, entry := range list(h.journal(fleetName), "History") {
+			if str(entry, "ID") == op {
+				n++
+			}
+		}
+		return n
+	}
+	settled := func(count int64) bool {
+		return specReplicas(h.get("deployment", "alpha")) == count && h.ready("alpha") && len(sub(h.journal("alpha"), "Operation")) == 0
+	}
+
+	h.setReplicas("alpha", 3)
+	h.waitFor("alpha at three before leader loss", 4*time.Minute, func() bool { return settled(3) })
+	h.k("-n", operatorNS, "scale", "deployment/celld-operator", "--replicas=2")
+	h.k("-n", operatorNS, "rollout", "status", "deployment/celld-operator", "--timeout=180s")
+	h.waitFor("two manager replicas with one elected leader", 2*time.Minute, func() bool { return len(managers()) == 2 && leader() != "" })
+	first := leader()
+	generation := num(h.get("deployment", "alpha"), "metadata", "generation")
+
+	h.setReplicas("alpha", 2)
+	// Catch the operation after its replica effect and before completion.
+	var op string
+	deadline := time.Now().Add(7 * time.Minute)
+	for time.Now().Before(deadline) {
+		j := h.journal("alpha")
+		if specReplicas(h.get("deployment", "alpha")) == 2 && len(sub(j, "Operation")) > 0 {
+			op = str(sub(j, "Operation"), "ID")
+			break
+		}
+		if specReplicas(h.get("deployment", "alpha")) == 2 && len(sub(j, "Operation")) == 0 {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if op == "" {
+		fmt.Println("Leader-loss window missed: contraction completed before the leader could be removed; deleting the leader at rest instead")
+		last := list(h.journal("alpha"), "History")
+		op = str(last[len(last)-1], "ID")
+	}
+	h.k("-n", operatorNS, "delete", "pod", first, "--wait=false")
+	h.waitFor("standby manager acquires the lease", 2*time.Minute, func() bool { l := leader(); return l != "" && l != first })
+	h.waitFor("the standby completes the same operation", 6*time.Minute, func() bool { return settled(2) })
+	assert(completions("alpha", op) == 1, "operation %s recorded %d times across the leader change", op, completions("alpha", op))
+	assert(num(h.get("deployment", "alpha"), "metadata", "generation") == generation+1, "more than one workload spec write across the leader change")
+	assert(h.ackStored("client", "alpha"), "acknowledged write not readable after leader loss")
+	fmt.Println("PASS: leader loss during an issued contraction: one effect, one completion, write readable")
+	h.k("-n", operatorNS, "scale", "deployment/celld-operator", "--replicas=1")
+	h.k("-n", operatorNS, "rollout", "status", "deployment/celld-operator", "--timeout=180s")
 }

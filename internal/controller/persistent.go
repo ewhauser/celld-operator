@@ -708,9 +708,6 @@ func (r *Reconciler) finishReactivation(ctx context.Context, f *fleet.CelldFleet
 				continue
 			}
 			if reactivatedNode(f.Name, m.Node, op.From, op.To) {
-				if prior.Superseded && !prior.Retired {
-					continue // resolved by its same-kernel successor's lock, never by a receipt
-				}
 				if !prior.Retired || !prior.Stopped || !prior.RestartDenied || prior.Generation == m.Generation || prior.ClaimUID != m.ClaimUID || prior.VolumeUID != m.VolumeUID || prior.VolumeHandle != m.VolumeHandle {
 					return fail(errors.New("reactivation lacks retired predecessor or unchanged volume identity"))
 				}

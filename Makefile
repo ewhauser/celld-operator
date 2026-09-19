@@ -5,10 +5,20 @@ GO_PACKAGES := ./...
 RACE ?= -race
 GOLANGCI_LINT_VERSION ?= v2.13.2
 GOLANGCI_LINT := GOTOOLCHAIN=go1.27.1 CGO_ENABLED=0 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+# A native lint binary that can analyze another GOOS; `go run` under GOOS=linux
+# would build a Linux executable that cannot run on a macOS host.
+GOLANGCI_LINT_BIN := bin/tools/golangci-lint
+RUNTIME_IMAGE := ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8
+HOST_GOARCH := $(shell go env GOARCH)
 
-.PHONY: check build test vet fmt lint lint-new image clean
+.PHONY: check check-full build test vet fmt lint lint-linux lint-new test-linux image clean
 
-check: build test lint
+# Linux-only files (launcher process handling, build tags) are invisible to a
+# macOS lint run; lint-linux analyzes the Linux build so they cannot reach CI red.
+check: build test lint lint-linux
+
+# Everything check does plus the suites that need Docker or envtest binaries.
+check-full: check test-linux test-envtest
 
 build:
 	go build -o /dev/null $(GO_PACKAGES)
@@ -35,6 +45,21 @@ fmt:
 
 lint:
 	$(GOLANGCI_LINT) run ./...
+
+$(GOLANGCI_LINT_BIN):
+	GOTOOLCHAIN=go1.27.1 CGO_ENABLED=0 GOBIN=$(CURDIR)/bin/tools go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+
+lint-linux: $(GOLANGCI_LINT_BIN)
+	GOOS=linux $(GOLANGCI_LINT_BIN) run ./...
+
+# Cross-compile the platform-sensitive packages' tests and run them on Linux in
+# the pinned runtime image (which supplies /bin/sh for the launcher fixtures).
+# No race detector: that needs cgo. Requires Docker.
+test-linux:
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(HOST_GOARCH) go test -c -o bin/tests/launcher.test ./internal/launcher
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(HOST_GOARCH) go test -c -o bin/tests/controller.test ./internal/controller
+	docker run --rm --platform linux/$(HOST_GOARCH) -e TZ=UTC -v $(CURDIR)/bin/tests:/t:ro -v $(CURDIR):/src:ro -w /src/internal/launcher --entrypoint /t/launcher.test $(RUNTIME_IMAGE) -test.count=1
+	docker run --rm --platform linux/$(HOST_GOARCH) -e TZ=UTC -v $(CURDIR)/bin/tests:/t:ro -v $(CURDIR):/src:ro -w /src/internal/controller --entrypoint /t/controller.test $(RUNTIME_IMAGE) -test.count=1
 
 lint-new:
 	$(GOLANGCI_LINT) run --new-from-rev=HEAD ./...
@@ -101,6 +126,11 @@ integration-maintenance:
 .PHONY: integration-faults
 integration-faults:
 	go run ./hack/integration --faults
+
+# Two manager replicas; the leader is deleted while a contraction is issued.
+.PHONY: integration-leader
+integration-leader:
+	go run ./hack/integration --leader-failover
 
 # PersistentFleet lifecycle with ReadWriteOncePod claims on the per-node hostpath CSI driver.
 .PHONY: integration-persistent-rwop

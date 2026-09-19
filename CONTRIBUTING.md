@@ -8,7 +8,10 @@ also need a C compiler. The Make targets and tooling follow
 local revision `bb37f8eb656f1622f170017464e990d88b855a5a` as the baseline.
 
 ```sh
-make check       # Build, race-enabled tests, and lint
+make check       # Build, race-enabled tests, lint, and lint of the Linux build
+make check-full  # check plus Linux container test runs and the envtest suite
+make test-linux  # Launcher and controller tests cross-compiled and run on Linux (Docker)
+make lint-linux  # golangci-lint analyzing GOOS=linux (catches Linux-only files)
 make build       # Build packages and bin/celld-operator
 make test        # go test -race ./...
 make test-envtest # Reconciler and journal tests against a real kube-apiserver/etcd (envtest)
@@ -28,6 +31,13 @@ error handling, HTTP body closure, modernization, static analysis, and its
 gocritic settings. Use standard-library `flag` for command options and return
 errors to `main`; use `log/slog` when runtime logging is introduced. Keep
 implementation packages under `internal/` as they are added.
+
+`make test-linux` cross-compiles the launcher and controller test binaries for
+Linux and runs them in the pinned celld image with Docker, under `TZ=UTC`. Two
+CI-only failures reached `main` before this target existed: a gocritic finding in
+a Linux-only file and a `time.Time` comparison that only differs in a UTC zone.
+Docker Desktop must share the repository path; the default `/Users` share works,
+`/tmp` may not.
 
 `make test-envtest` downloads pinned kube-apiserver and etcd binaries through
 `setup-envtest` on first use and runs the `TestEnvtest*` cases in

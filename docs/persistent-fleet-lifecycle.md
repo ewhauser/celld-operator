@@ -157,14 +157,6 @@ controller therefore cancels it through the same workload-CAS fence as an
 Intent-phase removal and records `CanceledBeforeIssue`. A launcher reporting
 `Stopping`, `Stopped`, an unrequested exit or a blocked lock is never canceled.
 
-In steady state, with no operation in flight, the controller admits every
-running invocation into the retained history: pod UID, container, launcher
-invocation and generation, Node UID, boot ID, provider ID, zone, disk nonce and
-PVC/PV/volume identity. Admission is observational and never resolves an earlier
-entry; a running generation that follows an unresolved admitted writer on the
-same ordinal blocks with `PersistentAdmissionBlocked` for investigation. The
-record is what a later uncertain failure can be fenced against.
-
 A survivor whose pod is recreated without any operation (eviction, kubelet
 restart) may return only onto its recorded host incarnation and retained volume:
 Node UID, boot ID, hostname, PVC UID, PV UID and volume handle must be unchanged
@@ -188,15 +180,10 @@ volume identity keeps the gate closed and the fleet reports
   current private metadata lacks an externally observable bucket-tiering watermark
   to authorize that retirement. Supporting it requires another concrete runtime
   evidence contract; launcher termination alone is insufficient.
-- Unexpected launcher/container generations, loss markers, missing historical
-  authority, cross-AZ reuse, unqualified storage handoffs, and changed storage
-  bindings remain blocked. An uncertain node failure of an admitted member is
-  reported, never repaired, unless an administrator authorizes the
-  [exact-instance recovery](infrastructure-fencing.md#recovering-an-unreachable-member);
-  a member that was never admitted stays pinned to its lost host. There is no
-  force-delete/detach or administrator-written completion switch: the only pod
-  the operator removes without a grace period is one whose instance EC2 has
-  positively reported terminated.
+- Uncertain node failures, unexpected launcher/container generations, loss markers,
+  missing historical authority, cross-AZ reuse, unqualified storage handoffs,
+  and changed storage bindings remain blocked. There is no force-delete/detach or
+  administrator-written completion switch.
 - Production requests use `ReadWriteOncePod` on EBS CSI. The operator expects the
   externally provided CSI driver to support it. The local test mode uses RWO
   hostPath provisioning solely to exercise same-host semantics; it is not an EBS

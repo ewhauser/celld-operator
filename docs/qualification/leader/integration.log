@@ -1,0 +1,32 @@
+go run ./hack/integration --leader-failover
+Creating isolated cluster celld-step2-f6182578
+Loaded pinned image from local cache: ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8
+Pulling into disposable node: curlimages/curl:8.12.1
+PASS: create two isolated test buckets
+PASS: qualification app deployed to bucket-alpha
+PASS: qualification app deployed to bucket-beta
+PASS: pre-existing PVC blocks initial StatefulSet creation
+PASS: both runtime profiles ready through operator reconciliation
+PASS: strict replicas use distinct nodes within the configured zone
+PASS: strict placement blocks a missing eligible zone
+PASS: probe same-fleet running
+PASS: probe client running
+PASS: probe client-beta running
+PASS: probe untrusted running
+PASS: probe operator running
+PASS: application writes readable only in their own fleet storage scope
+PASS: same-fleet/operator peer access, cross-fleet/untrusted/client peer denial, ClusterIP health routing
+PASS: cross-namespace storage conflict blocked
+PASS: fleet in a namespace without the fleet Role is reported, not reconciled
+PASS: schema rejects invalid specs and lifecycle mutations
+PASS: additional probe and bucket override are reported as unsafe drift
+PASS: restored original template matches normalized API defaults
+PASS: alpha at three before leader loss
+PASS: two manager replicas with one elected leader
+PASS: standby manager acquires the lease
+PASS: the standby completes the same operation
+PASS: leader loss during an issued contraction: one effect, one completion, write readable
+    ],
+
+Cleaning up only cluster celld-step2-f6182578
+exit=0

@@ -22,7 +22,6 @@ kubectl --context YOUR_CONTEXT -n fleets get events --sort-by=.lastTimestamp
 | `UnsupportedTransition` | Compare current and requested image with [compatibility](../../reference/compatibility/). Only v0.4.1 → v0.5.0 on launcher-managed PersistentFleet is implemented. |
 | `OperationStalled`, `RecoveryBlocked`, `MaintenanceRecoveryBlocked` | Inspect the named target, Pod events, PVC, launcher, and operator logs. The operation may have issued an effect and must recover that exact effect. |
 | `DeletionBlocked` | Identify the missing exact stop receipt, sealed log, lease expiry, or historical writer evidence. The finalizer retains the fleet until proof is complete. |
-| `PersistentMemberUncertain`, `InfrastructureFencing`, `PersistentRecoveryBlocked` | A member's host is gone or unreachable. Confirm the instance is dedicated and tagged, then authorize fencing of that exact invocation with the annotation named in the message; see [infrastructure fencing](../../contracts/infrastructure-fencing/). After termination, expect the replacement to wait for the peers' seal and for the stale attachment to clear. |
 | `PossibleDataLoss`, `JournalInvalid`, `StorageIdentityConflict` | Preserve disks, bucket contents, reservation, and journal archives. Investigate or restore evidence; do not clear the journal. |
 
 Check the manager logs if the condition does not explain the wait:

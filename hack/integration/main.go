@@ -26,6 +26,7 @@ type options struct {
 	faults              bool
 	rwopCSI             bool
 	external            bool
+	leaderFailover      bool
 }
 
 type harness struct {
@@ -63,6 +64,7 @@ func realMain() (code int) {
 	fs.BoolVar(&opts.faults, "faults", false, "fault injection: manager crash points, node loss, S3 latency/partition via toxiproxy")
 	fs.BoolVar(&opts.rwopCSI, "rwop-csi", false, "serve PersistentFleet claims as ReadWriteOncePod through the per-node hostpath CSI driver instead of local-path RWO")
 	fs.BoolVar(&opts.external, "external", false, "External capacity mode: a HorizontalPodAutoscaler drives spec.replicas through the /scale subresource")
+	fs.BoolVar(&opts.leaderFailover, "leader-failover", false, "two manager replicas; the elected leader is deleted while a contraction is issued")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -92,7 +94,7 @@ func realMain() (code int) {
 		root:                root,
 		name:                "celld-step2-" + hex.EncodeToString(suffix),
 	}
-	h.bucketLifecycle = opts.bucketLifecycle || h.persistentLifecycle || opts.orderedBucket || opts.external
+	h.bucketLifecycle = opts.bucketLifecycle || h.persistentLifecycle || opts.orderedBucket || opts.external || opts.leaderFailover
 	h.tmp, err = os.MkdirTemp("", h.name)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -154,6 +156,9 @@ func (h *harness) exercise() {
 		h.exerciseFaults()
 	case h.opts.external:
 		h.exerciseExternal()
+	case h.opts.leaderFailover:
+		h.exerciseLeaderFailover()
+		fmt.Println(h.k("get", "celldstoragereservations", "-o", "json"))
 	case h.persistentLifecycle:
 		h.exercisePersistentLifecycle()
 	default:
