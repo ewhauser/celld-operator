@@ -159,7 +159,7 @@ func (r *Reconciler) executePersistentMaintenance(ctx context.Context, f *fleet.
 		m.Phase = "Recovering"
 		return save()
 	case "Recovering":
-		if err := r.schedulePersistent(ctx, f, j); err != nil {
+		if err := r.schedulePersistent(ctx, f, res, j); err != nil {
 			return block(err)
 		}
 		members, err := r.persistentMembers(ctx, f, &view, j.Applied, false)
@@ -388,7 +388,7 @@ func (r *Reconciler) shutdownInventory(ctx context.Context, f *fleet.CelldFleet,
 	}
 	for _, session := range j.Inventory.Sessions {
 		if !slices.ContainsFunc(members, func(m persistentMember) bool { return m.Node == session.Node && m.Generation == session.Generation }) && !slices.ContainsFunc(j.PersistentHistory, func(m persistentMember) bool {
-			return m.Node == session.Node && m.Generation == session.Generation && m.Retired && m.Stopped && m.RestartDenied
+			return m.Node == session.Node && m.Generation == session.Generation && resolvedMember(m)
 		}) {
 			return inventory, errors.New("unresolved historical shutdown session")
 		}
@@ -397,7 +397,7 @@ func (r *Reconciler) shutdownInventory(ctx context.Context, f *fleet.CelldFleet,
 		i := slices.IndexFunc(members, func(m persistentMember) bool { return m.Node == n.Name && m.Generation == n.Generation })
 		if i < 0 {
 			if !slices.ContainsFunc(j.PersistentHistory, func(m persistentMember) bool {
-				return m.Node == n.Name && m.Generation == n.Generation && m.Retired && m.Stopped && m.RestartDenied
+				return m.Node == n.Name && m.Generation == n.Generation && resolvedMember(m)
 			}) {
 				return inventory, errors.New("unknown shutdown storage writer")
 			}

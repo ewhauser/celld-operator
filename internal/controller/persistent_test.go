@@ -216,7 +216,7 @@ func TestPersistentGracefulContractionNeedsFollowerBarrier(t *testing.T) {
 	if e := p.r.Create(t.Context(), pod); e != nil {
 		t.Fatal(e)
 	}
-	if e := p.r.schedulePersistent(t.Context(), p.f, p.j); e != nil {
+	if e := p.r.schedulePersistent(t.Context(), p.f, p.res, p.j); e != nil {
 		t.Fatal(e)
 	}
 	if e := p.r.Get(t.Context(), client.ObjectKeyFromObject(pod), pod); e != nil {
@@ -354,7 +354,7 @@ func TestPersistentReactivationRejectsChangedPVBeforeScheduling(t *testing.T) {
 	if err := p.r.Update(t.Context(), pv); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.r.schedulePersistent(t.Context(), p.f, p.j); err == nil {
+	if err := p.r.schedulePersistent(t.Context(), p.f, p.res, p.j); err == nil {
 		t.Fatal("changed physical volume admitted")
 	}
 	if err := p.r.Get(t.Context(), client.ObjectKeyFromObject(pod), pod); err != nil {

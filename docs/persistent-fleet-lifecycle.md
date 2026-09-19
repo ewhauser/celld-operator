@@ -133,6 +133,26 @@ unissued Intent/Blocked operation retains the existing workload-CAS cancellation
 mechanism. Already stopped/recovering operations remain unresolved on missing
 proof; neither deadlines nor restored desired counts manufacture success.
 
+A `Stopping` operation whose launcher still reports `Running` is provably
+unissued once every stop request for it has expired: requests carry an expiry
+no later than the operation deadline, and the launcher rejects expired ones
+before changing phase. One minute after the deadline (a clock-skew margin) the
+controller therefore cancels it through the same workload-CAS fence as an
+Intent-phase removal and records `CanceledBeforeIssue`. A launcher reporting
+`Stopping`, `Stopped`, an unrequested exit or a blocked lock is never canceled.
+
+A survivor whose pod is recreated without any operation (eviction, kubelet
+restart) may return only onto its recorded host incarnation and retained volume:
+Node UID, boot ID, hostname, PVC UID, PV UID and volume handle must be unchanged
+and no pod with the previous UID may remain. The controller records the old
+invocation as `Superseded` before releasing the scheduling gate. Exclusion
+authority for that return is the successor launcher's exclusive lock; the
+superseded generation counts as resolved history once its lease has expired and
+its log is sealed or absent, the same evidence required of a retired donor minus
+the stop receipt that no unrequested replacement can have. A changed host or
+volume identity keeps the gate closed and the fleet reports
+`PersistentSchedulingBlocked`.
+
 ## Supported and blocked paths
 
 - Experimental **manual graceful contraction from at least three to at least two**

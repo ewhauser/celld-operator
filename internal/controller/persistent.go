@@ -26,7 +26,23 @@ type persistentMember struct {
 	Epoch                                                                                                                             uint64
 	Ensemble                                                                                                                          []string
 	Stopped, Retired, RestartDenied                                                                                                   bool
+	// Superseded marks a survivor invocation whose pod was recreated and admitted
+	// back onto the same host incarnation and retained volume. Exclusion authority
+	// is the successor launcher's exclusive lock, not a stop receipt.
+	Superseded bool
 }
+
+// resolvedMember reports whether a historical invocation no longer needs a live
+// record: positively retired through the launcher, or superseded on the same host.
+func resolvedMember(m persistentMember) bool {
+	return (m.Retired && m.Stopped && m.RestartDenied) || m.Superseded
+}
+
+// stopExpiryGrace bounds clock skew between the manager and a launcher. A stop
+// request carries NotAfterMS no later than the operation deadline, so once the
+// launcher still reports Running this long after the deadline, no request for
+// this operation can be accepted anymore and the removal is provably unissued.
+const stopExpiryGrace = time.Minute
 
 func sameInvocation(a, b persistentMember) bool {
 	return a.Node == b.Node && a.PodUID == b.PodUID && a.Container == b.Container && a.Host == b.Host && a.HostUID == b.HostUID && a.BootID == b.BootID && a.Invocation == b.Invocation && a.Generation == b.Generation && a.ClaimUID == b.ClaimUID && a.VolumeUID == b.VolumeUID && a.VolumeHandle == b.VolumeHandle && a.DiskID == b.DiskID
@@ -260,7 +276,7 @@ func (r *Reconciler) assessPersistent(ctx context.Context, f *fleet.CelldFleet, 
 	}
 	for _, s := range j.Inventory.Sessions {
 		if !slices.ContainsFunc(members, func(m persistentMember) bool { return m.Node == s.Node && m.Generation == s.Generation }) && !slices.ContainsFunc(history, func(m persistentMember) bool {
-			return m.Node == s.Node && m.Generation == s.Generation && ((m.Retired && m.Stopped && m.RestartDenied) || (stopping && m.Node == op.TargetPod))
+			return m.Node == s.Node && m.Generation == s.Generation && (resolvedMember(m) || (stopping && m.Node == op.TargetPod))
 		}) {
 			return nil, time.Time{}, errors.New("unresolved historical persistent generation")
 		}
@@ -280,7 +296,7 @@ func (r *Reconciler) assessPersistent(ctx context.Context, f *fleet.CelldFleet, 
 		donor := stopping && n.Name == op.TargetPod
 		if index < 0 && !donor {
 			if !slices.ContainsFunc(history, func(m persistentMember) bool {
-				return m.Node == n.Name && m.Generation == n.Generation && m.Retired && m.Stopped && m.RestartDenied
+				return m.Node == n.Name && m.Generation == n.Generation && resolvedMember(m)
 			}) {
 				return nil, time.Time{}, errors.New("unknown persistent storage writer")
 			}
@@ -527,7 +543,14 @@ func (r *Reconciler) contractPersistent(ctx context.Context, f *fleet.CelldFleet
 				}
 			}
 			if op.Stalled || !r.capacityNow().Before(op.Deadline) {
-				return report("OperationStalled", "No graceful stop issued before deadline")
+				if !r.capacityNow().Before(op.Deadline.Add(stopExpiryGrace)) {
+					// The launcher positively reports Running and every stop request for
+					// this operation has expired: nothing was issued. Cancel through the
+					// ordinary workload-CAS fence instead of holding the fleet forever.
+					op.Phase = "Canceling"
+					return save()
+				}
+				return report("OperationStalled", "No graceful stop issued before deadline; canceling once every stop request has provably expired")
 			}
 			members, _, err := r.assessPersistent(ctx, f, j, false, false)
 			if err != nil {
@@ -687,7 +710,7 @@ func (r *Reconciler) finishReactivation(ctx context.Context, f *fleet.CelldFleet
 						return fail(err)
 					}
 				}
-			} else if !prior.Retired && !sameInvocation(prior, *m) {
+			} else if !prior.Retired && !prior.Superseded && !sameInvocation(prior, *m) {
 				return fail(errors.New("survivor changed during reactivation"))
 			}
 		}

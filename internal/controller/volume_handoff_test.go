@@ -129,7 +129,7 @@ func TestTransferableDiskSchedulingDoesNotRequireOldHost(t *testing.T) {
 	if err := p.r.Update(t.Context(), pod); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.r.schedulePersistent(t.Context(), p.f, p.j); err != nil {
+	if err := p.r.schedulePersistent(t.Context(), p.f, p.res, p.j); err != nil {
 		t.Fatal(err)
 	}
 	if err := p.r.Get(t.Context(), client.ObjectKeyFromObject(pod), pod); err != nil {

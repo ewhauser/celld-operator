@@ -156,7 +156,7 @@ func healthyHost(node *corev1.Node) bool {
 		return c.Type == corev1.NodeReady && c.Status == corev1.ConditionTrue
 	})
 }
-func (r *Reconciler) schedulePersistent(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal) error {
+func (r *Reconciler) schedulePersistent(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, j *lifecycleJournal) error {
 	pods := &corev1.PodList{}
 	if err := r.List(ctx, pods, client.InNamespace(f.Namespace), client.MatchingLabels(labels(f))); err != nil {
 		return err
@@ -175,16 +175,27 @@ func (r *Reconciler) schedulePersistent(ctx context.Context, f *fleet.CelldFleet
 		if owner == nil || owner.UID != j.WorkloadUID || owner.Kind != "StatefulSet" || pod.Spec.NodeName != "" || !pod.DeletionTimestamp.IsZero() {
 			return errors.New("gated PersistentFleet pod identity changed")
 		}
-		for _, previous := range j.PersistentHistory {
+		for index := range j.PersistentHistory {
+			previous := j.PersistentHistory[index]
 			if previous.Node != pod.Name {
 				continue
-			}
-			if !previous.Retired || !previous.RestartDenied {
-				return errors.New("previous PersistentFleet invocation lacks completed retirement")
 			}
 			latest, _ := latestPersistentMember(j.PersistentHistory, pod.Name)
 			if previous.Generation != latest.Generation {
 				continue
+			}
+			survivor := !previous.Retired
+			if previous.Retired && !previous.RestartDenied {
+				return errors.New("previous PersistentFleet invocation lacks completed retirement")
+			}
+			if survivor {
+				// A survivor's pod was recreated without any operation. Its old
+				// invocation is admitted back only on the same host incarnation and
+				// retained volume, where the successor launcher's exclusive lock is
+				// the exclusion authority. Cross-host return stays blocked.
+				if slices.ContainsFunc(pods.Items, func(other corev1.Pod) bool { return string(other.UID) == previous.PodUID }) {
+					return errors.New("previous PersistentFleet invocation still exists")
+				}
 			}
 			claim := &corev1.PersistentVolumeClaim{}
 			if err := r.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: "data-" + previous.Node}, claim); err != nil {
@@ -198,7 +209,7 @@ func (r *Reconciler) schedulePersistent(ctx context.Context, f *fleet.CelldFleet
 				return errors.New("retained volume changed before scheduling reactivation")
 			}
 
-			if previous.DiskID != "" && !r.Options.LocalTest {
+			if previous.DiskID != "" && !r.Options.LocalTest && !survivor {
 				if previous.Zone == "" || !previous.Stopped {
 					return errors.New("retired disk lacks zone or termination authority")
 				}
@@ -218,6 +229,13 @@ func (r *Reconciler) schedulePersistent(ctx context.Context, f *fleet.CelldFleet
 					pod.Spec.NodeSelector = map[string]string{}
 				}
 				pod.Spec.NodeSelector[corev1.LabelHostname] = previous.Hostname
+			}
+			if survivor && !previous.Superseded {
+				// Durable before the gate opens: a crash between the two replays here.
+				j.PersistentHistory[index].Superseded = true
+				if err := r.saveJournal(ctx, res, j); err != nil {
+					return err
+				}
 			}
 		}
 		pod.Spec.SchedulingGates = slices.DeleteFunc(pod.Spec.SchedulingGates, func(g corev1.PodSchedulingGate) bool { return g.Name == launcherGate })

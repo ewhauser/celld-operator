@@ -292,7 +292,7 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 		return block("LifecycleBlocked", "Workload differs from journaled infrastructure; no template mutation or replica drift repair is allowed")
 	}
 	if f.Spec.Profile == "PersistentFleet" && r.Options.LauncherImage != "" {
-		if err := r.schedulePersistent(ctx, appliedRuntime(f, j), j); err != nil {
+		if err := r.schedulePersistent(ctx, appliedRuntime(f, j), res, j); err != nil {
 			if _, loss := errors.AsType[*v050.LossError](err); loss {
 				return r.recordLoss(ctx, f, w, res, j, err.Error())
 			}

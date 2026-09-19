@@ -51,3 +51,11 @@ can reuse the disk; any retired UID remains blocked across subsequent cycles.
 Markers never recreate positive stop certificates. Legacy journals are readable,
 but old retirement receipts without this contract cannot authorize reuse or
 resolve historical writers without a separately qualified migration/fencing path.
+
+Amendment (19 September 2026): a `Stopping` operation whose launcher still
+reports `Running` after the deadline plus the stop-request expiry margin is
+canceled as unissued through the workload-CAS fence. A survivor pod recreated
+outside any operation may return onto its unchanged host incarnation and
+retained volume, with the old invocation recorded as superseded; the successor
+launcher's exclusive lock is the exclusion authority. Changed host or volume
+identity remains blocked. See [the lifecycle contract](../persistent-fleet-lifecycle.md).

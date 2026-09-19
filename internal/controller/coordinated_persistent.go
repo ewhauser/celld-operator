@@ -129,7 +129,7 @@ func (r *Reconciler) executeCoordinatedPersistent(ctx context.Context, f *fleet.
 		if replicas(w) != m.TargetReplicas || w.GetAnnotations()[operationKey] != m.ID+"/resume" {
 			return block(errors.New("coordinated restored replicas differ"))
 		}
-		if err := r.schedulePersistent(ctx, f, j); err != nil {
+		if err := r.schedulePersistent(ctx, f, res, j); err != nil {
 			return block(err)
 		}
 		view := *j
@@ -180,7 +180,7 @@ func (r *Reconciler) executeCoordinatedPersistent(ctx context.Context, f *fleet.
 				continue
 			}
 			if !slices.ContainsFunc(j.PersistentHistory, func(old persistentMember) bool {
-				return old.Node == node.Name && old.Generation == node.Generation && old.Retired && old.Stopped && old.RestartDenied
+				return old.Node == node.Name && old.Generation == node.Generation && resolvedMember(old)
 			}) || node.ExpiresMS > uint64(r.capacityNow().UnixMilli()) || (node.LogState != "sealed" && (node.LogState != "" || node.Epoch != 0)) {
 				return block(errors.New("unknown or revived writer during coordinated recovery"))
 			}
