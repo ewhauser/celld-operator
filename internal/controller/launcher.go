@@ -92,6 +92,9 @@ func (r *Reconciler) callLauncher(ctx context.Context, f *fleet.CelldFleet, pod 
 	if r.launcherCall != nil {
 		return r.launcherCall(ctx, f, pod, operation, generation)
 	}
+	return r.launcherRequest(ctx, f, pod, operation, generation, nil)
+}
+func (r *Reconciler) launcherRequest(ctx context.Context, f *fleet.CelldFleet, pod *corev1.Pod, operation, generation string, handoff *launcher.Handoff) (launcher.State, error) {
 	var zero launcher.State
 	if net.ParseIP(pod.Status.PodIP) == nil {
 		return zero, errors.New("launcher Pod IP unavailable")
@@ -104,7 +107,7 @@ func (r *Reconciler) callLauncher(ctx context.Context, f *fleet.CelldFleet, pod 
 	if deadline, ok := ctx.Deadline(); ok && deadline.Before(expires) {
 		expires = deadline
 	}
-	req := launcher.Request{Nonce: launcher.Nonce(), Operation: operation, Generation: generation, NotAfterMS: expires.UnixMilli()}
+	req := launcher.Request{Nonce: launcher.Nonce(), Operation: operation, Generation: generation, NotAfterMS: expires.UnixMilli(), Handoff: handoff}
 	body, err := json.Marshal(req)
 	if err != nil {
 		return zero, err
@@ -157,6 +160,11 @@ func (r *Reconciler) schedulePersistent(ctx context.Context, f *fleet.CelldFleet
 	for i := range pods.Items {
 		pod := &pods.Items[i]
 		if !slices.ContainsFunc(pod.Spec.SchedulingGates, func(g corev1.PodSchedulingGate) bool { return g.Name == launcherGate }) {
+			if pod.Spec.NodeName != "" && len(j.PersistentHistory) > 0 {
+				if err := r.authorizeVolumeHandoff(ctx, f, j, pod); err != nil {
+					return err
+				}
+			}
 			continue
 		}
 		owner := metav1.GetControllerOf(pod)
@@ -167,8 +175,12 @@ func (r *Reconciler) schedulePersistent(ctx context.Context, f *fleet.CelldFleet
 			if previous.Node != pod.Name {
 				continue
 			}
-			if !previous.Retired {
+			if !previous.Retired || !previous.RestartDenied {
 				return errors.New("previous PersistentFleet invocation lacks completed retirement")
+			}
+			latest, _ := latestPersistentMember(j.PersistentHistory, pod.Name)
+			if previous.Generation != latest.Generation {
+				continue
 			}
 			claim := &corev1.PersistentVolumeClaim{}
 			if err := r.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: "data-" + previous.Node}, claim); err != nil {
@@ -181,17 +193,28 @@ func (r *Reconciler) schedulePersistent(ctx context.Context, f *fleet.CelldFleet
 			if string(claim.UID) != previous.ClaimUID || volumeUID != previous.VolumeUID || volumeHandle != previous.VolumeHandle {
 				return errors.New("retained volume changed before scheduling reactivation")
 			}
-			node := &corev1.Node{}
-			if err := r.Get(ctx, types.NamespacedName{Name: previous.Host}, node); err != nil {
-				return err
+
+			if previous.DiskID != "" && !r.Options.LocalTest {
+				if previous.Zone == "" || !previous.Stopped {
+					return errors.New("retired disk lacks zone or termination authority")
+				}
+				if pod.Spec.NodeSelector == nil {
+					pod.Spec.NodeSelector = map[string]string{}
+				}
+				pod.Spec.NodeSelector[corev1.LabelTopologyZone] = previous.Zone
+			} else {
+				node := &corev1.Node{}
+				if err := r.Get(ctx, types.NamespacedName{Name: previous.Host}, node); err != nil {
+					return err
+				}
+				if !healthyHost(node) || string(node.UID) != previous.HostUID || node.Status.NodeInfo.BootID != previous.BootID || node.Labels[corev1.LabelHostname] != previous.Hostname {
+					return errors.New("legacy retained volume host incarnation unavailable")
+				}
+				if pod.Spec.NodeSelector == nil {
+					pod.Spec.NodeSelector = map[string]string{}
+				}
+				pod.Spec.NodeSelector[corev1.LabelHostname] = previous.Hostname
 			}
-			if !healthyHost(node) || string(node.UID) != previous.HostUID || node.Status.NodeInfo.BootID != previous.BootID || node.Labels[corev1.LabelHostname] != previous.Hostname {
-				return errors.New("retained volume host incarnation unavailable")
-			}
-			if pod.Spec.NodeSelector == nil {
-				pod.Spec.NodeSelector = map[string]string{}
-			}
-			pod.Spec.NodeSelector[corev1.LabelHostname] = previous.Hostname
 		}
 		pod.Spec.SchedulingGates = slices.DeleteFunc(pod.Spec.SchedulingGates, func(g corev1.PodSchedulingGate) bool { return g.Name == launcherGate })
 		if err := r.Update(ctx, pod); err != nil {

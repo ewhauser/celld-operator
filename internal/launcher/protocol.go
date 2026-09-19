@@ -12,10 +12,13 @@ import (
 type Request struct {
 	Nonce, Operation, Generation string
 	NotAfterMS                   int64
+	Handoff                      *Handoff `json:",omitempty"`
 }
 type State struct {
 	PodUID, Node, Host, Invocation, Generation, Phase, Operation, Error string
 	PID                                                                 int
+	BootID, DiskID, PreviousHost                                        string `json:",omitempty"`
+	RestartDenied                                                       bool   `json:",omitempty"`
 }
 type Response struct {
 	Nonce string
@@ -38,4 +41,10 @@ func Verify(key []byte, domain string, value any, signature string) bool {
 	}
 	got, e := hex.DecodeString(signature)
 	return e == nil && hmac.Equal(want, got)
+}
+
+// Handoff authorizes one waiting invocation, never an arbitrary future opener.
+// The controller obtains positive predecessor termination before sending it.
+type Handoff struct {
+	Invocation, Generation, PodUID, Host, BootID, DiskID, PreviousHost string `json:",omitempty"`
 }

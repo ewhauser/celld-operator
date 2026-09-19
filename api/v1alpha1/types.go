@@ -26,17 +26,22 @@ var AddToScheme = SchemeBuilder.AddToScheme
 type CelldFleet struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	// +kubebuilder:validation:XValidation:rule="self.qualification == oldSelf.qualification && self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement",message="only replicas, capacity, runtimeImage and maintenance may change"
+	// +kubebuilder:validation:XValidation:rule="self.qualification == oldSelf.qualification && self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement && self.bucketWorkload == oldSelf.bucketWorkload",message="only replicas, capacity, runtimeImage and maintenance may change"
 	Spec   CelldFleetSpec   `json:"spec"`
 	Status CelldFleetStatus `json:"status,omitempty"`
 }
 
+// +kubebuilder:validation:XValidation:rule="self.bucketWorkload != 'Ordered' || self.profile == 'Bucket'",message="Ordered bucketWorkload requires Bucket profile"
 // +kubebuilder:validation:XValidation:rule="self.placement.azCount == size(self.placement.zones)",message="azCount must equal the zones count"
 // +kubebuilder:validation:XValidation:rule="self.replicas >= self.placement.azCount",message="replicas must be at least azCount"
 // +kubebuilder:validation:XValidation:rule="self.profile == 'PersistentFleet' ? has(self.storage.storageClassName) && size(self.storage.storageClassName) > 0 : !has(self.storage.storageClassName)",message="storageClassName is required only for PersistentFleet"
 // +kubebuilder:validation:XValidation:rule="self.placement.zones.all(z, z.startsWith(self.storage.region) && size(z) == size(self.storage.region) + 1 && z.matches('.*[a-z]$'))",message="zones must be standard AZ names in storage.region"
 // +kubebuilder:validation:XValidation:rule="!has(self.capacity) || self.capacity.minReplicas >= self.placement.azCount",message="capacity minimum must cover requested AZs"
 type CelldFleetSpec struct {
+	// Immutable Bucket controller layout. Ordered enables deterministic ordinal removal.
+	// +kubebuilder:default=Deployment
+	// +kubebuilder:validation:Enum=Deployment;Ordered
+	BucketWorkload string `json:"bucketWorkload,omitempty"`
 	// Requested immutable runtime digest. Omission selects the original v0.5.0 pin.
 	// Unsupported transitions are durably blocked, including rollback.
 	// +optional
@@ -116,6 +121,10 @@ type PlacementSpec struct {
 // LifecycleStatus is an informational projection of the retained reservation journal.
 // Clearing status never cancels an operation or removes recovery evidence.
 type LifecycleStatus struct {
+	StartedAt        string `json:"startedAt,omitempty"`
+	LastCompletionAt string `json:"lastCompletionAt,omitempty"`
+	LastOutcome      string `json:"lastOutcome,omitempty"`
+
 	// RetiredBucketSessions left logical membership; physical liveness is unknown.
 	RetiredBucketSessions int32  `json:"retiredBucketSessions,omitempty"`
 	EvidenceBlocker       string `json:"evidenceBlocker,omitempty"`
@@ -137,6 +146,14 @@ type LifecycleStatus struct {
 }
 
 type CelldFleetStatus struct {
+	DesiredReplicas         int32  `json:"desiredReplicas,omitempty"`
+	AppliedReplicas         int32  `json:"appliedReplicas,omitempty"`
+	ObservedReplicas        int32  `json:"observedReplicas,omitempty"`
+	JoiningReplicas         int32  `json:"joiningReplicas,omitempty"`
+	TerminatingReplicas     int32  `json:"terminatingReplicas,omitempty"`
+	ReplicaObservationValid bool   `json:"replicaObservationValid,omitempty"`
+	BlockedSince            string `json:"blockedSince,omitempty"`
+
 	Capacity           CapacityStatus  `json:"capacity,omitempty"`
 	Lifecycle          LifecycleStatus `json:"lifecycle,omitempty"`
 	ObservedGeneration int64           `json:"observedGeneration,omitempty"`

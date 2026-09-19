@@ -1,0 +1,12 @@
+celld-operator is installed in {{ .Release.Namespace }}.
+
+This is an experimental operator. See docs/installation.md and docs/operations.md
+for external IAM, storage, NetworkPolicy and recovery requirements.
+Only one operator installation may own these cluster-wide fleet CRDs.
+{{- if not .Values.networkPolicyEnforced }}
+Provisioning remains blocked until networkPolicyEnforced=true after verifying CNI enforcement.
+{{- end }}
+{{- if not .Values.launcherImage }}
+Launcher-managed PersistentFleet lifecycle is disabled; set launcherImage to a qualified digest.
+{{- end }}
+CRDs and retained fleet resources are not removed on Helm uninstall.

@@ -19,14 +19,14 @@ import (
 )
 
 type persistentMember struct {
-	Node, PodUID, Container, Host, HostUID, Hostname, BootID, Zone, Invocation, Generation, ClaimUID, VolumeUID, VolumeHandle string
-	Epoch                                                                                                                     uint64
-	Ensemble                                                                                                                  []string
-	Stopped, Retired                                                                                                          bool
+	Node, PodUID, Container, Host, HostUID, Hostname, BootID, Zone, Invocation, Generation, ClaimUID, VolumeUID, VolumeHandle, DiskID string
+	Epoch                                                                                                                             uint64
+	Ensemble                                                                                                                          []string
+	Stopped, Retired, RestartDenied                                                                                                   bool
 }
 
 func sameInvocation(a, b persistentMember) bool {
-	return a.Node == b.Node && a.PodUID == b.PodUID && a.Container == b.Container && a.Host == b.Host && a.HostUID == b.HostUID && a.BootID == b.BootID && a.Invocation == b.Invocation && a.Generation == b.Generation && a.ClaimUID == b.ClaimUID && a.VolumeUID == b.VolumeUID && a.VolumeHandle == b.VolumeHandle
+	return a.Node == b.Node && a.PodUID == b.PodUID && a.Container == b.Container && a.Host == b.Host && a.HostUID == b.HostUID && a.BootID == b.BootID && a.Invocation == b.Invocation && a.Generation == b.Generation && a.ClaimUID == b.ClaimUID && a.VolumeUID == b.VolumeUID && a.VolumeHandle == b.VolumeHandle && a.DiskID == b.DiskID
 }
 func validateReactivation(j *lifecycleJournal, from, to int32, name string) error {
 	for ordinal := from; ordinal < to; ordinal++ {
@@ -36,7 +36,7 @@ func validateReactivation(j *lifecycleJournal, from, to int32, name string) erro
 				continue
 			}
 			if !slices.ContainsFunc(j.PersistentHistory, func(p persistentMember) bool {
-				return p.Node == node && p.Generation == s.Generation && p.Retired && p.Stopped
+				return p.Node == node && p.Generation == s.Generation && p.Retired && p.Stopped && p.RestartDenied
 			}) {
 				return errors.New("retained identity lacks positively completed launcher retirement")
 			}
@@ -163,15 +163,18 @@ func (r *Reconciler) persistentMembers(ctx context.Context, f *fleet.CelldFleet,
 		if err != nil {
 			return nil, err
 		}
+		if state.BootID != "" && state.BootID != node.Status.NodeInfo.BootID {
+			return nil, errors.New("authenticated launcher boot differs from Kubernetes host incarnation")
+		}
 		isDonor := stopping && pod.Name == j.Operation.TargetPod
 		if isDonor {
-			if state.Phase != "Stopped" || state.Operation != j.Operation.ID {
+			if state.Phase != "Stopped" || state.Operation != j.Operation.ID || !state.RestartDenied {
 				return nil, errors.New("exact child termination and inherited-lock release unconfirmed")
 			}
 		} else if state.Phase != "Running" || !podReady(pod) {
 			return nil, errors.New("persistent survivor launcher is not running and ready")
 		}
-		members = append(members, persistentMember{Node: pod.Name, PodUID: string(pod.UID), Container: id, Host: node.Name, HostUID: string(node.UID), Hostname: node.Labels[corev1.LabelHostname], BootID: node.Status.NodeInfo.BootID, Zone: node.Labels[corev1.LabelTopologyZone], Invocation: state.Invocation, Generation: state.Generation, ClaimUID: string(claim.UID), VolumeUID: volumeUID, VolumeHandle: volumeHandle, Stopped: isDonor})
+		members = append(members, persistentMember{Node: pod.Name, PodUID: string(pod.UID), Container: id, Host: node.Name, HostUID: string(node.UID), Hostname: node.Labels[corev1.LabelHostname], BootID: node.Status.NodeInfo.BootID, Zone: node.Labels[corev1.LabelTopologyZone], Invocation: state.Invocation, Generation: state.Generation, ClaimUID: string(claim.UID), VolumeUID: volumeUID, VolumeHandle: volumeHandle, Stopped: isDonor, RestartDenied: isDonor && state.RestartDenied, DiskID: state.DiskID})
 	}
 	slices.SortFunc(members, func(a, b persistentMember) int {
 		if a.Node < b.Node {
@@ -202,7 +205,7 @@ func (r *Reconciler) assessPersistent(ctx context.Context, f *fleet.CelldFleet, 
 	if stopping {
 		for _, old := range op.PersistentMembers {
 			if issued && old.Node == op.TargetPod {
-				if !old.Stopped {
+				if !old.Stopped || !old.RestartDenied {
 					return nil, time.Time{}, errors.New("missing durable termination receipt")
 				}
 				continue
@@ -232,7 +235,7 @@ func (r *Reconciler) assessPersistent(ctx context.Context, f *fleet.CelldFleet, 
 	}
 	for _, s := range j.Inventory.Sessions {
 		if !slices.ContainsFunc(members, func(m persistentMember) bool { return m.Node == s.Node && m.Generation == s.Generation }) && !slices.ContainsFunc(history, func(m persistentMember) bool {
-			return m.Node == s.Node && m.Generation == s.Generation && (m.Retired || (stopping && m.Node == op.TargetPod))
+			return m.Node == s.Node && m.Generation == s.Generation && ((m.Retired && m.Stopped && m.RestartDenied) || (stopping && m.Node == op.TargetPod))
 		}) {
 			return nil, time.Time{}, errors.New("unresolved historical persistent generation")
 		}
@@ -252,7 +255,7 @@ func (r *Reconciler) assessPersistent(ctx context.Context, f *fleet.CelldFleet, 
 		donor := stopping && n.Name == op.TargetPod
 		if index < 0 && !donor {
 			if !slices.ContainsFunc(history, func(m persistentMember) bool {
-				return m.Node == n.Name && m.Generation == n.Generation && m.Retired && m.Stopped
+				return m.Node == n.Name && m.Generation == n.Generation && m.Retired && m.Stopped && m.RestartDenied
 			}) {
 				return nil, time.Time{}, errors.New("unknown persistent storage writer")
 			}
@@ -335,7 +338,11 @@ func (r *Reconciler) assessPersistent(ctx context.Context, f *fleet.CelldFleet, 
 			return nil, time.Time{}, errors.New("persistent survivor health or capacity uncertain")
 		}
 	} else {
-		donorIndex := slices.IndexFunc(members, func(m persistentMember) bool { return m.Node == fmt.Sprintf("%s-%d", f.Name, op.To) })
+		donor := op.TargetPod
+		if donor == "" {
+			donor = fmt.Sprintf("%s-%d", f.Name, op.To)
+		}
+		donorIndex := slices.IndexFunc(members, func(m persistentMember) bool { return m.Node == donor })
 		if donorIndex < 0 {
 			return nil, time.Time{}, errors.New("highest ordinal donor missing")
 		}
@@ -345,7 +352,11 @@ func (r *Reconciler) assessPersistent(ctx context.Context, f *fleet.CelldFleet, 
 	}
 	placement := map[types.UID]bucketCandidate{}
 	for _, m := range members {
-		if m.Node == fmt.Sprintf("%s-%d", f.Name, op.To) {
+		donor := op.TargetPod
+		if donor == "" {
+			donor = fmt.Sprintf("%s-%d", f.Name, op.To)
+		}
+		if m.Node == donor {
 			continue
 		}
 		placement[types.UID(m.PodUID)] = bucketCandidate{Host: m.Host, HostUID: m.HostUID, Hostname: m.Hostname, Zone: m.Zone}
@@ -563,7 +574,7 @@ func (r *Reconciler) contractPersistent(ctx context.Context, f *fleet.CelldFleet
 		}
 	}
 	done := completion(op, at)
-	done.Outcome = "LauncherStoppedRecoveredFollowerRetiredSameHostReuseOnly"
+	done.Outcome = "LauncherStoppedRecoveredFollowerRetired"
 	j.History = append(j.History, done)
 	j.Applied, j.Operation = op.To, nil
 	if j.Capacity != nil {
@@ -623,8 +634,17 @@ func (r *Reconciler) finishReactivation(ctx context.Context, f *fleet.CelldFleet
 				continue
 			}
 			if reactivatedNode(f.Name, m.Node, op.From, op.To) {
-				if !prior.Retired || !prior.Stopped || prior.Generation == m.Generation || prior.Host != m.Host || prior.HostUID != m.HostUID || prior.BootID != m.BootID || prior.ClaimUID != m.ClaimUID || prior.VolumeUID != m.VolumeUID || prior.VolumeHandle != m.VolumeHandle {
-					return fail(errors.New("reactivation lacks retired predecessor or unchanged exclusive host and volume identity"))
+				if !prior.Retired || !prior.Stopped || !prior.RestartDenied || prior.Generation == m.Generation || prior.ClaimUID != m.ClaimUID || prior.VolumeUID != m.VolumeUID || prior.VolumeHandle != m.VolumeHandle {
+					return fail(errors.New("reactivation lacks retired predecessor or unchanged volume identity"))
+				}
+				latest, _ := latestPersistentMember(j.PersistentHistory, m.Node)
+				if prior.Generation == latest.Generation && (prior.Host != m.Host || prior.HostUID != m.HostUID || prior.BootID != m.BootID) {
+					if prior.DiskID == "" || prior.DiskID != m.DiskID || prior.Zone == "" || prior.Zone != m.Zone || r.Options.LocalTest {
+						return fail(errors.New("cross-host reactivation lacks authenticated disk and zone continuity"))
+					}
+					if err := r.verifyVolumeAttachment(ctx, f, *m); err != nil {
+						return fail(err)
+					}
 				}
 			} else if !prior.Retired && !sameInvocation(prior, *m) {
 				return fail(errors.New("survivor changed during reactivation"))
@@ -649,7 +669,7 @@ func (r *Reconciler) finishReactivation(ctx context.Context, f *fleet.CelldFleet
 		}
 	}
 	done := completion(op, inventory.ObservedAt)
-	done.Outcome = "SameHostRetainedVolumeReactivated"
+	done.Outcome = "RetainedVolumeReactivated"
 	j.History = append(j.History, done)
 	j.Applied, j.Operation = op.To, nil
 	return ctrl.Result{RequeueAfter: time.Second}, true, r.saveJournal(ctx, res, j)
@@ -664,7 +684,7 @@ func validatePersistentJournal(j *lifecycleJournal) error {
 		seen := map[string]bool{}
 		for _, m := range group {
 			key := m.Node + "/" + m.Generation
-			if m.Node == "" || m.PodUID == "" || m.Container == "" || m.Host == "" || m.HostUID == "" || m.Hostname == "" || m.BootID == "" || m.Invocation == "" || m.Generation == "" || m.ClaimUID == "" || m.VolumeUID == "" || m.VolumeHandle == "" || string(j.Claims["data-"+m.Node]) != m.ClaimUID || (m.Retired && !m.Stopped) || seen[key] {
+			if m.Node == "" || m.PodUID == "" || m.Container == "" || m.Host == "" || m.HostUID == "" || m.Hostname == "" || m.BootID == "" || m.Invocation == "" || m.Generation == "" || m.ClaimUID == "" || m.VolumeUID == "" || m.VolumeHandle == "" || string(j.Claims["data-"+m.Node]) != m.ClaimUID || (m.Retired && !m.Stopped) || (m.RestartDenied && !m.Stopped) || seen[key] {
 				return errors.New("invalid PersistentFleet invocation authority")
 			}
 			seen[key] = true

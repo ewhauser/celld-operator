@@ -45,10 +45,14 @@ func (r *Reconciler) cancelRemoval(ctx context.Context, res *fleet.CelldStorageR
 	done.Outcome = "CanceledBeforeIssue"
 	j.History = append(j.History, done)
 	for _, candidate := range op.BucketCandidates {
-		if !slices.ContainsFunc(j.BucketHistory, func(s bucketSession) bool { return s.Node == candidate.Node }) {
-			// Cancellation preserves admission, never completed retirement.
-			candidate.Retired = false
+		// Cancellation preserves every admitted generation and its positively
+		// observed succession chain, but never invents completed retirement.
+		candidate.Retired = candidate.SupersededBy != ""
+		index := slices.IndexFunc(j.BucketHistory, func(s bucketSession) bool { return s.Node == candidate.Node && s.Generation == candidate.Generation })
+		if index < 0 {
 			j.BucketHistory = append(j.BucketHistory, candidate)
+		} else if candidate.SupersededBy != "" {
+			j.BucketHistory[index] = candidate
 		}
 	}
 	j.Operation = nil

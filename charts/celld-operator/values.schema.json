@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["replicaCount", "image", "metrics", "networkPolicyEnforced"],
+  "properties": {
+    "replicaCount": {"type": "integer", "minimum": 1, "maximum": 10},
+    "image": {"type": "object", "required": ["repository", "tag", "digest", "pullPolicy"], "properties": {
+      "repository": {"type": "string", "minLength": 1},
+      "tag": {"type": "string"},
+      "digest": {"type": "string", "pattern": "^$|^sha256:[a-f0-9]{64}$"},
+      "pullPolicy": {"enum": ["Always", "IfNotPresent", "Never"]}
+    }},
+    "launcherImage": {"type": "string", "pattern": "^$|^[^\\s]+@sha256:[a-f0-9]{64}$"},
+    "networkPolicyEnforced": {"type": "boolean"},
+    "metrics": {"type": "object", "required": ["enabled", "port"], "properties": {
+      "enabled": {"type": "boolean"},
+      "port": {"type": "integer", "minimum": 1024, "maximum": 65535, "not": {"enum": [8082]}},
+      "serviceMonitor": {"type": "object", "properties": {"enabled": {"type": "boolean"}}},
+      "prometheusRule": {"type": "object", "properties": {"enabled": {"type": "boolean"}}}
+    }, "allOf": [{"if": {"properties": {"enabled": {"const": false}}}, "then": {"properties": {
+      "serviceMonitor": {"properties": {"enabled": {"const": false}}},
+      "prometheusRule": {"properties": {"enabled": {"const": false}}}
+    }}}]}
+  }
+}

@@ -31,19 +31,19 @@ rules:
     verbs: [get, create]
   - apiGroups: ['']
     resources: [pods]
-    verbs: [get, list, update]
+    verbs: [get, list, update, delete]
   - apiGroups: ['']
     resources: [nodes, persistentvolumes]
     verbs: [get]
   - apiGroups: ['']
-    resources: [secrets]
+    resources: [secrets, configmaps]
     verbs: [get, create]
   - apiGroups: [metrics.k8s.io]
     resources: [pods]
     verbs: [get]
   - apiGroups: [apps]
     resources: [deployments, statefulsets]
-    verbs: [get, create, update]
+    verbs: [get, create, update, delete]
   - apiGroups: [apps]
     resources: [replicasets]
     verbs: [get]
@@ -54,9 +54,12 @@ rules:
     resources: [poddisruptionbudgets]
     verbs: [get, create]
   - apiGroups: [storage.k8s.io]
+    resources: [volumeattachments]
+    verbs: [list]
+  - apiGroups: [storage.k8s.io]
     resources: [storageclasses]
     verbs: [get]
-  - apiGroups: ['']
+  - apiGroups: [events.k8s.io]
     resources: [events]
     verbs: [create, patch]
 ---
@@ -103,7 +106,7 @@ metadata:
   name: celld-operator
   namespace: celld-system
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app.kubernetes.io/name: celld-operator

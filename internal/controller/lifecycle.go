@@ -27,8 +27,10 @@ const lossFenceKey = "celld.example.com/recovery-loss-fence"
 const operationKey = "celld.example.com/lifecycle-operation"
 
 // The reservation survives status loss and fleet deletion. Never prune session
-// history or PVC identities automatically. Exhausting annotation capacity blocks.
+// history or PVC identities automatically. Large journals use immutable archives.
 type lifecycleJournal struct {
+	Maintenance       *maintenanceOperation
+	CompletedRestarts []string
 	Inventory         recoveryInventory
 	Request           *disruptionRequest
 	RuntimeImage      string
@@ -119,11 +121,11 @@ func readJournal(res *fleet.CelldStorageReservation) (*lifecycleJournal, error) 
 	if j.RuntimeImage != Image {
 		return nil, errors.New("unsupported journal runtime image")
 	}
-	if (j.Version != 1 && j.Version != 2 && j.Version != 3 && j.Version != 4 && j.Version != 5 && j.Version != 6) || j.Initial < 1 || j.Initial > 100 || j.Applied < 1 || j.Applied > 100 {
+	if (j.Version != 1 && j.Version != 2 && j.Version != 3 && j.Version != 4 && j.Version != 5 && j.Version != 6 && j.Version != 7) || j.Initial < 1 || j.Initial > 100 || j.Applied < 1 || j.Applied > 100 {
 		return nil, errors.New("invalid lifecycle journal")
 	}
-	// Older binaries reject version 6 instead of ignoring launcher and reactivation authority.
-	j.Version = 6
+	// Older binaries reject version 7 instead of ignoring handoff, maintenance, and session succession authority.
+	j.Version = 7
 	if req := j.Request; req != nil {
 		if req.ID == "" || req.SourceImage != j.RuntimeImage || req.WorkloadUID != j.WorkloadUID || (req.Kind != "Upgrade" && req.Kind != "Restart" && req.Kind != "Delete") {
 			return nil, errors.New("invalid disruption request")
@@ -139,6 +141,9 @@ func readJournal(res *fleet.CelldStorageReservation) (*lifecycleJournal, error) 
 	}
 	if j.Claims == nil {
 		j.Claims = map[string]types.UID{}
+	}
+	if err := validateMaintenanceJournal(&j); err != nil {
+		return nil, err
 	}
 	if err := validatePersistentJournal(&j); err != nil {
 		return nil, err
@@ -156,8 +161,11 @@ func (r *Reconciler) saveJournal(ctx context.Context, res *fleet.CelldStorageRes
 	if res.Annotations == nil {
 		res.Annotations = map[string]string{}
 	}
-	if len(b) > 200*1024 {
-		return errors.New("lifecycle journal budget exhausted; retain history and block further actions")
+	if len(b) > 180*1024 {
+		b, err = r.archiveJournal(ctx, res, b)
+		if err != nil {
+			return err
+		}
 	}
 	res.Annotations[journalKey] = string(b)
 	// Update carries the read resourceVersion. Never retry with a fresh version:
@@ -165,7 +173,7 @@ func (r *Reconciler) saveJournal(ctx context.Context, res *fleet.CelldStorageRes
 	return r.Update(ctx, res)
 }
 func (r *Reconciler) reservationMatches(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, want fleet.ReservationSpec) bool {
-	j, err := readJournal(res)
+	j, err := r.loadJournal(ctx, res)
 	if err != nil {
 		return false
 	}
@@ -201,7 +209,7 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 		}
 		return progress("Durable lifecycle transition recorded; inspect status.lifecycle for the operation and target")
 	}
-	j, err := readJournal(res)
+	j, err := r.loadJournal(ctx, res)
 	if err != nil {
 		return block("JournalInvalid", err.Error())
 	}
@@ -218,7 +226,7 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 		if initial == 0 {
 			initial = replicas(w)
 		}
-		j = &lifecycleJournal{Version: 6, RuntimeImage: Image, Initial: initial, Applied: replicas(w), WorkloadUID: w.GetUID(), Claims: map[string]types.UID{}}
+		j = &lifecycleJournal{Version: 7, RuntimeImage: Image, Initial: initial, Applied: replicas(w), WorkloadUID: w.GetUID(), Claims: map[string]types.UID{}}
 		// Creation records claim UIDs before workload creation. Verify those bindings;
 		// missing or replaced claims can never be adopted.
 		var created map[string]types.UID
@@ -245,16 +253,6 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 	if j.WorkloadUID != w.GetUID() {
 		return block("LifecycleBlocked", "Workload UID changed; refusing replacement adoption")
 	}
-	expectedCount := j.Applied
-	op := j.Operation
-	if op != nil && w.GetAnnotations()[operationKey] == op.ID {
-		expectedCount = op.To
-	}
-	expected := f.DeepCopy()
-	expected.Spec.Replicas = expectedCount
-	if !matches(workload(expected, r.Options), w) {
-		return block("LifecycleBlocked", "Workload differs from journaled infrastructure; no template mutation or replica drift repair is allowed")
-	}
 	// The workload fence is authoritative even if a leader crashed before the
 	// reservation journal could record the loss. It also invalidates old replica CASes.
 	if loss := w.GetAnnotations()[lossFenceKey]; loss != "" && j.Loss == "" {
@@ -270,9 +268,30 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 			return block("StorageIdentityConflict", "Retained PVC identity, ownership or deletion state changed: "+name)
 		}
 	}
+	if j.Maintenance != nil {
+		return r.executeMaintenance(ctx, f, res, j, w)
+	}
+	expectedCount := j.Applied
+	op := j.Operation
+	if op != nil && w.GetAnnotations()[operationKey] == op.ID {
+		expectedCount = op.To
+	}
+	expected := f.DeepCopy()
+	expected.Spec.Replicas = expectedCount
+	if !matches(workload(expected, r.Options), w) {
+		return block("LifecycleBlocked", "Workload differs from journaled infrastructure; no template mutation or replica drift repair is allowed")
+	}
 	if f.Spec.Profile == "PersistentFleet" && r.Options.LauncherImage != "" {
 		if err := r.schedulePersistent(ctx, f, j); err != nil {
+			if _, loss := errors.AsType[*v050.LossError](err); loss {
+				return r.recordLoss(ctx, f, w, res, j, err.Error())
+			}
 			return block("PersistentSchedulingBlocked", err.Error())
+		}
+	}
+	if orderedBucket(f) {
+		if err := r.scheduleOrderedBucket(ctx, f, j); err != nil {
+			return block("BucketSchedulingBlocked", err.Error())
 		}
 	}
 	if r.Evidence != nil {
@@ -308,6 +327,9 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 		resetMaintenanceCapacity(j)
 		issued := op != nil && w.GetAnnotations()[operationKey] == op.ID && replicas(w) == op.To
 		if !issued {
+			if op == nil && !f.DeletionTimestamp.IsZero() {
+				return r.disruption(ctx, f, res, j, w)
+			}
 			if op != nil {
 				op.SettledAt = time.Time{}
 			}
@@ -331,6 +353,20 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 		}
 	}
 	if op == nil {
+		if f.Spec.Profile == "Bucket" && r.Evidence != nil {
+			changed, admissionErr := r.admitBucketHistory(ctx, f, j)
+			if _, loss := errors.AsType[*v050.LossError](admissionErr); loss {
+				return r.recordLoss(ctx, f, w, res, j, admissionErr.Error())
+			}
+			if changed {
+				if err := r.saveJournal(ctx, res, j); err != nil {
+					return ctrl.Result{}, true, err
+				}
+			}
+			// Incomplete/uncertain observational admission must not prevent
+			// previously supported additive capacity. Removal still revalidates
+			// all history independently and cannot use missing admission.
+		}
 		if result, handled, err := r.disruption(ctx, f, res, j, w); handled || err != nil {
 			return result, handled, err
 		}

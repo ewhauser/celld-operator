@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -9,7 +10,6 @@ import (
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	"github.com/ewhauser/celld-operator/internal/capacity"
 	v050 "github.com/ewhauser/celld-operator/internal/runtime/v050"
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -17,17 +17,57 @@ import (
 
 func TestBucketManualContractionCrashReplayAndRenewingOldLease(t *testing.T) {
 	for _, contrary := range []string{"renewal", "replacement"} {
-		t.Run(contrary, func(t *testing.T) { testBucketManualContractionCrashReplay(t, contrary) })
+		t.Run(contrary, func(t *testing.T) { testBucketManualContractionCrashReplay(t, contrary, false) })
 	}
 }
 
-func testBucketManualContractionCrashReplay(t *testing.T, contrary string) {
+func testBucketManualContractionCrashReplay(t *testing.T, contrary string, ordered bool) {
 	p, f, j, opts, reader := bucketPreflightSetup(t)
 	p.now = func() time.Time { return reader.now }
 	if err := p.client.Get(t.Context(), client.ObjectKeyFromObject(f), f); err != nil {
 		t.Fatal(err)
 	}
 	f.Spec.Replicas = 2
+	victimName := "pod-2"
+	if ordered {
+		f.Spec.BucketWorkload = "Ordered"
+		f.Spec.Placement.AZCount = 2
+		f.Spec.Placement.Zones = []string{"us-east-1a", "us-east-1b"}
+		victimName = f.Name + "-2"
+		if contrary == "wrong-victim" {
+			victimName = f.Name + "-1"
+		}
+		for i := range 3 {
+			pod := &corev1.Pod{}
+			if err := p.client.Get(t.Context(), client.ObjectKey{Namespace: f.Namespace, Name: fmt.Sprintf("pod-%d", i)}, pod); err != nil {
+				t.Fatal(err)
+			}
+			if err := p.client.Delete(t.Context(), pod); err != nil {
+				t.Fatal(err)
+			}
+			pod.Name = fmt.Sprintf("%s-%d", f.Name, i)
+			pod.ResourceVersion = ""
+			pod.OwnerReferences[0].Kind = "StatefulSet"
+			pod.OwnerReferences[0].Name = f.Name
+			pod.OwnerReferences[0].UID = j.WorkloadUID
+			pod.Spec = podTemplate(f, opts).Spec
+			pod.Spec.SchedulingGates = nil
+			pod.Spec.NodeName = fmt.Sprintf("host-pod-%d", i)
+			zone := f.Spec.Placement.Zones[i%2]
+			pod.Spec.NodeSelector = map[string]string{corev1.LabelTopologyZone: zone}
+			if err := p.client.Create(t.Context(), pod); err != nil {
+				t.Fatal(err)
+			}
+			node := &corev1.Node{}
+			if err := p.client.Get(t.Context(), client.ObjectKey{Name: pod.Spec.NodeName}, node); err != nil {
+				t.Fatal(err)
+			}
+			node.Labels[corev1.LabelTopologyZone] = zone
+			if err := p.client.Update(t.Context(), node); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	if err := p.client.Update(t.Context(), f); err != nil {
 		t.Fatal(err)
 	}
@@ -41,8 +81,8 @@ func testBucketManualContractionCrashReplay(t *testing.T, contrary string) {
 	if err := p.client.Create(t.Context(), res); err != nil {
 		t.Fatal(err)
 	}
-	w := workload(f, opts).(*appsv1.Deployment)
-	w.UID = j.WorkloadUID
+	w := workload(f, opts)
+	w.SetUID(j.WorkloadUID)
 	setReplicas(w, 3)
 	if err := p.client.Create(t.Context(), w); err != nil {
 		t.Fatal(err)
@@ -93,7 +133,7 @@ func testBucketManualContractionCrashReplay(t *testing.T, contrary string) {
 		t.Fatal("replica effect not issued")
 	}
 	pod := &corev1.Pod{}
-	if err := p.client.Get(t.Context(), client.ObjectKey{Namespace: f.Namespace, Name: "pod-2"}, pod); err != nil {
+	if err := p.client.Get(t.Context(), client.ObjectKey{Namespace: f.Namespace, Name: victimName}, pod); err != nil {
 		t.Fatal(err)
 	}
 	if err := p.client.Delete(t.Context(), pod); err != nil {
@@ -106,6 +146,15 @@ func testBucketManualContractionCrashReplay(t *testing.T, contrary string) {
 	}
 	if j.Operation == nil || !j.Operation.SettledAt.IsZero() {
 		t.Fatal("live removed lease accepted")
+	}
+	if ordered && contrary == "wrong-victim" {
+		reader.expired = map[string]bool{"pod-1": true}
+		reader.now = reader.now.Add(time.Minute)
+		step()
+		if j.Operation == nil || !j.Operation.SettledAt.IsZero() {
+			t.Fatal("wrong ordinal removal completed")
+		}
+		return
 	}
 	// A Retired bit from admission is not post-issue expiry authority.
 	for i := range j.Operation.BucketCandidates {
@@ -162,6 +211,9 @@ func testBucketManualContractionCrashReplay(t *testing.T, contrary string) {
 	if !j.BucketHistory[2].Retired {
 		t.Fatal("retired generation lost")
 	}
+	if ordered {
+		return
+	}
 	// Model a completed ordinary addition with a new Pod UID. Historical Bucket
 	// sessions can be GCed only after durable completion, without blocking a
 	// second removal. Retain their generation in the operator journal.
@@ -188,7 +240,7 @@ func testBucketManualContractionCrashReplay(t *testing.T, contrary string) {
 		t.Fatal(err)
 	}
 	setReplicas(w, 3)
-	w.Annotations[operationKey] = "addition"
+	w.GetAnnotations()[operationKey] = "addition"
 	if err := p.client.Update(t.Context(), w); err != nil {
 		t.Fatal(err)
 	}
@@ -350,5 +402,11 @@ func TestBucketStrictPlacementChecksEveryVictim(t *testing.T) {
 	candidates["b1"] = bucketCandidate{Hostname: "a1", Zone: "us-east-1b"}
 	if err := validateBucketPlacement(f, candidates, false); err == nil {
 		t.Fatal("strict shared hostname accepted")
+	}
+}
+
+func TestOrderedBucketContractionCrashReplay(t *testing.T) {
+	for _, contrary := range []string{"renewal", "replacement", "wrong-victim"} {
+		t.Run(contrary, func(t *testing.T) { testBucketManualContractionCrashReplay(t, contrary, true) })
 	}
 }

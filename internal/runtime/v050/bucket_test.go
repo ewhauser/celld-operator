@@ -122,3 +122,38 @@ func TestBucketRetiredLeaseIsMembershipEvidenceNotTermination(t *testing.T) {
 		})
 	}
 }
+
+func TestBucketExactSuccessorResolvesOnlyAdmittedHistory(t *testing.T) {
+	a, _ := New(Image)
+	raw := fixture(t, "node-bucket")
+	node, _ := a.ParseNode("nodes/a.json", raw)
+	now := time.UnixMilli(node.SampledMS)
+	for _, name := range []string{"successor", "old revival", "unknown replacement", "missing successor", "expired successor", "partial listing", "chain", "cycle", "unknown historical writer"} {
+		t.Run(name, func(t *testing.T) {
+			r := &reader{data: raw, pages: map[string]Page{"nodes/": {Keys: []string{"nodes/a.json"}, Complete: true}, "log/": {Complete: true}}}
+			members := []BucketMember{{Node: "a", Generation: "old", SupersededBy: node.Generation, Retired: true}, {Node: "a", Generation: node.Generation}}
+			switch name {
+			case "old revival":
+				r.data = mutate(t, raw, func(m map[string]any) { m["ownership_index_generation"] = "old" })
+			case "unknown replacement":
+				r.data = mutate(t, raw, func(m map[string]any) { m["ownership_index_generation"] = "unknown" })
+			case "missing successor":
+				r.pages["nodes/"] = Page{Complete: true}
+			case "expired successor":
+				r.data = mutate(t, raw, func(m map[string]any) { m["expires_ms"] = now.UnixMilli() })
+			case "partial listing":
+				r.pages["nodes/"] = Page{Next: "missing"}
+			case "chain":
+				members = append(members, BucketMember{Node: "a", Generation: "earlier", SupersededBy: "old", Retired: true})
+			case "cycle":
+				members[0].SupersededBy = "old"
+			case "unknown historical writer":
+				members = append(members, BucketMember{Node: "a", Generation: "unadmitted", Retired: true})
+			}
+			_, err := a.InspectBucketMembership(t.Context(), r, members, func() time.Time { return now })
+			if (name == "successor" || name == "chain") != (err == nil) {
+				t.Fatalf("%s: %v", name, err)
+			}
+		})
+	}
+}

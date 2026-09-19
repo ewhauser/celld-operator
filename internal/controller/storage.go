@@ -17,7 +17,7 @@ import (
 // blocks retries after a crash or a partial allocation, preserving every claim.
 func initialClaims(f *fleet.CelldFleet, workload client.Object) []*corev1.PersistentVolumeClaim {
 	sts, ok := workload.(*appsv1.StatefulSet)
-	if !ok {
+	if !ok || f.Spec.Profile != "PersistentFleet" {
 		return nil
 	}
 	claims := make([]*corev1.PersistentVolumeClaim, 0, f.Spec.Replicas)

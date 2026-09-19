@@ -1,5 +1,7 @@
 # ADR 0014 Coordinated maintenance and retained deletion
 
+Implementation follow-up: [maintenance execution](../maintenance-execution.md) supersedes the blocked-only restart/deletion behavior below for admitted Bucket and launcher-managed PersistentFleet operations. Different-version transitions remain unsupported; PersistentFleet final shutdown requires positively sealed logs for every stopped leader.
+
 Status: Implemented blocked disruption requests and maintenance fencing; no runtime transition qualified
 
 This extends ADRs 0012 and 0013. The lifecycle reservation remains the only

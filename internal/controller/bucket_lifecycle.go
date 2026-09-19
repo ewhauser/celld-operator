@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"time"
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
@@ -20,12 +21,17 @@ import (
 // this ledger. Never turn an unknown historical writer into a retired session.
 type bucketSession struct {
 	Node, Generation, Container, Host, IP string
+	SupersededBy                          string
 	Retired                               bool
 	ExpiryObserved                        bool
 	ExpiryInvalidated                     bool
 }
 
 func (r *Reconciler) bucketAssessment(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal, count int32, issued bool) ([]bucketSession, time.Time, error) {
+	return r.bucketAssessmentMode(ctx, f, j, count, issued, false)
+}
+
+func (r *Reconciler) bucketAssessmentMode(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal, count int32, issued, admissionOnly bool) ([]bucketSession, time.Time, error) {
 	view := *j
 	op := *j.Operation
 	op.From = count
@@ -34,13 +40,16 @@ func (r *Reconciler) bucketAssessment(ctx context.Context, f *fleet.CelldFleet, 
 	if err != nil {
 		return nil, time.Time{}, err
 	}
-	if err := validateBucketPlacement(f, candidates, !issued); err != nil {
+	if err := validateBucketPlacement(f, candidates, !issued && !admissionOnly); err != nil {
 		return nil, time.Time{}, err
 	}
 	sessions := slices.Clone(j.BucketHistory)
 	for _, s := range j.Operation.BucketCandidates {
-		if !slices.ContainsFunc(sessions, func(old bucketSession) bool { return old.Node == s.Node }) {
+		index := slices.IndexFunc(sessions, func(old bucketSession) bool { return old.Node == s.Node && old.Generation == s.Generation })
+		if index < 0 {
 			sessions = append(sessions, s)
+		} else {
+			sessions[index] = s
 		}
 	}
 	for uid, c := range candidates {
@@ -57,14 +66,27 @@ func (r *Reconciler) bucketAssessment(ctx context.Context, f *fleet.CelldFleet, 
 		if observed == nil {
 			return nil, time.Time{}, errors.New("current bucket association unavailable")
 		}
-		index := slices.IndexFunc(sessions, func(s bucketSession) bool { return s.Node == string(uid) })
+		index := slices.IndexFunc(sessions, func(s bucketSession) bool { return s.Node == string(uid) && s.SupersededBy == "" })
 		current := bucketSession{Node: string(uid), Generation: observed.Generation, Container: c.Container, Host: c.Host, IP: c.IP}
 		if index < 0 {
 			sessions = append(sessions, current)
 		} else {
 			old := sessions[index]
-			if old.Retired || old.Generation != current.Generation || old.Container != current.Container || old.Host != current.Host || old.IP != current.IP {
-				return nil, time.Time{}, errors.New("bucket incarnation changed or retired member returned")
+			if old.Retired || old.Host != current.Host || old.IP != current.IP {
+				return nil, time.Time{}, errors.New("bucket retired member or changed host returned")
+			}
+			if old.Generation != current.Generation {
+				// Only an already admitted Bucket invocation may be superseded.
+				// A new container and fresh matching successor lease are required;
+				// adapter verification below positively reads that exact successor.
+				if old.Container == current.Container || slices.ContainsFunc(sessions, func(s bucketSession) bool { return s.Node == current.Node && s.Generation == current.Generation }) {
+					return nil, time.Time{}, errors.New("bucket successor reused a previous invocation")
+				}
+				sessions[index].SupersededBy = current.Generation
+				sessions[index].Retired = true
+				sessions = append(sessions, current)
+			} else if old.Container != current.Container {
+				return nil, time.Time{}, errors.New("bucket container changed without successor generation")
 			}
 		}
 	}
@@ -84,8 +106,8 @@ func (r *Reconciler) bucketAssessment(ctx context.Context, f *fleet.CelldFleet, 
 		if !present && !s.Retired && !issued && j.Operation.Phase != "Blocked" {
 			return nil, time.Time{}, errors.New("bucket membership changed before issue")
 		}
-		s.Retired = !present
-		members = append(members, v050.BucketMember{Node: s.Node, Generation: s.Generation, Retired: s.Retired, Resolved: slices.ContainsFunc(j.BucketHistory, func(old bucketSession) bool {
+		s.Retired = !present || s.SupersededBy != ""
+		members = append(members, v050.BucketMember{Node: s.Node, Generation: s.Generation, SupersededBy: s.SupersededBy, Retired: s.Retired, Resolved: slices.ContainsFunc(j.BucketHistory, func(old bucketSession) bool {
 			return old.Node == s.Node && old.Generation == s.Generation && old.Retired && !old.ExpiryInvalidated
 		}) || (issued && j.Operation.Phase == "Recovering" && slices.ContainsFunc(j.Operation.BucketCandidates, func(old bucketSession) bool {
 			// Recovering candidates record ExpiryObserved only after a successful
@@ -106,40 +128,45 @@ func (r *Reconciler) bucketAssessment(ctx context.Context, f *fleet.CelldFleet, 
 	if err != nil {
 		return nil, time.Time{}, err
 	}
-	policy := f.DeepCopy()
-	if policy.Spec.Capacity == nil {
-		policy.Spec.Capacity = &fleet.CapacityPolicy{}
-		policy.Spec.Capacity.Default()
-	}
-	if r.Collector == nil {
-		return nil, time.Time{}, errors.New("bucket survivor collector unavailable")
-	}
-	observation := r.Collector.Collect(ctx, policy)
-	var ids []string
-	for _, c := range candidates {
-		ids = append(ids, c.Container)
-	}
-	if issued {
-		if !capacity.LowDemand(*policy.Spec.Capacity, observation, count) || !bucketObservationIdentities(observation, ids) {
-			return nil, time.Time{}, errors.New("bucket survivor health or membership uncertain")
+	var observation capacity.Observation
+	var maxAge time.Duration
+	if !admissionOnly {
+		policy := f.DeepCopy()
+		if policy.Spec.Capacity == nil {
+			policy.Spec.Capacity = &fleet.CapacityPolicy{}
+			policy.Spec.Capacity.Default()
 		}
-	} else {
-		for _, id := range ids {
-			if err := ValidateSurvivors(*policy.Spec.Capacity, observation, ids, id, r.capacityNow()); err != nil {
-				return nil, time.Time{}, err
+		if r.Collector == nil {
+			return nil, time.Time{}, errors.New("bucket survivor collector unavailable")
+		}
+		observation = r.Collector.Collect(ctx, policy)
+		var ids []string
+		for _, c := range candidates {
+			ids = append(ids, c.Container)
+		}
+		if issued {
+			if !capacity.LowDemand(*policy.Spec.Capacity, observation, count) || !bucketObservationIdentities(observation, ids) {
+				return nil, time.Time{}, errors.New("bucket survivor health or membership uncertain")
+			}
+		} else {
+			for _, id := range ids {
+				if err := ValidateSurvivors(*policy.Spec.Capacity, observation, ids, id, r.capacityNow()); err != nil {
+					return nil, time.Time{}, err
+				}
 			}
 		}
+		maxAge = capacity.Seconds(policy.Spec.Capacity.MaxAgeSeconds)
 	}
 	after, err := r.Evidence.bucketCandidates(ctx, f, &view, r.Options)
 	if err != nil {
 		return nil, time.Time{}, err
 	}
-	if !equality.Semantic.DeepEqual(candidates, after) || evidence.ObservedAt.After(r.capacityNow()) || r.capacityNow().Sub(evidence.ObservedAt) > 5*time.Second || observation.At.After(r.capacityNow()) || r.capacityNow().Sub(observation.At) > capacity.Seconds(policy.Spec.Capacity.MaxAgeSeconds) {
+	if !equality.Semantic.DeepEqual(candidates, after) || evidence.ObservedAt.After(r.capacityNow()) || r.capacityNow().Sub(evidence.ObservedAt) > 5*time.Second || (!admissionOnly && (observation.At.After(r.capacityNow()) || r.capacityNow().Sub(observation.At) > maxAge)) {
 		return nil, time.Time{}, errors.New("bucket assessment expired or membership changed")
 	}
 	if issued {
 		for i := range sessions {
-			if sessions[i].Retired {
+			if sessions[i].Retired && sessions[i].SupersededBy == "" {
 				sessions[i].ExpiryObserved = true
 				sessions[i].ExpiryInvalidated = false
 			}
@@ -152,7 +179,7 @@ func (r *Reconciler) bucketAssessment(ctx context.Context, f *fleet.CelldFleet, 
 		if a.Node > b.Node {
 			return 1
 		}
-		return 0
+		return strings.Compare(a.Generation, b.Generation)
 	})
 	return sessions, evidence.ObservedAt, nil
 }
@@ -192,6 +219,15 @@ func validateBucketPlacement(f *fleet.CelldFleet, candidates map[types.UID]bucke
 	}
 	if removing {
 		for _, c := range candidates {
+			if orderedBucket(f) {
+				n, err := bucketOrdinal(f, c.Pod)
+				if err != nil {
+					return err
+				}
+				if n != len(candidates)-1 {
+					continue
+				}
+			}
 			counts[c.Zone]--
 			ok := balanced()
 			counts[c.Zone]++
@@ -288,7 +324,11 @@ func (r *Reconciler) contractBucket(ctx context.Context, f *fleet.CelldFleet, re
 			return save()
 		}
 		if !equality.Semantic.DeepEqual(sessions, op.BucketCandidates) {
-			return fail(errors.New("bucket candidate set differs from persisted intent"))
+			// The fresh complete assessment admitted an exact successor. Persist
+			// its authority and revalidate again before the workload CAS.
+			op.BucketCandidates = sessions
+			op.WorkloadVersion = w.GetResourceVersion()
+			return save()
 		}
 		if w.GetResourceVersion() != op.WorkloadVersion {
 			op.WorkloadVersion = w.GetResourceVersion()

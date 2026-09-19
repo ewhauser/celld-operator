@@ -37,10 +37,12 @@ def run(args, **kwargs):
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--bucket-lifecycle',action='store_true')
+    parser.add_argument('--ordered-bucket',action='store_true')
     parser.add_argument('--persistent-lifecycle',action='store_true')
+    parser.add_argument('--maintenance',action='store_true')
     args=parser.parse_args()
-    persistent_lifecycle=args.persistent_lifecycle
-    bucket_lifecycle=args.bucket_lifecycle or persistent_lifecycle
+    persistent_lifecycle=args.persistent_lifecycle or args.maintenance
+    bucket_lifecycle=args.bucket_lifecycle or persistent_lifecycle or args.ordered_bucket
     name = 'celld-step2-' + uuid.uuid4().hex[:8]
     process = None
     created = False
@@ -85,6 +87,10 @@ nodes:
   labels:
     topology.kubernetes.io/zone: us-east-1a
 ''')
+            if args.ordered_bucket:
+                config_text=(tmp/'kind.yaml').read_text()
+                before,last=config_text.rsplit('us-east-1a',1)
+                (tmp/'kind.yaml').write_text(before+'us-east-1b'+last)
             print('Creating isolated cluster', name, flush=True)
             # Name is unique; cleanup is authorized only for this invocation's cluster.
             created = True
@@ -105,7 +111,17 @@ nodes:
             for ns in ('fleets', 'other', 'celld-test-store'):
                 k('create', 'namespace', ns)
                 k('-n', ns, 'create', 'serviceaccount', 'runtime')
-            for image in (IMAGE, MINIO, MC, CURL):
+            node_arch=json.loads(k('get','node',name+'-control-plane','-o','json'))['status']['nodeInfo']['architecture']
+            for index,image in enumerate((IMAGE, MINIO, MC, CURL)):
+                # Docker's containerd store may have only the local platform of
+                # a multiarch image. Export that platform explicitly; ordinary
+                # kind load docker-image can fail on absent sibling manifests.
+                cached=subprocess.run(['docker','image','inspect',image],capture_output=True,text=True,timeout=30)
+                if cached.returncode == 0 and '@sha256:' not in image:
+                    archive=tmp/('cached-image-'+str(index)+'.tar')
+                    run(['docker','image','save','--platform','linux/'+node_arch,'-o',str(archive),image],timeout=180)
+                    run(['kind','load','image-archive','--name',name,str(archive)],timeout=180)
+                    archive.unlink()
                 print('Pulling into disposable node:', image, flush=True)
                 for node in (name+'-control-plane', name+'-worker', name+'-worker2'):
                     run(['docker', 'exec', node, 'crictl', 'pull', image], timeout=300)
@@ -178,6 +194,10 @@ nodes:
                 storage={'bucket':bucket,'region':'us-east-1','sizeGiB':1}
                 if profile=='PersistentFleet': storage['storageClassName']='retained'
                 return {'apiVersion':'celld.example.com/v1alpha1','kind':'CelldFleet','metadata':{'name':name,'namespace':namespace},'spec':{'qualification':'Experimental','profile':profile,'replicas':2,'serviceAccountName':'runtime','storage':storage,'placement':{'azCount':1,'zones':['us-east-1a']}}}
+            if args.ordered_bucket:
+                from ordered_bucket import exercise
+                exercise(k,apply,get,wait_for,restart_operator,fleet,CURL)
+                return
             alpha=fleet('alpha','bucket-alpha')
             beta=fleet('beta','bucket-beta','PersistentFleet')
             # An old deterministic claim must never be adopted into a new bucket.
@@ -265,6 +285,10 @@ nodes:
             assert [get('pod','beta-'+str(i))['metadata']['uid'] for i in range(2)]==beta_pod_uids
             k('-n','fleets','patch','statefulset','beta','--type=json','-p',json.dumps([{'op':'replace','path':'/spec/template','value':original_template}]))
             wait_for(lambda:ready('beta'),'restored original template matches normalized API defaults')
+            if args.maintenance:
+                import maintenance
+                maintenance.exercise(k, get, wait_for, restart_operator, ready, curl)
+                return
             if persistent_lifecycle:
                 # Local-path RWO is deliberately local-test-only: test same-host
                 # locks and scheduling, not CSI/RWOP/EBS attachment guarantees.
@@ -403,7 +427,7 @@ nodes:
             wait_for(baseline_recovered,'replica edit before workload creation preserves reservation baseline')
             assert get('deployment','delayed')['spec']['replicas']==2
             print('PASS: controller restart preserves initial workload; all integration assertions passed',flush=True)
-        except BaseException:
+        except BaseException as failure:
             if config.exists():
                 for args in [('get','pods','-A','-o','wide'),('-n','fleets','get','celldfleets','-o','yaml'),('get','celldstoragereservations','-o','json'),('-n','fleets','get','events','--sort-by=.lastTimestamp')]:
                     try: print(k(*args),flush=True)
@@ -412,6 +436,14 @@ nodes:
             if bucket_lifecycle and config.exists():
                 try: print(k('-n','celld-system','logs','deployment/celld-operator'),flush=True)
                 except RuntimeError: pass
+            # Optional bounded diagnostic window for an explicitly owned local
+            # cluster. Normal runs still clean immediately, including interrupts.
+            hold=min(600,max(0,int(os.environ.get('CELLD_TEST_DIAGNOSTIC_HOLD_SECONDS','0'))))
+            if hold and not isinstance(failure,KeyboardInterrupt):
+                marker=tmp/'continue-cleanup'
+                print('Diagnostic hold:',config,'context=kind-'+name,'touch',marker,'to clean early',flush=True)
+                until=time.monotonic()+hold
+                while time.monotonic()<until and not marker.exists(): time.sleep(2)
             raise
         finally:
             try:

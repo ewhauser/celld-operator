@@ -49,3 +49,16 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: make lint
+
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        with:
+          version: v4.2.4
+      - run: |
+          python3 -m venv .qualification-venv
+          .qualification-venv/bin/pip install -r hack/chart-requirements.txt
+          make chart-check
+          python3 hack/package-release.py --version 0.0.0-test --image ghcr.io/ewhauser/celld-operator --digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

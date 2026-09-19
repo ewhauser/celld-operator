@@ -3,7 +3,8 @@
 18 September 2026. Experimental implementation around unchanged celld v0.5.0,
 commit `12d5b6333fe52717325addcfe1e99e9fd4f77bcd` and the existing image digest.
 This supplies an executable graceful retirement/reactivation path. It does not
-qualify EKS/EBS, arbitrary node failure, cross-host reuse, or the last follower.
+qualify EKS/EBS, arbitrary node failure, or the last follower. Graceful cross-node
+reuse within one AZ is implemented under the explicit CSI handoff contract below.
 
 ## Installing the launcher
 
@@ -18,7 +19,8 @@ Bucket retains its existing launch command and volumes.
 The operator exclusively creates an immutable per-fleet Secret containing a
 random 32-byte authentication key, records its digest on the storage reservation,
 and fails on uncertain adoption or replacement. The new Kubernetes permissions
-are Secret get/create, PV get and Pod update (for scheduling gates). There is no
+are Secret get/create, PV/Node/StorageClass get, VolumeAttachment list, and Pod
+update (for scheduling gates). There is no
 Secret list/watch/delete, Pod delete, or EC2 permission. Because fleet namespaces
 are dynamic, the supplied ClusterRole grants get/create across namespaces;
 installations restricting managed namespaces should scope those bindings
@@ -70,7 +72,15 @@ It closes only its own lock descriptor and attempts an independent exclusive
 open. A remaining inherited holder keeps this attempt blocked. Only successful
 reacquisition allows `Stopped`; exit code 0 alone is irrelevant. The live
 launcher continues holding the new lock and serving the exact stopped response
-until Kubernetes removes the pod. If the launcher crashes before the controller
+until Kubernetes removes the pod. Before publishing that response it creates and
+fsyncs a permanent deny marker for the retired Pod UID. Every future invocation
+checks that marker after acquiring the volume lock and refuses to start celld for
+that UID. Markers remain across successive retained-volume reuse, so a delayed
+old kubelet cannot resurrect an earlier writer. The signed `RestartDenied` bit
+is set only after this durable write. A marker supplies negative startup authority
+only: it never reconstructs a positive stop receipt.
+
+If the launcher crashes before the controller
 records this response, no persisted file can recreate it. An unrequested child
 exit does not automatically restart or certify an operation.
 
@@ -109,9 +119,10 @@ or a copied filesystem. These events remain outside the supported path.
    metadata/loss evidence and unchanged healthy survivors through ten seconds of
    settling before marking the retirement complete.
 7. On growth, admit only positively retired historical generations. Keep the new
-   pod scheduling-gated while checking the old Node UID/boot ID, PVC UID, PV UID
-   and CSI volume handle. Pin its hostname before releasing the gate. The launcher
-   independently checks its persisted host/boot restriction and exclusive lock.
+   pod scheduling-gated while checking the PVC UID, PV UID and CSI volume handle.
+   Legacy/local disks remain pinned to the old Node UID/boot ID. Transferable
+   production disks are pinned to their original AZ. A different host/boot waits
+   for the authenticated transfer described below before celld can start.
    Keep the operation in `Reactivating` until the new launcher is Running, celld
    is Ready, and its new generation has a live matching node record with no loss
    declaration. Preserve all historical retirement authority.
@@ -125,8 +136,8 @@ proof; neither deadlines nor restored desired counts manufacture success.
 ## Supported and blocked paths
 
 - Experimental **manual graceful contraction from at least three to at least two**
-  is executable for launcher-managed fleets, as is repeated same-host retained-disk
-  growth. Production automatic contraction remains explicitly release-gated;
+  is executable for launcher-managed fleets, as is repeated retained-disk growth
+  on the same host or, under the explicit EBS contract, another host in the same AZ. Production automatic contraction remains explicitly release-gated;
   the disposable local fixture runs the same automatic execution path.
 - **Two to one is blocked before stopping any child.** With no remaining peer,
   the runtime may never publish an ensemble excluding its last follower. The
@@ -134,7 +145,7 @@ proof; neither deadlines nor restored desired counts manufacture success.
   to authorize that retirement. Supporting it requires another concrete runtime
   evidence contract; launcher termination alone is insufficient.
 - Uncertain node failures, unexpected launcher/container generations, loss markers,
-  missing historical authority, host reboot/replacement, cross-host volume reuse,
+  missing historical authority, cross-AZ reuse, unqualified storage handoffs,
   and changed storage bindings remain blocked. There is no force-delete/detach or
   administrator-written completion switch.
 - Production requests use `ReadWriteOncePod` on EBS CSI. The operator expects the
@@ -146,7 +157,7 @@ proof; neither deadlines nor restored desired counts manufacture success.
   claim modes are never mutated or foreign claims adopted. An in-place migration
   requires a separately designed and qualified maintenance path; a fresh fleet
   uses fresh exclusive claims and its own bucket reservation.
-- The retained journal reads versions 1–6, writes 6, and remains bounded at 200 KiB.
+- The retained journal preserves version 6 authority alongside newer fields and uses [immutable archives](journal-archives.md) beyond 180 KiB (16 MiB hydrated limit).
   Older binaries cannot downgrade or discard the new lifecycle authority.
 
 See [local evidence](qualification/persistent-launcher/README.md). AWS IAM/S3/EBS,
@@ -158,3 +169,46 @@ Credential bootstrap first records a durable random creation nonce in the
 reservation. It can resume an interrupted immutable Secret creation only when
 the Secret carries that exact nonce and fleet identity; it then pins the key
 digest. An existing unrelated Secret is never silently adopted.
+
+## Graceful cross-node volume handoff
+
+This is an executable controller/launcher protocol, not proof that a cloud test
+passed. Production cross-node handoff requires EBS CSI filesystem RWOP claims,
+retained delayed-binding StorageClass with explicit `type: gp2` or `type: gp3`,
+and unchanged PVC/PV/CSI handle. Types permitting EBS Multi-Attach and unknown
+storage classes are rejected. Static or administrator-modified storage outside
+that contract is unsupported. Operators never force-delete or detach a volume.
+
+Each new launcher creates and fsyncs a random disk nonce before starting celld.
+The nonce travels in signed responses and retirement history. A launcher on a
+different host or boot acquires the local lock but stays `WaitingForHandoff`;
+it has not spawned celld. The operator requires the latest predecessor to be
+positively stopped and retired, unchanged disk nonce/bindings, the same AZ,
+healthy target boot, and fresh S3 evidence that the predecessor is still expired
+and sealed (or its positively captured no-log session remains no-log). Loss,
+revived lease, stale generation, or incomplete recovery blocks authorization.
+
+The CSI attachment list must contain exactly one healthy, nondeleting EBS
+attachment, to the destination. Any old attachment, attachment/deletion error,
+missing attachment, or additional target blocks. This is attachment continuity,
+not process-death evidence: the latter was already recorded from the exact live
+supervisor before retirement. Namespace/storage administrators must not bypass
+CSI fencing, copy volumes, or rewrite authority.
+
+The operator sends an HMAC-authenticated grant expiring within three seconds,
+bound to the destination Pod UID, launcher invocation, runtime generation, host,
+boot, disk nonce and old host stamp. The waiting launcher checks every field,
+atomically replaces/fsyncs the host stamp, waits restart spacing, then spawns the
+unchanged celld binary. Delayed grants cannot start a different invocation.
+Crashing before the grant leaves the disk blocked; crashing after the stamp
+commit cannot reconstruct positive predecessor termination or replay authority
+on another host. The same-host inherited lock still protects surviving children.
+
+Version 6 journals remain readable, but historical retirement receipts without
+signed `RestartDenied` authority cannot authorize reuse or excuse old writers.
+Older launchers did not enforce persistent negative startup authority and could
+resurrect a stopped Pod UID after a container restart. A legacy retired history
+therefore requires a separately qualified migration/fencing path, not merely a
+host match or a disk nonce. The operator never infers termination or nonresurrection
+from file markers. Active legacy invocations likewise must move to the qualified
+launcher before their stop can supply the new receipt.

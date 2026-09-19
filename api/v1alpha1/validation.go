@@ -10,6 +10,9 @@ import (
 )
 
 func (f *CelldFleet) Default() {
+	if f.Spec.BucketWorkload == "" {
+		f.Spec.BucketWorkload = "Deployment"
+	}
 	if f.Spec.Capacity != nil {
 		f.Spec.Capacity.Default()
 	}
@@ -41,6 +44,10 @@ func (f *CelldFleet) Validate() error {
 		}
 	}
 	switch {
+	case s.BucketWorkload != "" && s.BucketWorkload != "Deployment" && s.BucketWorkload != "Ordered":
+		return fmt.Errorf("bucketWorkload must be Deployment or Ordered")
+	case s.BucketWorkload == "Ordered" && s.Profile != "Bucket":
+		return fmt.Errorf("ordered bucketWorkload requires Bucket profile")
 	case len(f.Name) > 40 || len(validation.IsDNS1123Label(f.Name)) != 0:
 		return fmt.Errorf("fleet name must be a DNS label of at most 40 characters")
 	case s.Qualification != "Experimental":

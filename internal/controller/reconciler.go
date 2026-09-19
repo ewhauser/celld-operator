@@ -22,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	controlleroptions "sigs.k8s.io/controller-runtime/pkg/controller"
@@ -36,6 +37,7 @@ type Reconciler struct {
 	client.Client
 	Options               Options
 	NetworkPolicyEnforced bool
+	Recorder              events.EventRecorder
 	// localLifecycle is only supplied by in-package qualification tests. No production fence exists.
 	localLifecycle lifecycleEvidence
 	launcherCall   func(context.Context, *fleet.CelldFleet, *corev1.Pod, string, string) (launcher.State, error)
@@ -47,6 +49,10 @@ type Reconciler struct {
 func digest(data []byte) string { h := sha256.Sum256(data); return hex.EncodeToString(h[:]) }
 func specHash(f *fleet.CelldFleet) string {
 	spec := f.Spec
+	// Preserve reservation hashes from before the opt-in Ordered layout existed.
+	if spec.BucketWorkload == "Deployment" {
+		spec.BucketWorkload = ""
+	}
 	spec.Capacity = nil
 	spec.RuntimeImage = ""
 	spec.Maintenance = nil
@@ -60,6 +66,9 @@ func reservationName(f *fleet.CelldFleet) string {
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	f := &fleet.CelldFleet{}
 	if err := r.Get(ctx, req.NamespacedName, f); err != nil {
+		if apierrors.IsNotFound(err) {
+			clearFleetMetrics(req.Namespace, req.Name)
+		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	f.Default()
@@ -239,16 +248,22 @@ func emptyObject(obj client.Object) client.Object {
 
 func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, reason, message string, ready int32, provisioned bool) (ctrl.Result, error) {
 	before := f.DeepCopy()
+	f.Status.DesiredReplicas = f.Spec.Replicas
+	f.Status.AppliedReplicas = 0
 	res := &fleet.CelldStorageReservation{}
 	if err := r.Get(ctx, types.NamespacedName{Name: reservationName(f)}, res); err == nil {
-		if j, err := readJournal(res); err == nil && j != nil && res.Spec.FleetUID == string(f.UID) {
+		if j, err := r.loadJournal(ctx, res); err == nil && j != nil && res.Spec.FleetUID == string(f.UID) {
 			f.Status.Lifecycle = fleet.LifecycleStatus{PossibleLoss: j.Loss}
 			f.Status.Capacity = fleet.CapacityStatus{}
 			if j.Capacity != nil && f.Spec.Capacity != nil {
 				f.Status.Capacity = j.Capacity.Decision
+				if (f.Spec.Capacity.Mode == "Automatic" || f.Spec.Capacity.Mode == "ScaleOut") && j.Capacity.Decision.DesiredReplicas > 0 {
+					f.Status.DesiredReplicas = j.Capacity.Decision.DesiredReplicas
+				}
 			}
 
 			if op := j.Operation; op != nil {
+				f.Status.DesiredReplicas = op.To
 				f.Status.Lifecycle = fleet.LifecycleStatus{OperationID: op.ID, Phase: op.Phase, From: op.From, To: op.To, TargetPod: op.TargetPod, TargetUID: op.TargetUID, TargetGeneration: op.TargetGeneration, PossibleLoss: j.Loss}
 			}
 			f.Status.Lifecycle.EvidenceBlocker = j.Inventory.Blocker
@@ -279,8 +294,32 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, reason, me
 			}
 			if j.Operation != nil {
 				f.Status.Lifecycle.Stalled = j.Operation.Stalled
+				if !j.Operation.StartedAt.IsZero() {
+					f.Status.Lifecycle.StartedAt = j.Operation.StartedAt.UTC().Format(time.RFC3339)
+				}
 				if !j.Operation.Deadline.IsZero() {
 					f.Status.Lifecycle.Deadline = j.Operation.Deadline.UTC().Format(time.RFC3339)
+				}
+			}
+			if m := j.Maintenance; m != nil {
+				if m.Kind == "Delete" {
+					f.Status.DesiredReplicas = 0
+				}
+				f.Status.Lifecycle.OperationID = m.ID
+				f.Status.Lifecycle.Phase = m.Phase
+				f.Status.Lifecycle.Stalled = !m.Deadline.IsZero() && !r.capacityNow().Before(m.Deadline)
+				if !m.StartedAt.IsZero() {
+					f.Status.Lifecycle.StartedAt = m.StartedAt.UTC().Format(time.RFC3339)
+				}
+				if !m.Deadline.IsZero() {
+					f.Status.Lifecycle.Deadline = m.Deadline.UTC().Format(time.RFC3339)
+				}
+			}
+			if len(j.History) > 0 {
+				last := j.History[len(j.History)-1]
+				f.Status.Lifecycle.LastOutcome = last.Outcome
+				if !last.EvidenceAt.IsZero() {
+					f.Status.Lifecycle.LastCompletionAt = last.EvidenceAt.UTC().Format(time.RFC3339)
 				}
 			}
 			if request := j.Request; request != nil {
@@ -299,6 +338,7 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, reason, me
 	if err := r.Get(ctx, client.ObjectKeyFromObject(f), observed); err != nil && !apierrors.IsNotFound(err) {
 		return ctrl.Result{}, err
 	} else if err == nil && observed.GetLabels()[FleetLabel] == string(f.UID) && observed.GetDeletionTimestamp().IsZero() {
+		f.Status.AppliedReplicas = replicas(observed)
 		var generation int64
 		switch w := observed.(type) {
 		case *appsv1.Deployment:
@@ -314,6 +354,7 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, reason, me
 		ready = 0
 	}
 	f.Status.ReadyReplicas = ready
+	r.observeReplicaCounts(ctx, f)
 	set := func(kind string, yes bool, why, msg string) {
 		status := metav1.ConditionFalse
 		if yes {
@@ -327,17 +368,29 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, reason, me
 	set("InfrastructureReady", provisioned || reason == "LifecycleProgress", reason, message)
 	set("Progressing", reason == "LifecycleProgress" || reason == "Provisioning", reason, message)
 	set("Blocked", !provisioned && reason != "LifecycleProgress", reason, message)
-	set("LifecycleBlocked", true, "QualificationIncomplete", "Production automatic contraction and uncertain-node PersistentFleet recovery remain unqualified; upgrades, restarts and deletion are blocked")
+	set("LifecycleBlocked", true, "QualificationIncomplete", "Production automatic contraction, runtime upgrades and uncertain-node recovery remain unqualified; experimental maintenance requires exact runtime and storage evidence")
 	set("ProductionQualified", false, "QualificationIncomplete", "Local prototype only; AWS, retained-EBS recovery, fencing, follower AZ diversity and restart safety remain unqualified")
+	if meta.IsStatusConditionTrue(f.Status.Conditions, "Blocked") {
+		if f.Status.BlockedSince == "" || !meta.IsStatusConditionTrue(before.Status.Conditions, "Blocked") {
+			f.Status.BlockedSince = r.capacityNow().UTC().Format(time.RFC3339)
+		}
+	} else {
+		f.Status.BlockedSince = ""
+	}
 	if !equality.Semantic.DeepEqual(before.Status, f.Status) {
 		if err := r.Status().Patch(ctx, f, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
-	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	r.recordConditionChange(f, before.Status.Conditions)
+	publishFleetMetrics(f, r.capacityNow())
+	return ctrl.Result{RequeueAfter: reconcileDelay(f)}, nil
 }
 
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if r.Recorder == nil {
+		r.Recorder = mgr.GetEventRecorder("celld-operator")
+	}
 	return ctrl.NewControllerManagedBy(mgr).For(&fleet.CelldFleet{}).WithOptions(fleetControllerOptions()).Complete(r)
 }
 

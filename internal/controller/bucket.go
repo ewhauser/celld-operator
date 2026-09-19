@@ -20,8 +20,8 @@ import (
 // deletion order. A matching label is not proof of ownership or bucket posture.
 // This is observational admission only; it never certifies process termination.
 type bucketCandidate struct {
-	Container, Host, IP     string
-	HostUID, Hostname, Zone string
+	Container, Host, IP, Pod string
+	HostUID, Hostname, Zone  string
 }
 
 func (p *ProductionEvidence) bucketCandidates(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal, opts Options) (map[types.UID]bucketCandidate, error) {
@@ -54,20 +54,41 @@ func (p *ProductionEvidence) bucketCandidates(ctx context.Context, f *fleet.Cell
 		}
 		id, _ := podIdentity(pod)
 		owner := metav1.GetControllerOf(pod)
-		if id == "" || !podReady(pod) || owner == nil || owner.APIVersion != "apps/v1" || owner.Kind != "ReplicaSet" || owner.UID == "" {
-			return nil, errors.New("bucket candidate is unready, terminating, or lacks exact ReplicaSet ownership")
+		if id == "" || !podReady(pod) || owner == nil || owner.APIVersion != "apps/v1" || owner.UID == "" {
+			return nil, errors.New("bucket candidate unready or lacks exact ownership")
 		}
-		rs := &appsv1.ReplicaSet{}
-		if err := p.client.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: owner.Name}, rs); err != nil {
-			return nil, err
-		}
-		deployment := metav1.GetControllerOf(rs)
-		if rs.UID != owner.UID || !rs.DeletionTimestamp.IsZero() || deployment == nil || deployment.APIVersion != "apps/v1" || deployment.Kind != "Deployment" || deployment.Name != f.Name || deployment.UID != j.WorkloadUID || j.WorkloadUID == "" {
-			return nil, errors.New("bucket candidate owner chain changed")
-		}
-		normalizePod(&rs.Spec.Template.Spec)
-		if !equality.Semantic.DeepEqual(base, rs.Spec.Template.Spec) {
-			return nil, errors.New("bucket candidate ReplicaSet runtime template differs")
+		if orderedBucket(f) {
+			sts := &appsv1.StatefulSet{}
+			if err := p.client.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: f.Name}, sts); err != nil {
+				return nil, err
+			}
+			normalizePod(&sts.Spec.Template.Spec)
+			if sts.UID != j.WorkloadUID || !sts.DeletionTimestamp.IsZero() || !equality.Semantic.DeepEqual(base, sts.Spec.Template.Spec) || sts.Spec.PodManagementPolicy != appsv1.OrderedReadyPodManagement || len(sts.Spec.VolumeClaimTemplates) != 0 {
+				return nil, errors.New("ordered Bucket workload changed")
+			}
+			n, err := bucketOrdinal(f, pod.Name)
+			if err != nil || n >= int(j.Operation.From) || owner.Kind != "StatefulSet" || owner.Name != f.Name || owner.UID != j.WorkloadUID || j.WorkloadUID == "" {
+				return nil, errors.New("ordered Bucket candidate ownership or ordinal changed")
+			}
+			if f.Spec.Placement.Mode != "Relaxed" && (node.Labels[corev1.LabelTopologyZone] != f.Spec.Placement.Zones[n%len(f.Spec.Placement.Zones)] || pod.Spec.NodeSelector[corev1.LabelTopologyZone] != f.Spec.Placement.Zones[n%len(f.Spec.Placement.Zones)]) {
+				return nil, errors.New("ordered Bucket ordinal zone differs")
+			}
+		} else {
+			if owner.Kind != "ReplicaSet" {
+				return nil, errors.New("bucket candidate lacks ReplicaSet owner")
+			}
+			rs := &appsv1.ReplicaSet{}
+			if err := p.client.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: owner.Name}, rs); err != nil {
+				return nil, err
+			}
+			deployment := metav1.GetControllerOf(rs)
+			if rs.UID != owner.UID || !rs.DeletionTimestamp.IsZero() || deployment == nil || deployment.APIVersion != "apps/v1" || deployment.Kind != "Deployment" || deployment.Name != f.Name || deployment.UID != j.WorkloadUID || j.WorkloadUID == "" {
+				return nil, errors.New("bucket candidate owner chain changed")
+			}
+			normalizePod(&rs.Spec.Template.Spec)
+			if !equality.Semantic.DeepEqual(base, rs.Spec.Template.Spec) {
+				return nil, errors.New("bucket candidate ReplicaSet runtime template differs")
+			}
 		}
 		// Admission can change a Pod independently of its ReplicaSet. Verify all
 		// runtime configuration, while allowing externally injected AWS credentials.
@@ -131,7 +152,7 @@ func (p *ProductionEvidence) bucketCandidates(ctx context.Context, f *fleet.Cell
 				return nil, errors.New("bucket candidate runtime configuration missing")
 			}
 		}
-		identities[pod.UID] = bucketCandidate{Container: id, Host: pod.Spec.NodeName, IP: pod.Status.PodIP, HostUID: string(node.UID), Hostname: node.Labels[corev1.LabelHostname], Zone: node.Labels[corev1.LabelTopologyZone]}
+		identities[pod.UID] = bucketCandidate{Pod: pod.Name, Container: id, Host: pod.Spec.NodeName, IP: pod.Status.PodIP, HostUID: string(node.UID), Hostname: node.Labels[corev1.LabelHostname], Zone: node.Labels[corev1.LabelTopologyZone]}
 	}
 	return identities, nil
 }

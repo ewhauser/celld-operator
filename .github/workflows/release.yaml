@@ -1,0 +1,93 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
+        with:
+          go-version-file: go.mod
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        with:
+          version: v4.2.4
+      - run: |
+          python3 -m venv .qualification-venv
+          .qualification-venv/bin/pip install -r hack/chart-requirements.txt -r hack/qualification/requirements.txt
+          make check manifests-check qualification-replay qualification-test chart-check
+      - name: Validate release version and packaging
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: python3 hack/package-release.py --version "$RELEASE_VERSION" --image ghcr.io/ewhauser/celld-operator --digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        with:
+          version: v4.2.4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Refuse existing or partially published version
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_USER: ${{ github.actor }}
+        run: python3 hack/check-release-absent.py
+      - name: Resolve image repository
+        id: repository
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: echo "image=ghcr.io/${REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        id: image
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.repository.outputs.image }}:${{ github.ref_name }}
+          build-args: VERSION=${{ github.ref_name }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+      - name: Publish immutable chart and experimental release artifacts
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+          IMAGE: ${{ steps.repository.outputs.image }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_USER: ${{ github.actor }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          python3 hack/package-release.py --version "$RELEASE_VERSION" --image "$IMAGE" --digest "$DIGEST"
+          version="${RELEASE_VERSION#v}"
+          owner="${REPOSITORY%%/*}"
+          owner="${owner,,}"
+          printf '%s' "$GH_TOKEN" | helm registry login ghcr.io --username "$GH_USER" --password-stdin
+          helm push "dist/celld-operator-${version}.tgz" "oci://ghcr.io/${owner}/charts"
+          mkdir -p dist/verified
+          helm pull "oci://ghcr.io/${owner}/charts/celld-operator" --version "$version" --destination dist/verified
+          cmp "dist/celld-operator-${version}.tgz" "dist/verified/celld-operator-${version}.tgz"
+          cp config/crd/*.yaml dist/
+          printf '%s@%s\n' "$IMAGE" "$DIGEST" > dist/image.txt
+          (cd dist && sha256sum ./*.tgz ./*.yaml image.txt > SHA256SUMS)
+          gh release create "$RELEASE_VERSION" dist/*.tgz dist/*.yaml dist/image.txt dist/SHA256SUMS --verify-tag --prerelease --title "$RELEASE_VERSION (experimental)" --notes 'Experimental operator. See docs/operations.md for installation and qualification limits. Local checks do not establish AWS/EKS qualification. CRD upgrades are explicit; retained data and storage reservations must not be deleted during uninstall.'

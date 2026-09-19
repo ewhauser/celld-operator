@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -29,11 +30,13 @@ type Config struct {
 	Stdout, Stderr                            io.Writer
 }
 type supervisor struct {
-	mu       sync.Mutex
-	state    State
-	stop     chan struct{}
-	stopping bool
-	key      []byte
+	mu              sync.Mutex
+	state           State
+	stop            chan struct{}
+	stopping        bool
+	key             []byte
+	handoff         chan struct{}
+	handoffAccepted bool
 }
 
 func (s *supervisor) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -48,6 +51,17 @@ func (s *supervisor) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if req.Handoff != nil {
+		h := req.Handoff
+		if req.Operation != "" || req.NotAfterMS <= time.Now().UnixMilli() || req.NotAfterMS > time.Now().Add(3*time.Second).UnixMilli() || s.state.Phase != "WaitingForHandoff" || h.Invocation != s.state.Invocation || h.Generation != s.state.Generation || h.PodUID != s.state.PodUID || h.Host != s.state.Host || h.BootID != s.state.BootID || h.DiskID != s.state.DiskID || h.PreviousHost != s.state.PreviousHost || h.DiskID == "" {
+			http.Error(w, "handoff association changed or expired", http.StatusConflict)
+			return
+		}
+		if !s.handoffAccepted {
+			s.handoffAccepted = true
+			close(s.handoff)
+		}
+	}
 	if req.Operation != "" {
 		if (s.state.Phase == "Running" && req.NotAfterMS <= time.Now().UnixMilli()) || req.Generation != s.state.Generation || (s.state.Operation != "" && s.state.Operation != req.Operation) || (s.state.Phase != "Running" && s.state.Phase != "Stopping" && s.state.Phase != "Stopped") {
 			http.Error(w, "invocation changed or unavailable", http.StatusConflict)
@@ -117,7 +131,7 @@ func Run(ctx context.Context, c Config) error {
 	if err != nil {
 		return err
 	}
-	s := &supervisor{state: State{PodUID: c.PodUID, Node: c.Node, Host: c.Host, Invocation: Nonce(), Generation: hex.EncodeToString(pub), Phase: "WaitingForExclusiveVolume"}, stop: make(chan struct{}), key: c.Key}
+	s := &supervisor{state: State{PodUID: c.PodUID, Node: c.Node, Host: c.Host, Invocation: Nonce(), Generation: hex.EncodeToString(pub), Phase: "WaitingForExclusiveVolume"}, stop: make(chan struct{}), handoff: make(chan struct{}), key: c.Key}
 	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", c.Address)
 	if err != nil {
 		return err
@@ -134,6 +148,18 @@ func Run(ctx context.Context, c Config) error {
 			_ = lock.Close()
 		}
 	}()
+	// Retirement is a one-way deny rule for this Kubernetes pod identity.
+	// A stale kubelet may restart a container after an observed stop. It must
+	// never resurrect that pod's writer, even after later reuse of this disk.
+	retiredPath := retiredPodPath(c.Root, c.PodUID)
+	if _, err := os.Stat(retiredPath); !errors.Is(err, os.ErrNotExist) {
+		if err != nil {
+			return err
+		}
+		s.phase("Blocked", errors.New("pod identity was durably retired"))
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	if c.BootID == "" {
 		b, e := os.ReadFile("/proc/sys/kernel/random/boot_id")
 		if e != nil {
@@ -147,17 +173,52 @@ func Run(ctx context.Context, c Config) error {
 	hostIdentity := c.Host + "\n" + c.BootID
 	hostPath := filepath.Join(c.Root, ".celld-launcher-host")
 	old, err := os.ReadFile(hostPath)
-	if err == nil && string(old) != hostIdentity {
-		s.phase("Blocked", errors.New("cross-host volume reuse is unqualified"))
-		<-ctx.Done()
-		return ctx.Err()
-	}
+
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if errors.Is(err, os.ErrNotExist) {
-		if err := persistHost(c.Root, hostPath, []byte(hostIdentity)); err != nil {
-			return err
+	// A disk nonce binds controller authority to this mounted filesystem. Existing
+	// legacy disks can acquire one only on their original host incarnation.
+	diskPath := filepath.Join(c.Root, ".celld-launcher-disk")
+	disk, diskErr := os.ReadFile(diskPath)
+	if errors.Is(diskErr, os.ErrNotExist) {
+		if err == nil && string(old) != hostIdentity {
+			s.phase("Blocked", errors.New("legacy disk has no transferable identity"))
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		disk = []byte(Nonce())
+		if e := persistHost(c.Root, diskPath, disk); e != nil {
+			return e
+		}
+	} else if diskErr != nil {
+		return diskErr
+	}
+	if len(disk) != 64 {
+		return errors.New("invalid disk identity")
+	}
+	s.mu.Lock()
+	s.state.BootID = c.BootID
+	s.state.DiskID = string(disk)
+	s.mu.Unlock()
+	if err == nil && string(old) != hostIdentity {
+		s.mu.Lock()
+		s.state.PreviousHost = string(old)
+		s.state.Phase = "WaitingForHandoff"
+		s.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-s.handoff:
+		}
+		// No child exists yet. Commit the new host before spacing or spawning. A
+		// replay cannot authorize another host or a new invocation after a crash.
+		if e := replaceHost(c.Root, hostPath, []byte(hostIdentity)); e != nil {
+			return e
+		}
+	} else if errors.Is(err, os.ErrNotExist) {
+		if e := persistHost(c.Root, hostPath, []byte(hostIdentity)); e != nil {
+			return e
 		}
 	}
 	// New launches never use the runtime's preserve-mode generation override.
@@ -231,6 +292,17 @@ func Run(ctx context.Context, c Config) error {
 		return ctx.Err()
 	}
 	lock = proof
+	// Persist only negative authority before publishing the live receipt. This
+	// file cannot certify termination to another process or reconstruct Stopped.
+	// A failure here leaves the supervisor blocked, with no positive receipt.
+	if err := persistHost(c.Root, retiredPath, []byte(c.PodUID)); err != nil {
+		s.phase("Blocked", fmt.Errorf("cannot durably deny retired pod restart: %w", err))
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	s.mu.Lock()
+	s.state.RestartDenied = true
+	s.mu.Unlock()
 	s.phase("Stopped", nil)
 	<-ctx.Done()
 	return nil
@@ -260,4 +332,26 @@ func persistHost(root, path string, body []byte) error {
 	}
 	defer func() { _ = directory.Close() }()
 	return directory.Sync()
+}
+
+func replaceHost(root, path string, body []byte) error {
+	temporary := path + "." + Nonce()
+	if err := persistHost(root, temporary, body); err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(temporary) }()
+	if err := os.Rename(temporary, path); err != nil {
+		return err
+	}
+	directory, err := os.Open(root)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = directory.Close() }()
+	return directory.Sync()
+}
+
+func retiredPodPath(root, podUID string) string {
+	hash := sha256.Sum256([]byte(podUID))
+	return filepath.Join(root, ".celld-launcher-retired-"+hex.EncodeToString(hash[:]))
 }

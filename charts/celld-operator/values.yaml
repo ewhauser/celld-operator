@@ -1,0 +1,33 @@
+# Install CRDs on first install. Helm does not upgrade or delete CRDs; see docs/operations.md.
+replicaCount: 2
+image:
+  repository: ghcr.io/ewhauser/celld-operator
+  tag: ''
+  digest: ''
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+# Pin this image by digest to enable launcher-managed PersistentFleet workloads.
+launcherImage: ''
+networkPolicyEnforced: false
+serviceAccount:
+  annotations: {}
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 256Mi
+nodeSelector: {}
+tolerations: []
+# Spread operator replicas where worker capacity permits.
+affinity: {}
+metrics:
+  enabled: false
+  port: 8084
+  serviceMonitor:
+    enabled: false
+    labels: {}
+    interval: 30s
+  prometheusRule:
+    enabled: false
+    labels: {}

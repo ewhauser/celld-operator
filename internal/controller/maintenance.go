@@ -3,9 +3,11 @@ package controller
 import (
 	"context"
 	"errors"
+	"slices"
 	"time"
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
@@ -68,7 +70,7 @@ func (r *Reconciler) persistDisruptionRequest(ctx context.Context, f *fleet.Cell
 	if f.Spec.Maintenance != nil {
 		token = f.Spec.Maintenance.RestartToken
 	}
-	if kind == "" && token != "" {
+	if kind == "" && token != "" && !slices.Contains(j.CompletedRestarts, token) {
 		kind = "Restart"
 	}
 	if !f.DeletionTimestamp.IsZero() {
@@ -102,6 +104,9 @@ func (r *Reconciler) disruption(ctx context.Context, f *fleet.CelldFleet, res *f
 		return ctrl.Result{}, false, nil
 	}
 
+	if (f.Spec.Profile == "Bucket" || (f.Spec.Profile == "PersistentFleet" && r.Options.LauncherImage != "")) && (kind == "Restart" || kind == "Delete") && r.Evidence != nil {
+		return r.beginMaintenance(ctx, f, res, j, w)
+	}
 	reason := "DisruptionUnqualified"
 	if kind == "Upgrade" {
 		reason = "UnsupportedTransition"
@@ -130,7 +135,28 @@ func (r *Reconciler) maintenanceFleet(ctx context.Context, f *fleet.CelldFleet) 
 		if !apierrors.IsNotFound(err) {
 			return ctrl.Result{}, err
 		}
-		return r.report(ctx, f, reason, "No reservation found; provisioning suspended; deletion requires manual identity review", 0, false)
+		if !f.DeletionTimestamp.IsZero() {
+			candidate := emptyObject(workload(f, r.Options))
+			if err := r.Get(ctx, client.ObjectKeyFromObject(f), candidate); err == nil {
+				return r.report(ctx, f, "DeletionBlocked", "Missing reservation for existing workload; refusing reconstruction of runtime authority", 0, false)
+			} else if !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, err
+			}
+			pods := &corev1.PodList{}
+			if err := r.List(ctx, pods, client.InNamespace(f.Namespace), client.MatchingLabels(labels(f))); err != nil {
+				return ctrl.Result{}, err
+			}
+			if len(pods.Items) != 0 {
+				return r.report(ctx, f, "DeletionBlocked", "Missing reservation with live pod identities requires investigation", 0, false)
+			}
+			res = &fleet.CelldStorageReservation{Name: reservationName(f), Spec: fleet.ReservationSpec{InitialReplicas: f.Spec.Replicas, Bucket: f.Spec.Storage.Bucket, FleetNamespace: f.Namespace, FleetName: f.Name, FleetUID: string(f.UID), SpecHash: specHash(f)}}
+			res.Annotations = map[string]string{attemptAnnotation: "deletion-before-workload"}
+			if err := r.Create(ctx, res); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{RequeueAfter: time.Second}, nil
+		}
+		return r.report(ctx, f, reason, "No reservation found; provisioning suspended", 0, false)
 	}
 	want := fleet.ReservationSpec{InitialReplicas: f.Spec.Replicas, Bucket: f.Spec.Storage.Bucket, FleetNamespace: f.Namespace, FleetName: f.Name, FleetUID: string(f.UID), SpecHash: specHash(f)}
 	if len(res.OwnerReferences) != 0 || !res.DeletionTimestamp.IsZero() || !r.reservationMatches(ctx, f, res, want) {
@@ -140,6 +166,28 @@ func (r *Reconciler) maintenanceFleet(ctx context.Context, f *fleet.CelldFleet) 
 	if err := r.Get(ctx, client.ObjectKeyFromObject(f), w); err != nil {
 		if !apierrors.IsNotFound(err) {
 			return ctrl.Result{}, err
+		}
+		if !f.DeletionTimestamp.IsZero() {
+			j, err := r.loadJournal(ctx, res)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+			if j != nil && j.Maintenance != nil && j.Maintenance.Kind == "Delete" && j.Maintenance.Phase == "Cleanup" {
+				result, _, err := r.completeRetainedDeletion(ctx, f, res, j)
+				return result, err
+			}
+			if res.Annotations[attemptAnnotation] == "" || res.Annotations[attemptAnnotation] == "deletion-before-workload" {
+				if res.Annotations == nil {
+					res.Annotations = map[string]string{}
+				}
+				res.Annotations[attemptAnnotation] = "deletion-before-workload"
+				j = &lifecycleJournal{Version: 7, RuntimeImage: Image, Initial: res.Spec.InitialReplicas, Applied: res.Spec.InitialReplicas, Maintenance: &maintenanceOperation{ID: string(uuid.NewUUID()), Kind: "Delete", Phase: "Cleanup"}}
+				if err := r.saveJournal(ctx, res, j); err != nil {
+					return ctrl.Result{}, err
+				}
+				result, _, err := r.completeRetainedDeletion(ctx, f, res, j)
+				return result, err
+			}
 		}
 		return r.report(ctx, f, reason, "Workload absent; retain finalizer and reservation because absence is not process fencing or recovery evidence", 0, false)
 	}

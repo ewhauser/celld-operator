@@ -1,0 +1,70 @@
+{{- if .Values.metrics.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "celld-operator.name" . }}-metrics
+  labels:
+    {{- include "celld-operator.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: celld-operator
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+  ports:
+    - name: metrics
+      port: {{ .Values.metrics.port }}
+      targetPort: metrics
+{{- if .Values.metrics.serviceMonitor.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "celld-operator.name" . }}
+  labels:
+    {{- include "celld-operator.labels" . | nindent 4 }}
+    {{- with .Values.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: celld-operator
+      app.kubernetes.io/instance: {{ .Release.Name | quote }}
+  endpoints:
+    - port: metrics
+      interval: {{ .Values.metrics.serviceMonitor.interval }}
+{{- end }}
+{{- if .Values.metrics.prometheusRule.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "celld-operator.name" . }}
+  labels:
+    {{- include "celld-operator.labels" . | nindent 4 }}
+    {{- with .Values.metrics.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: celld-fleets
+      rules:
+        - alert: CelldFleetRecoveryStalled
+          expr: celld_fleet_operation_stalled == 1
+          for: 5m
+          labels: {severity: warning}
+          annotations:
+            summary: Fleet lifecycle exceeded its operation deadline
+        - alert: CelldFleetPossibleDataLoss
+          expr: celld_fleet_possible_loss == 1
+          labels: {severity: critical}
+          annotations:
+            summary: Runtime reported possible data loss; controlled disruption is blocked
+        - alert: CelldFleetUnavailable
+          expr: (celld_fleet_ready_replicas == 0) and (celld_fleet_applied_replicas > 0)
+          for: 5m
+          labels: {severity: critical}
+          annotations:
+            summary: No serving replicas observed
+{{- end }}
+{{- end }}

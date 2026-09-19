@@ -1,0 +1,135 @@
+go build -o /dev/null ./...
+CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=add5c2c-dirty" -o bin/celld-operator ./cmd/celld-operator
+CGO_ENABLED=0 go build -trimpath -o bin/celld-launcher ./cmd/celld-launcher
+go test -race ./...
+ok  	github.com/ewhauser/celld-operator/api/v1alpha1	(cached)
+?   	github.com/ewhauser/celld-operator/cmd/celld-launcher	[no test files]
+?   	github.com/ewhauser/celld-operator/cmd/celld-operator	[no test files]
+?   	github.com/ewhauser/celld-operator/cmd/celld-qualify	[no test files]
+ok  	github.com/ewhauser/celld-operator/internal/capacity	(cached)
+ok  	github.com/ewhauser/celld-operator/internal/controller	38.026s
+ok  	github.com/ewhauser/celld-operator/internal/launcher	(cached)
+ok  	github.com/ewhauser/celld-operator/internal/recovery	(cached)
+ok  	github.com/ewhauser/celld-operator/internal/runtime/v050	(cached)
+GOTOOLCHAIN=go1.27.1 CGO_ENABLED=0 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2 run ./...
+internal/controller/observability_test.go:5:1: File is not properly formatted (goimports)
+
+^
+1 issues:
+* goimports: 1
+exit status 1
+make: *** [lint] Error 1
+GOTOOLCHAIN=go1.27.1 CGO_ENABLED=0 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2 run ./...
+0 issues.
+python3 hack/sync-chart.py --check
+Chart CRDs and RBAC match canonical manifests.
+helm lint charts/celld-operator --strict
+==> Linting charts/celld-operator
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+.qualification-venv/bin/python hack/test-chart.py
+Helm rendering, canonical RBAC, HA, monitoring and invalid-value checks passed.
+python3 -m unittest discover -s hack -p test_release.py
+....
+----------------------------------------------------------------------
+Ran 4 tests in 0.002s
+
+OK
+Release, image tag and chart version are absent.
+python3 hack/check-generated.py
+Generated CRDs and deepcopy code match.
+sh hack/qualification/replay.sh
+{"Scope":"offline candidate evidence; not live removal authorization","Evidence":{"OperationID":"offline-replay","Completed":[{"Node":"a","Generation":"aca1dbaf43cb67e552f8f7c0358de55579a4bc9cec783c1e77250927a783d038","Epoch":1,"Stopped":true}],"ObservedAt":"2026-09-18T10:17:30.465-06:00"}}
+{"Scope":"offline candidate evidence; not live removal authorization","Evidence":{"OperationID":"offline-replay","Completed":[{"Node":"a","Generation":"aca1dbaf43cb67e552f8f7c0358de55579a4bc9cec783c1e77250927a783d038","Epoch":1,"Stopped":true},{"Node":"b","Generation":"19d76c4295b63a46286633ca3c7947060e6a5ad5ed8b75a622283fadc2793bc8","Epoch":1,"Stopped":true}],"ObservedAt":"2026-09-18T10:18:01.436-06:00"}}
+{"Scope":"offline candidate evidence; not live removal authorization","Evidence":{"OperationID":"offline-replay","Completed":[{"Node":"a","Generation":"a520a79213bb05ec419ff9ab1a5bb5f9379f6b3c84f3f65bce10d4fc2d555e81","Epoch":1,"Stopped":true},{"Node":"b","Generation":"cb4821fefc761f87a0f8ab32f3f737a996ae54e53f3786c897078651377c7e94","Epoch":2,"Stopped":true}],"ObservedAt":"2026-09-18T10:15:12.656-06:00"}}
+{"Scope":"offline candidate evidence; not live removal authorization","Evidence":{"OperationID":"offline-replay","Completed":[{"Node":"a","Generation":"a520a79213bb05ec419ff9ab1a5bb5f9379f6b3c84f3f65bce10d4fc2d555e81","Epoch":1,"Stopped":true},{"Node":"b","Generation":"82033e42871913a38b9bbc3a72785201407424ce5037a53a4c00dcd117044c42","Epoch":1,"Stopped":true}],"ObservedAt":"2026-09-18T10:15:42.976-06:00"}}
+{"Scope":"offline candidate evidence; not live removal authorization","Evidence":{"OperationID":"offline-replay","Completed":[{"Node":"a","Generation":"7f5dc0d6862181b99880eeed7ed7adca7f54306a605b62b42d8d70269d33759b","Epoch":1,"Stopped":true}],"ObservedAt":"2026-09-18T10:17:58.668-06:00"}}
+BLOCKED (offline replay): session recovery unresolved
+BLOCKED (offline replay): session recovery unresolved
+BLOCKED (offline replay): session recovery unresolved
+BLOCKED (offline replay): unknown node or generation replacement
+.qualification-venv/bin/python -m unittest discover -s hack/qualification -p 'test_*.py'
+........
+----------------------------------------------------------------------
+Ran 8 tests in 0.004s
+
+OK
+log capture: injected failure
+go build -o /dev/null ./...
+CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=add5c2c-dirty" -o bin/celld-operator ./cmd/celld-operator
+CGO_ENABLED=0 go build -trimpath -o bin/celld-launcher ./cmd/celld-launcher
+go test -race ./...
+ok  	github.com/ewhauser/celld-operator/api/v1alpha1	(cached)
+?   	github.com/ewhauser/celld-operator/cmd/celld-launcher	[no test files]
+?   	github.com/ewhauser/celld-operator/cmd/celld-operator	[no test files]
+?   	github.com/ewhauser/celld-operator/cmd/celld-qualify	[no test files]
+ok  	github.com/ewhauser/celld-operator/internal/capacity	(cached)
+ok  	github.com/ewhauser/celld-operator/internal/controller	40.182s
+ok  	github.com/ewhauser/celld-operator/internal/launcher	(cached)
+ok  	github.com/ewhauser/celld-operator/internal/recovery	(cached)
+ok  	github.com/ewhauser/celld-operator/internal/runtime/v050	(cached)
+GOTOOLCHAIN=go1.27.1 CGO_ENABLED=0 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2 run ./...
+0 issues.
+python3 hack/check-generated.py
+Generated CRDs and deepcopy code match.
+python3 hack/sync-chart.py --check
+Chart CRDs and RBAC match canonical manifests.
+helm lint charts/celld-operator --strict
+==> Linting charts/celld-operator
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+.qualification-venv/bin/python hack/test-chart.py
+Helm rendering, canonical RBAC, HA, monitoring and invalid-value checks passed.
+python3 -m unittest discover -s hack -p test_release.py
+....
+----------------------------------------------------------------------
+Ran 4 tests in 0.002s
+
+OK
+Release, image tag and chart version are absent.
+sh hack/qualification/replay.sh
+{"Scope":"offline candidate evidence; not live removal authorization","Evidence":{"OperationID":"offline-replay","Completed":[{"Node":"a","Generation":"aca1dbaf43cb67e552f8f7c0358de55579a4bc9cec783c1e77250927a783d038","Epoch":1,"Stopped":true}],"ObservedAt":"2026-09-18T10:17:30.465-06:00"}}
+{"Scope":"offline candidate evidence; not live removal authorization","Evidence":{"OperationID":"offline-replay","Completed":[{"Node":"a","Generation":"aca1dbaf43cb67e552f8f7c0358de55579a4bc9cec783c1e77250927a783d038","Epoch":1,"Stopped":true},{"Node":"b","Generation":"19d76c4295b63a46286633ca3c7947060e6a5ad5ed8b75a622283fadc2793bc8","Epoch":1,"Stopped":true}],"ObservedAt":"2026-09-18T10:18:01.436-06:00"}}
+{"Scope":"offline candidate evidence; not live removal authorization","Evidence":{"OperationID":"offline-replay","Completed":[{"Node":"a","Generation":"a520a79213bb05ec419ff9ab1a5bb5f9379f6b3c84f3f65bce10d4fc2d555e81","Epoch":1,"Stopped":true},{"Node":"b","Generation":"cb4821fefc761f87a0f8ab32f3f737a996ae54e53f3786c897078651377c7e94","Epoch":2,"Stopped":true}],"ObservedAt":"2026-09-18T10:15:12.656-06:00"}}
+{"Scope":"offline candidate evidence; not live removal authorization","Evidence":{"OperationID":"offline-replay","Completed":[{"Node":"a","Generation":"a520a79213bb05ec419ff9ab1a5bb5f9379f6b3c84f3f65bce10d4fc2d555e81","Epoch":1,"Stopped":true},{"Node":"b","Generation":"82033e42871913a38b9bbc3a72785201407424ce5037a53a4c00dcd117044c42","Epoch":1,"Stopped":true}],"ObservedAt":"2026-09-18T10:15:42.976-06:00"}}
+{"Scope":"offline candidate evidence; not live removal authorization","Evidence":{"OperationID":"offline-replay","Completed":[{"Node":"a","Generation":"7f5dc0d6862181b99880eeed7ed7adca7f54306a605b62b42d8d70269d33759b","Epoch":1,"Stopped":true}],"ObservedAt":"2026-09-18T10:17:58.668-06:00"}}
+BLOCKED (offline replay): session recovery unresolved
+BLOCKED (offline replay): session recovery unresolved
+BLOCKED (offline replay): session recovery unresolved
+BLOCKED (offline replay): unknown node or generation replacement
+.qualification-venv/bin/python -m unittest discover -s hack/qualification -p 'test_*.py'
+........
+----------------------------------------------------------------------
+Ran 8 tests in 0.004s
+
+OK
+log capture: injected failure
+go test -race ./...
+ok  	github.com/ewhauser/celld-operator/api/v1alpha1	(cached)
+?   	github.com/ewhauser/celld-operator/cmd/celld-launcher	[no test files]
+?   	github.com/ewhauser/celld-operator/cmd/celld-operator	[no test files]
+?   	github.com/ewhauser/celld-operator/cmd/celld-qualify	[no test files]
+ok  	github.com/ewhauser/celld-operator/internal/capacity	(cached)
+ok  	github.com/ewhauser/celld-operator/internal/controller	40.364s
+ok  	github.com/ewhauser/celld-operator/internal/launcher	(cached)
+ok  	github.com/ewhauser/celld-operator/internal/recovery	(cached)
+ok  	github.com/ewhauser/celld-operator/internal/runtime/v050	(cached)
+GOTOOLCHAIN=go1.27.1 CGO_ENABLED=0 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2 run ./...
+0 issues.
+go test -race ./...
+ok  	github.com/ewhauser/celld-operator/api/v1alpha1	(cached)
+?   	github.com/ewhauser/celld-operator/cmd/celld-launcher	[no test files]
+?   	github.com/ewhauser/celld-operator/cmd/celld-operator	[no test files]
+?   	github.com/ewhauser/celld-operator/cmd/celld-qualify	[no test files]
+ok  	github.com/ewhauser/celld-operator/internal/capacity	(cached)
+ok  	github.com/ewhauser/celld-operator/internal/controller	44.797s
+ok  	github.com/ewhauser/celld-operator/internal/launcher	(cached)
+ok  	github.com/ewhauser/celld-operator/internal/recovery	(cached)
+ok  	github.com/ewhauser/celld-operator/internal/runtime/v050	(cached)
+GOTOOLCHAIN=go1.27.1 CGO_ENABLED=0 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2 run ./...
+0 issues.
+go build -o /dev/null ./...
+CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=add5c2c-dirty" -o bin/celld-operator ./cmd/celld-operator
+CGO_ENABLED=0 go build -trimpath -o bin/celld-launcher ./cmd/celld-launcher

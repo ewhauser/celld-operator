@@ -66,3 +66,24 @@ integration-bucket:
 .PHONY: integration-persistent
 integration-persistent:
 	python3 hack/integration/run.py --persistent-lifecycle
+
+.PHONY: chart-sync chart-check chart-package
+chart-sync:
+	python3 hack/sync-chart.py
+
+chart-check:
+	python3 hack/sync-chart.py --check
+	helm lint charts/celld-operator --strict
+	.qualification-venv/bin/python hack/test-chart.py
+	python3 -m unittest discover -s hack -p test_release.py
+
+chart-package: chart-check
+	helm package charts/celld-operator --destination dist
+
+.PHONY: integration-ordered-bucket
+integration-ordered-bucket:
+	python3 hack/integration/run.py --ordered-bucket
+
+.PHONY: integration-maintenance
+integration-maintenance:
+	python3 hack/integration/run.py --maintenance

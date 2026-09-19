@@ -120,6 +120,7 @@ func persistentSetup(t *testing.T) *persistentFixture {
 				return s, errors.New("generation differs")
 			}
 			s.Phase = "Stopped"
+			s.RestartDenied = true
 			s.Operation = op
 			states[p.Name] = s
 			reader.stopped = true

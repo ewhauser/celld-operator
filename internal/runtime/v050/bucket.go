@@ -93,7 +93,10 @@ func (e *BucketExpiryInvalidatedError) Error() string {
 // absent from desired Kubernetes membership, NOT physically stopped.
 type BucketMember struct {
 	Node, Generation string
-	Retired          bool
+	// SupersededBy is an exact positively observed admitted successor generation.
+	// This is logical membership evidence, never physical process termination.
+	SupersededBy string
+	Retired      bool
 	// Resolved records durably observed positive expiry; survivor settling is
 	// independently enforced by the controller.
 	Resolved bool
@@ -107,11 +110,46 @@ func (a *Adapter) InspectBucketMembership(ctx context.Context, r Reader, members
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	expected := map[string]BucketMember{}
-	for _, s := range members {
-		if !validID(s.Node) || !validID(s.Generation) || expected[s.Node].Node != "" {
-			return BucketObservation{}, errors.New("ambiguous bucket membership")
+	generations := map[string]map[string]BucketMember{}
+	for _, member := range members {
+		if !validID(member.Node) || !validID(member.Generation) {
+			return BucketObservation{}, errors.New("invalid bucket membership")
 		}
-		expected[s.Node] = s
+		if generations[member.Node] == nil {
+			generations[member.Node] = map[string]BucketMember{}
+		}
+		if _, exists := generations[member.Node][member.Generation]; exists {
+			return BucketObservation{}, errors.New("duplicate bucket generation")
+		}
+		generations[member.Node][member.Generation] = member
+		if member.SupersededBy == "" {
+			if expected[member.Node].Node != "" {
+				return BucketObservation{}, errors.New("ambiguous bucket membership")
+			}
+			expected[member.Node] = member
+		}
+	}
+	for _, member := range members {
+		if member.SupersededBy == "" {
+			continue
+		}
+		if !member.Retired {
+			return BucketObservation{}, errors.New("current bucket generation cannot be superseded")
+		}
+		next := member
+		for hops := 0; next.SupersededBy != ""; hops++ {
+			if hops >= len(members) {
+				return BucketObservation{}, errors.New("cyclic bucket succession")
+			}
+			var ok bool
+			next, ok = generations[member.Node][next.SupersededBy]
+			if !ok {
+				return BucketObservation{}, errors.New("bucket successor missing")
+			}
+		}
+		if expected[member.Node].Generation != next.Generation {
+			return BucketObservation{}, errors.New("bucket successor authority ambiguous")
+		}
 	}
 	if len(expected) == 0 {
 		return BucketObservation{}, errors.New("empty bucket membership")

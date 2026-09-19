@@ -47,7 +47,9 @@ exclusive fleet credentials/storage scope, and nonmalicious runtime and cluster
 administration. It is not a Byzantine-writer guarantee. The Bucket path needs
 observed node UID/generation/container consistency and verified runtime
 configuration; it does not require the peer-authentication secret to certify
-physical process identity. Unknown or replaced generations remain blockers.
+physical process identity. Unknown historical writers remain blockers. A previously admitted Bucket invocation
+may be superseded by a fresh matching lease from a different container within
+the same Pod UID; its predecessor remains permanently recorded.
 
 ## Durable execution
 
@@ -87,9 +89,10 @@ physical process identity. Unknown or replaced generations remain blockers.
    evidence. Pinned `dead_node_gc.rs:399` deletes no-log dead records after a CAS tombstone. Persist the first successful positive-expiry assessment in the operation candidates before settling. A later complete listing may omit that exact generation during settling or after completion; full fresh survivor, live-lease and log/loss checks still run. This avoids requiring a runtime-GCed object to outlive the ten-second settling window. Absence cannot resolve a new retirement; unreadable listed records still block. Renewed historical leases block the next assessment. Reappearing
    retired identities and replaced generations are not adopted.
 
-The journal writes version **5** and reads versions 1–5. Older binaries reject
-version 5 instead of ignoring Bucket admission/history. Downgrade after advancement
-is unsupported. History is never pruned to fit the existing 200 KiB journal budget.
+The journal writes version **7** and reads versions 1–7. Unsupported older
+binaries reject newer authority instead of ignoring it. Downgrade after advancement
+is unsupported. [Immutable journal archives](journal-archives.md) retain full
+history beyond the annotation budget; no fencing evidence is pruned.
 Canceled unissued operations retain candidate admission records but never mark new historical sessions resolved.
 
 ## Automatic execution and local qualification
@@ -119,12 +122,12 @@ NetworkPolicy, the unchanged runtime and Metrics Server. See the recorded
 
 - EKS/S3 identity, IAM isolation, KMS, pagination/faults and actual AWS storage
   behavior remain unqualified. No AWS account or default kubeconfig was used.
-- Strict multi-AZ contraction can block when some Deployment victims violate spread: for example a 2/1 distribution cannot safely decrement with arbitrary victim selection, even though a particular victim would be safe. This needs a qualified victim-selection protocol or different workload layout to improve liveness; the operator never silently relaxes strictness.
+- Strict multi-AZ contraction can block when some Deployment victims violate spread: for example a 2/1 distribution cannot safely decrement with arbitrary victim selection, even though a particular victim would be safe. Opt into the [Ordered Bucket layout](ordered-bucket.md) for deterministic ordinal victims and zone assignment; existing Deployments are not silently migrated or relaxed.
 - Broader workloads, clock skew/suspension timing, sustained concurrent writes,
   long-running connections, repeated cloud node partitions and soak tests remain.
 - The operator conservatively blocks a lost/replaced historical node record,
-  unknown prior writer, peer-log history, container generation replacement or a
-  changed candidate set before issue. It offers no administrative success flag.
+  unknown prior writer, peer-log history, unadmitted container generation replacement
+  or a changed candidate set before issue. It offers no administrative success flag.
 - A process retaining S3 access may continue renewing its lease indefinitely;
   the issued operation then remains pending. An infrastructure operator can
   restore networking or remove that process, but this operator has no EC2 fencing
@@ -140,10 +143,37 @@ record has already disappeared cannot manufacture that evidence. Supporting
 that ordering needs another durable runtime evidence contract or authenticated
 transport history; higher polling frequency is not a proof.
 
-Journal v6 distinguishes `ExpiryObserved` (positive expiry authority validated
-after the replica effect, not full settling) from `Retired` (membership state). A typed renewed-lease or generation-replacement
+The journal distinguishes `ExpiryObserved` (positive expiry authority from a
+complete membership assessment, not full settling) from `Retired` (membership state). A typed renewed-lease or generation-replacement
 observation durably sets `ExpiryInvalidated` for the exact generation in both
 operation candidates and fully settled history. A subsequent missing record
 cannot reuse that superseded proof. Only another successful complete assessment
 with positively expired metadata reestablishes the authority; renewal also resets
-the settling window. Unknown or canceled admission never sets `ExpiryObserved`.
+the settling window. Unknown writers never receive `ExpiryObserved`; canceling an operation cannot
+manufacture it. Steady observations may record actual expiry of a previously
+admitted writer that left membership outside a controlled decrement.
+
+## Steady Bucket invocation admission
+
+When no lifecycle or maintenance operation is active, the operator records a
+fully observed, Ready Bucket membership before issuing another action. Admission
+uses the same pinned pod/owner/configuration checks, complete S3 membership and
+no-log checks, generation association, and before/after identity verification as
+contraction. It does not require low demand or Metrics Server: recording an
+invocation has no replica effect. Prospective removal still runs its own full
+capacity and placement checks.
+
+This early durable admission lets a later in-place container restart supersede a
+known Bucket predecessor even before the fleet's first contraction. Every prior
+generation remains in history. Unknown historical writers, missing metadata,
+changed posture, or an unready membership cannot be adopted. Ordinary admission
+uncertainty does not block supported capacity additions; observed loss still
+persists its safety fence, and contrary lease evidence invalidates old expiry
+proof durably. A restart before any qualified observation can still require
+investigation because its predecessor's posture was never established.
+
+[Admission regression tests](../internal/controller/bucket_admission_test.go)
+cover eight cases: first admission followed by restart and first removal; five
+negative admission cases; preserved additive capacity under uncertainty; and
+invalidation of previously expired leases that revive. These are local controller
+checks, not additional AWS qualification.

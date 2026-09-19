@@ -153,12 +153,18 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 		c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: "launcher", MountPath: "/launcher", ReadOnly: true}, corev1.VolumeMount{Name: "launcher-key", MountPath: "/launcher-key", ReadOnly: true})
 		c.Ports = append(c.Ports, corev1.ContainerPort{Name: "launcher", ContainerPort: 8083})
 	}
+	if orderedBucket(f) {
+		pod.SchedulingGates = []corev1.PodSchedulingGate{{Name: bucketZoneGate}}
+		if s.Placement.Mode != "Relaxed" {
+			pod.TopologySpreadConstraints = nil
+		}
+	}
 	return corev1.PodTemplateSpec{Labels: labels(f), Spec: pod}
 }
 
 func workload(f *fleet.CelldFleet, opts Options) client.Object {
 	template := podTemplate(f, opts)
-	if f.Spec.Profile == "Bucket" {
+	if f.Spec.Profile == "Bucket" && !orderedBucket(f) {
 		return &appsv1.Deployment{
 			ObjectMeta: metadata(f, f.Name),
 			Spec: appsv1.DeploymentSpec{
@@ -168,6 +174,9 @@ func workload(f *fleet.CelldFleet, opts Options) client.Object {
 				Strategy: appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType},
 			},
 		}
+	}
+	if orderedBucket(f) {
+		return &appsv1.StatefulSet{ObjectMeta: metadata(f, f.Name), Spec: appsv1.StatefulSetSpec{Replicas: new(f.Spec.Replicas), Selector: selector(f), ServiceName: f.Name + "-peers", PodManagementPolicy: appsv1.OrderedReadyPodManagement, PersistentVolumeClaimRetentionPolicy: &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{WhenDeleted: appsv1.RetainPersistentVolumeClaimRetentionPolicyType, WhenScaled: appsv1.RetainPersistentVolumeClaimRetentionPolicyType}, Template: template, UpdateStrategy: appsv1.StatefulSetUpdateStrategy{Type: appsv1.OnDeleteStatefulSetStrategyType}}}
 	}
 	return &appsv1.StatefulSet{
 		ObjectMeta: metadata(f, f.Name),
