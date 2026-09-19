@@ -27,6 +27,9 @@ harnesses are available; they do not enable production scaling.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for formatting, linting, hooks, and container
 builds, and [docs/](docs/README.md) for the architecture and qualification work.
+The same documentation is published at
+[ewhauser.github.io/celld-operator](https://ewhauser.github.io/celld-operator/);
+`make site` builds it locally from `site/`.
 
 Runtime qualification: [measured findings and release gates](docs/qualification/README.md), [local harness](hack/qualification/README.md).
 

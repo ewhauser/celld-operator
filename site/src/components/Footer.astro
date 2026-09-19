@@ -1,0 +1,19 @@
+---
+import Default from '@astrojs/starlight/components/Footer.astro';
+---
+
+<Default />
+<p class="site-notice">
+	Every documented path is experimental. Nothing on this site is AWS-qualified; the
+	<a href={`${import.meta.env.BASE_URL}contracts/critical-features/`}>status page</a> lists the open release gates.
+</p>
+
+<style>
+	.site-notice {
+		margin-top: 1.5rem;
+		padding-top: 1rem;
+		border-top: 1px solid var(--sl-color-hairline);
+		font-size: var(--sl-text-xs);
+		color: var(--sl-color-gray-3);
+	}
+</style>

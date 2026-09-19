@@ -1,5 +1,8 @@
 # Celld operator documentation
 
+Published at [ewhauser.github.io/celld-operator](https://ewhauser.github.io/celld-operator/).
+The site syncs every file here at build time; see [site/README.md](../site/README.md).
+
 ## Current state
 
 - [Critical feature checklist](critical-features.md): what executes today, what is a

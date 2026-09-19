@@ -44,6 +44,15 @@ pre-commit install
 
 The configuration is included, but hooks are not installed automatically.
 
+## Documentation site
+
+`site/` holds the Astro site published to GitHub Pages. Contract, decision and
+qualification pages are synced from `docs/` at build time, and the API, chart,
+sample and flag references are generated from `config/`, `charts/` and `cmd/`,
+so edit those sources rather than the synced copies. Only `site/src/content/docs/start`,
+`concepts` and `reference` are written by hand. `make site` builds it and fails on
+broken internal links; `make site-dev` serves it locally.
+
 ## Containers
 
 ```sh

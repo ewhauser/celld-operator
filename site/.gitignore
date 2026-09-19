@@ -1,0 +1,12 @@
+# build output
+dist/
+.astro/
+node_modules/
+
+# pages synced from ../docs and generated references (pnpm sync)
+src/content/docs/contracts/
+src/content/docs/decisions/
+src/content/docs/qualification/
+src/content/docs/history/
+src/content/docs/api/
+src/generated-sidebar.json
