@@ -422,12 +422,13 @@ func (r *Reconciler) contractBucket(ctx context.Context, f *fleet.CelldFleet, re
 		op.SettledAt = time.Time{}
 		return save()
 	}
-	if op.SettledAt.IsZero() {
-		op.SettledAt = at
-		return save()
-	}
-	if at.Sub(op.SettledAt) < 10*time.Second {
+	// Contraction reports progress instead of a silent requeue while it waits,
+	// so the wait it hands the shared window is its own.
+	settlingReport := func() (ctrl.Result, bool, error) {
 		return report("LifecycleProgress", "Bucket membership converged; repeating fresh survivor and lease checks through settling")
+	}
+	if t := awaitSettling(&op.SettledAt, at, save, settlingReport); t != nil {
+		return t.unwrap()
 	}
 	j.BucketHistory = sessions
 	done := completion(op, at)

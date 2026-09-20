@@ -42,6 +42,74 @@ type maintenanceTarget struct {
 	UID  types.UID
 }
 
+// transition is the (result, handled, error) triple every lifecycle phase
+// returns. Carrying it as a value lets the shared helpers below hand a caller's
+// own terminal transition back to it unchanged, instead of inventing one.
+type transition struct {
+	result  ctrl.Result
+	handled bool
+	err     error
+}
+
+func asTransition(result ctrl.Result, handled bool, err error) *transition {
+	return &transition{result: result, handled: handled, err: err}
+}
+
+func (t *transition) unwrap() (ctrl.Result, bool, error) { return t.result, t.handled, t.err }
+
+// settlingWindow is the convergence window every recovery phase waits out
+// before it may record history and advance.
+const settlingWindow = 10 * time.Second
+
+// awaitSettling opens and waits out the settling window. The first observation
+// is recorded through settledAt and durably persisted with save; a later
+// observation still inside the window returns wait. A nil return means the
+// window has elapsed and the caller may proceed. Clearing settledAt on the way
+// out stays with the caller: phases that step to a further target reset it,
+// phases that finish the operation do not.
+func awaitSettling(settledAt *time.Time, observedAt time.Time, save, wait func() (ctrl.Result, bool, error)) *transition {
+	if settledAt.IsZero() {
+		*settledAt = observedAt
+		return asTransition(save())
+	}
+	if observedAt.Sub(*settledAt) < settlingWindow {
+		return asTransition(wait())
+	}
+	return nil
+}
+
+// requeueSoon is the wait every maintenance phase uses inside the settling
+// window: no progress is recorded, the pass is simply repeated.
+func requeueSoon() (ctrl.Result, bool, error) {
+	return ctrl.Result{RequeueAfter: time.Second}, true, nil
+}
+
+// scaleToZero is the replica CAS that removes all compute for an operation and
+// stamps the workload with the exact operation that issued it. admit runs only
+// while the workload still carries replicas and states the phase's own
+// preconditions; the transition it returns denies the CAS and is handed back
+// unchanged. A workload already at zero must carry this operation's annotation,
+// or unauthorized is returned: a foreign or absent stamp means some other
+// issuer removed the replicas and this operation has no authority over them.
+// A nil return means the caller may proceed to its next phase.
+func (r *Reconciler) scaleToZero(ctx context.Context, w client.Object, id string, admit, unauthorized func() *transition) *transition {
+	if replicas(w) != 0 {
+		if denied := admit(); denied != nil {
+			return denied
+		}
+		setReplicas(w, 0)
+		w.GetAnnotations()[operationKey] = id
+		if err := r.Update(ctx, w); err != nil {
+			return asTransition(ctrl.Result{}, true, err)
+		}
+		return nil
+	}
+	if w.GetAnnotations()[operationKey] != id {
+		return unauthorized()
+	}
+	return nil
+}
+
 func (r *Reconciler) beginMaintenance(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, j *lifecycleJournal, w client.Object) (ctrl.Result, bool, error) {
 	if w.GetUID() != j.WorkloadUID {
 		return ctrl.Result{}, true, errors.New("maintenance workload changed")
@@ -57,12 +125,29 @@ func (r *Reconciler) beginMaintenance(ctx context.Context, f *fleet.CelldFleet, 
 	return r.saveMaintenance(ctx, f, res, j)
 }
 
+// maintenancePass is one reconcile pass over an admitted maintenance operation.
+// It carries what every phase of that pass needs: the fleet, reservation,
+// journal and workload, the operation itself, the journal view each assessment
+// is made against, and the two closures a phase ends in — save, which durably
+// records the transition, and block, which records a blocker and reports it.
+type maintenancePass struct {
+	f     *fleet.CelldFleet
+	res   *fleet.CelldStorageReservation
+	j     *lifecycleJournal
+	w     client.Object
+	m     *maintenanceOperation
+	view  lifecycleJournal
+	save  func() (ctrl.Result, bool, error)
+	block func(error) (ctrl.Result, bool, error)
+}
+
 func (r *Reconciler) executeMaintenance(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, j *lifecycleJournal, w client.Object) (ctrl.Result, bool, error) {
 	m := j.Maintenance
-	save := func() (ctrl.Result, bool, error) {
+	p := &maintenancePass{f: f, res: res, j: j, w: w, m: m}
+	p.save = func() (ctrl.Result, bool, error) {
 		return r.saveMaintenance(ctx, f, res, j)
 	}
-	block := func(err error) (ctrl.Result, bool, error) {
+	p.block = func(err error) (ctrl.Result, bool, error) {
 		if _, ok := errors.AsType[*v050.LossError](err); ok {
 			return r.recordLoss(ctx, f, w, res, j, err.Error())
 		}
@@ -76,17 +161,53 @@ func (r *Reconciler) executeMaintenance(ctx context.Context, f *fleet.CelldFleet
 		result, reportErr := r.report(ctx, f, "MaintenanceRecoveryBlocked", err.Error(), false)
 		return result, true, reportErr
 	}
-	if m.ID == "" || (m.Kind != "Restart" && m.Kind != "Delete" && m.Kind != "Contract" && m.Kind != "Upgrade") || m.Index < 0 || m.Index > len(m.Targets) || j.Operation != nil {
-		return block(errors.New("invalid maintenance authority"))
+	expected, denied := r.admitMaintenancePass(ctx, p)
+	if denied != nil {
+		return denied.unwrap()
+	}
+	if f.Spec.Profile == "PersistentFleet" {
+		beforeVersion := expected.ResourceVersion
+		result, handled, err := r.executePersistentMaintenance(ctx, expected, res, j, w, p.block)
+		if expected.ResourceVersion != beforeVersion {
+			f.ResourceVersion, f.Status = expected.ResourceVersion, expected.Status
+		}
+		return result, handled, err
+	}
+	p.view = *j
+	p.view.Operation = &lifecycleOperation{ID: m.ID, Phase: "Recovering", From: j.Applied, To: j.Applied, BucketCandidates: m.Sessions}
+	if m.Kind == "Delete" {
+		return r.executeBucketDeletion(ctx, f, res, j, w, p.block)
+	}
+	switch m.Phase {
+	case "Capture", "Next":
+		return r.executeMaintenanceCapture(ctx, p)
+	case "Authorized":
+		return r.executeMaintenanceAuthorized(ctx, p)
+	case "Recovering":
+		return r.executeMaintenanceRecovering(ctx, p)
+	default:
+		return p.block(errors.New("unknown maintenance phase"))
+	}
+}
+
+// admitMaintenancePass re-establishes on every pass that this operation still
+// holds authority over this exact workload: a valid journal, no loss fence, an
+// unchanged workload identity and template, a current maintenance fence and
+// available production evidence. It returns the expected fleet the pass
+// observed against, or the transition the caller must return instead.
+func (r *Reconciler) admitMaintenancePass(ctx context.Context, p *maintenancePass) (*fleet.CelldFleet, *transition) {
+	f, j, w, m := p.f, p.j, p.w, p.m
+	if invalidMaintenanceAuthority(j) {
+		return nil, asTransition(p.block(errors.New("invalid maintenance authority")))
 	}
 	if j.Loss != "" || w.GetAnnotations()[lossFenceKey] != "" {
-		return block(errors.New("durable loss fence prohibits maintenance completion"))
+		return nil, asTransition(p.block(errors.New("durable loss fence prohibits maintenance completion")))
 	}
 	expected := appliedRuntime(f, j)
 	if m.Kind == "Upgrade" {
 		image, err := transitionWorkloadImage(j, w)
 		if err != nil {
-			return block(err)
+			return nil, asTransition(p.block(err))
 		}
 		expected.Spec.RuntimeImage = image
 	}
@@ -98,174 +219,190 @@ func (r *Reconciler) executeMaintenance(ctx context.Context, f *fleet.CelldFleet
 		expected.Spec.Replicas = 0
 	}
 	if w.GetUID() != j.WorkloadUID || !matches(workload(expected, r.Options), w) {
-		return block(errors.New("maintenance workload identity or configuration changed"))
+		return nil, asTransition(p.block(errors.New("maintenance workload identity or configuration changed")))
 	}
 	if w.GetAnnotations()[maintenanceFenceKey] != maintenanceFence(f) {
 		if err := r.setMaintenanceFence(ctx, f, w, maintenanceFence(f)); err != nil {
-			return block(err)
+			return nil, asTransition(p.block(err))
 		}
 	}
 	if orderedBucket(f) {
 		if err := r.scheduleOrderedBucket(ctx, f, j); err != nil {
-			return block(err)
+			return nil, asTransition(p.block(err))
 		}
 	}
 	if r.Evidence == nil {
-		return block(errors.New("production recovery evidence unavailable"))
+		return nil, asTransition(p.block(errors.New("production recovery evidence unavailable")))
 	}
 	inventory, loss := r.Evidence.Observe(ctx, expected, j.Inventory)
 	j.Inventory = inventory
 	if loss != "" {
-		return r.recordLoss(ctx, f, w, res, j, loss)
+		return nil, asTransition(r.recordLoss(ctx, f, w, p.res, j, loss))
 	}
 	if m.Phase == "Capture" || m.Phase == "Next" {
-		if paused(f) {
-			result, err := r.report(ctx, f, "MaintenancePaused", "No new maintenance action admitted", false)
-			return result, true, err
-		}
-		if m.Kind == "Upgrade" && (!canStopUpgrade(f, j, r.Options) || runtimeImage(f) != m.TargetImage || !f.DeletionTimestamp.IsZero()) {
-			j.Maintenance = nil
-			return save()
-		}
-		if m.Kind == "Contract" && (f.Spec.Replicas != m.TargetReplicas || !f.DeletionTimestamp.IsZero() || !coordinatedDowntime(f)) {
-			j.Maintenance = nil
-			return save()
-		}
-		if m.Kind == "Restart" && (!f.DeletionTimestamp.IsZero() || runtimeImage(f) != j.RuntimeImage || f.Spec.Maintenance == nil || f.Spec.Maintenance.RestartToken != m.Token) {
-			j.Maintenance = nil
-			return save()
-		}
-		if !r.capacityNow().Before(m.Deadline) {
-			return block(errors.New("maintenance admission deadline exceeded"))
+		if t := r.admitNextMaintenanceAction(ctx, p); t != nil {
+			return nil, t
 		}
 	}
-	if f.Spec.Profile == "PersistentFleet" {
-		beforeVersion := expected.ResourceVersion
-		result, handled, err := r.executePersistentMaintenance(ctx, expected, res, j, w, block)
-		if expected.ResourceVersion != beforeVersion {
-			f.ResourceVersion, f.Status = expected.ResourceVersion, expected.Status
-		}
-		return result, handled, err
+	return expected, nil
+}
+
+// admitNextMaintenanceAction gates the admission of the next disruptive action.
+// Pause and a request that no longer asks for this operation stop the next
+// action; neither revokes an action a previous leader already authorized.
+func (r *Reconciler) admitNextMaintenanceAction(ctx context.Context, p *maintenancePass) *transition {
+	f, j, m := p.f, p.j, p.m
+	if paused(f) {
+		result, err := r.report(ctx, f, "MaintenancePaused", "No new maintenance action admitted", false)
+		return asTransition(result, true, err)
 	}
-	view := *j
-	view.Operation = &lifecycleOperation{ID: m.ID, Phase: "Recovering", From: j.Applied, To: j.Applied, BucketCandidates: m.Sessions}
-	if m.Kind == "Delete" {
-		return r.executeBucketDeletion(ctx, f, res, j, w, block)
+	withdrawn := false
+	switch m.Kind {
+	case "Upgrade":
+		withdrawn = !canStopUpgrade(f, j, r.Options) || runtimeImage(f) != m.TargetImage || !f.DeletionTimestamp.IsZero()
+	case "Contract":
+		withdrawn = f.Spec.Replicas != m.TargetReplicas || !f.DeletionTimestamp.IsZero() || !coordinatedDowntime(f)
+	case "Restart":
+		withdrawn = !f.DeletionTimestamp.IsZero() || runtimeImage(f) != j.RuntimeImage || f.Spec.Maintenance == nil || f.Spec.Maintenance.RestartToken != m.Token
 	}
-	switch m.Phase {
-	case "Capture", "Next":
-		sessions, _, err := r.bucketAssessment(ctx, f, &view, j.Applied, false)
+	if withdrawn {
+		j.Maintenance = nil
+		return asTransition(p.save())
+	}
+	if !r.capacityNow().Before(m.Deadline) {
+		return asTransition(p.block(errors.New("maintenance admission deadline exceeded")))
+	}
+	return nil
+}
+
+// invalidMaintenanceAuthority reports whether the journal's maintenance record
+// could never have been admitted: no operation identity, an unknown kind, a
+// target index outside the captured inventory, or a concurrent scaling
+// operation.
+func invalidMaintenanceAuthority(j *lifecycleJournal) bool {
+	m := j.Maintenance
+	if j.Operation != nil || m.ID == "" {
+		return true
+	}
+	if m.Kind != "Restart" && m.Kind != "Delete" && m.Kind != "Contract" && m.Kind != "Upgrade" {
+		return true
+	}
+	return m.Index < 0 || m.Index > len(m.Targets)
+}
+
+func (r *Reconciler) executeMaintenanceCapture(ctx context.Context, p *maintenancePass) (ctrl.Result, bool, error) {
+	f, j, w, m, save, block := p.f, p.j, p.w, p.m, p.save, p.block
+	sessions, _, err := r.bucketAssessment(ctx, f, &p.view, j.Applied, false)
+	if err != nil {
+		return block(err)
+	}
+	if m.Phase == "Capture" {
+		pods, err := r.Evidence.pods(ctx, f)
 		if err != nil {
 			return block(err)
 		}
-		if m.Phase == "Capture" {
-			pods, err := r.Evidence.pods(ctx, f)
-			if err != nil {
-				return block(err)
-			}
-			// Capture is replayed whenever a later step in this pass blocks, so the
-			// inventory is rebuilt and replaced rather than appended to. Appending
-			// duplicated every target and wedged the journal on its next load.
-			targets := make([]maintenanceTarget, 0, len(pods))
-			for _, pod := range pods {
-				targets = append(targets, maintenanceTarget{Name: pod.Name, UID: pod.UID})
-			}
-			slices.SortFunc(targets, func(a, b maintenanceTarget) int {
-				if a.Name < b.Name {
-					return -1
-				}
-				if a.Name > b.Name {
-					return 1
-				}
-				return 0
-			})
-			m.Targets = targets
+		// Capture is replayed whenever a later step in this pass blocks, so the
+		// inventory is rebuilt and replaced rather than appended to. Appending
+		// duplicated every target and wedged the journal on its next load.
+		targets := make([]maintenanceTarget, 0, len(pods))
+		for _, pod := range pods {
+			targets = append(targets, maintenanceTarget{Name: pod.Name, UID: pod.UID})
 		}
-		m.Sessions = sessions
-		if m.Index == len(m.Targets) {
-			j.CompletedRestarts = append(j.CompletedRestarts, m.Token)
-			j.History = append(j.History, lifecycleCompletion{ID: m.ID, From: j.Applied, To: j.Applied, EvidenceAt: r.capacityNow(), Outcome: "RestartComplete"})
-			j.Maintenance = nil
-			j.Request = nil
-			return save()
+		slices.SortFunc(targets, func(a, b maintenanceTarget) int {
+			if a.Name < b.Name {
+				return -1
+			}
+			if a.Name > b.Name {
+				return 1
+			}
+			return 0
+		})
+		m.Targets = targets
+	}
+	m.Sessions = sessions
+	if m.Index == len(m.Targets) {
+		j.CompletedRestarts = append(j.CompletedRestarts, m.Token)
+		j.History = append(j.History, lifecycleCompletion{ID: m.ID, From: j.Applied, To: j.Applied, EvidenceAt: r.capacityNow(), Outcome: "RestartComplete"})
+		j.Maintenance = nil
+		j.Request = nil
+		return save()
+	}
+	target := m.Targets[m.Index]
+	pod := &corev1.Pod{}
+	if err := r.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: target.Name}, pod); err != nil {
+		return block(err)
+	}
+	if pod.UID != target.UID {
+		return block(errors.New("restart target replaced outside admitted operation"))
+	}
+	candidates, err := r.Evidence.bucketCandidates(ctx, f, &p.view, r.Options)
+	if err != nil {
+		return block(err)
+	}
+	if err := validateRestartPlacement(f, candidates, target.UID); err != nil {
+		return block(err)
+	}
+	if err := r.authorizeMaintenanceAction(ctx, w, m); err != nil {
+		return block(err)
+	}
+	m.Phase = "Authorized"
+	return save()
+}
+
+func (r *Reconciler) executeMaintenanceAuthorized(ctx context.Context, p *maintenancePass) (ctrl.Result, bool, error) {
+	f, j, m, save, block := p.f, p.j, p.m, p.save, p.block
+	target := m.Targets[m.Index]
+	pod := &corev1.Pod{}
+	err := r.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: target.Name}, pod)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return block(err)
+	}
+	if err == nil && pod.UID == target.UID {
+		if m.Deadline.IsZero() || !r.capacityNow().Before(m.Deadline) {
+			return block(errors.New("restart deadline expired before pod deletion"))
 		}
-		target := m.Targets[m.Index]
-		pod := &corev1.Pod{}
-		if err := r.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: target.Name}, pod); err != nil {
+		sessions, _, err := r.bucketAssessment(ctx, f, &p.view, j.Applied, false)
+		if err != nil {
 			return block(err)
 		}
-		if pod.UID != target.UID {
-			return block(errors.New("restart target replaced outside admitted operation"))
+		if !slices.Equal(sessions, m.Sessions) {
+			m.Sessions = sessions
+			return save()
 		}
-		candidates, err := r.Evidence.bucketCandidates(ctx, f, &view, r.Options)
+		candidates, err := r.Evidence.bucketCandidates(ctx, f, &p.view, r.Options)
 		if err != nil {
 			return block(err)
 		}
 		if err := validateRestartPlacement(f, candidates, target.UID); err != nil {
 			return block(err)
 		}
-		if err := r.authorizeMaintenanceAction(ctx, w, m); err != nil {
+		if err := r.Delete(ctx, pod, client.Preconditions{UID: &target.UID, ResourceVersion: &pod.ResourceVersion}); err != nil && !apierrors.IsNotFound(err) {
 			return block(err)
 		}
-		m.Phase = "Authorized"
-		return save()
-	case "Authorized":
-		target := m.Targets[m.Index]
-		pod := &corev1.Pod{}
-		err := r.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: target.Name}, pod)
-		if err != nil && !apierrors.IsNotFound(err) {
-			return block(err)
-		}
-		if err == nil && pod.UID == target.UID {
-			if m.Deadline.IsZero() || !r.capacityNow().Before(m.Deadline) {
-				return block(errors.New("restart deadline expired before pod deletion"))
-			}
-			sessions, _, err := r.bucketAssessment(ctx, f, &view, j.Applied, false)
-			if err != nil {
-				return block(err)
-			}
-			if !slices.Equal(sessions, m.Sessions) {
-				m.Sessions = sessions
-				return save()
-			}
-			candidates, err := r.Evidence.bucketCandidates(ctx, f, &view, r.Options)
-			if err != nil {
-				return block(err)
-			}
-			if err := validateRestartPlacement(f, candidates, target.UID); err != nil {
-				return block(err)
-			}
-			if err := r.Delete(ctx, pod, client.Preconditions{UID: &target.UID, ResourceVersion: &pod.ResourceVersion}); err != nil && !apierrors.IsNotFound(err) {
-				return block(err)
-			}
-		}
-		m.Phase = "Recovering"
-		return save()
-	case "Recovering":
-		sessions, at, err := r.bucketAssessment(ctx, f, &view, j.Applied, true)
-		if err != nil {
-			return block(err)
-		}
-		target := m.Targets[m.Index]
-		if !slices.ContainsFunc(sessions, func(s bucketSession) bool { return s.Node == string(target.UID) && s.Retired && s.ExpiryObserved }) {
-			return block(errors.New("restart target has not retired with positive lease expiry"))
-		}
-		m.Sessions = sessions
-		if m.SettledAt.IsZero() {
-			m.SettledAt = at
-			return save()
-		}
-		if at.Sub(m.SettledAt) < 10*time.Second {
-			return ctrl.Result{RequeueAfter: time.Second}, true, nil
-		}
-		j.BucketHistory = sessions
-		m.Index++
-		m.Phase = "Next"
-		m.SettledAt = time.Time{}
-		return save()
-	default:
-		return block(errors.New("unknown maintenance phase"))
 	}
+	m.Phase = "Recovering"
+	return save()
+}
+
+func (r *Reconciler) executeMaintenanceRecovering(ctx context.Context, p *maintenancePass) (ctrl.Result, bool, error) {
+	f, j, m, save, block := p.f, p.j, p.m, p.save, p.block
+	sessions, at, err := r.bucketAssessment(ctx, f, &p.view, j.Applied, true)
+	if err != nil {
+		return block(err)
+	}
+	target := m.Targets[m.Index]
+	if !slices.ContainsFunc(sessions, func(s bucketSession) bool { return s.Node == string(target.UID) && s.Retired && s.ExpiryObserved }) {
+		return block(errors.New("restart target has not retired with positive lease expiry"))
+	}
+	m.Sessions = sessions
+	if t := awaitSettling(&m.SettledAt, at, save, requeueSoon); t != nil {
+		return t.unwrap()
+	}
+	j.BucketHistory = sessions
+	m.Index++
+	m.Phase = "Next"
+	m.SettledAt = time.Time{}
+	return save()
 }
 
 func (r *Reconciler) executeBucketDeletion(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, j *lifecycleJournal, w client.Object, block func(error) (ctrl.Result, bool, error)) (ctrl.Result, bool, error) {
@@ -292,17 +429,17 @@ func (r *Reconciler) executeBucketDeletion(ctx context.Context, f *fleet.CelldFl
 		m.Phase = "Authorized"
 		return save()
 	case "Authorized":
-		if replicas(w) != 0 {
+		admit := func() *transition {
 			if replicas(w) != j.Applied || w.GetAnnotations()[maintenanceFenceKey] != "deleting" {
-				return block(errors.New("deletion workload fence unavailable"))
+				return asTransition(block(errors.New("deletion workload fence unavailable")))
 			}
-			setReplicas(w, 0)
-			w.GetAnnotations()[operationKey] = m.ID
-			if err := r.Update(ctx, w); err != nil {
-				return ctrl.Result{}, true, err
-			}
-		} else if w.GetAnnotations()[operationKey] != m.ID {
-			return block(errors.New("zero replicas lacks deletion authority"))
+			return nil
+		}
+		unauthorized := func() *transition {
+			return asTransition(block(errors.New("zero replicas lacks deletion authority")))
+		}
+		if t := r.scaleToZero(ctx, w, m.ID, admit, unauthorized); t != nil {
+			return t.unwrap()
 		}
 		m.Phase = "Recovering"
 		return save()
@@ -335,12 +472,8 @@ func (r *Reconciler) executeBucketDeletion(ctx context.Context, f *fleet.CelldFl
 			m.Sessions[i].ExpiryObserved = true
 			m.Sessions[i].ExpiryInvalidated = false
 		}
-		if m.SettledAt.IsZero() {
-			m.SettledAt = evidence.ObservedAt
-			return save()
-		}
-		if evidence.ObservedAt.Sub(m.SettledAt) < 10*time.Second {
-			return ctrl.Result{RequeueAfter: time.Second}, true, nil
+		if t := awaitSettling(&m.SettledAt, evidence.ObservedAt, save, requeueSoon); t != nil {
+			return t.unwrap()
 		}
 		j.BucketHistory = m.Sessions
 		m.Phase = "Cleanup"
@@ -382,7 +515,7 @@ func validateMaintenanceJournal(j *lifecycleJournal) error {
 	if m == nil {
 		return nil
 	}
-	if j.Operation != nil || m.ID == "" || (m.Kind != "Restart" && m.Kind != "Delete" && m.Kind != "Contract" && m.Kind != "Upgrade") || m.Index < 0 || m.Index > len(m.Targets) {
+	if invalidMaintenanceAuthority(j) {
 		return errors.New("invalid maintenance journal")
 	}
 	switch m.Phase {
