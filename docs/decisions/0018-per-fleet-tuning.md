@@ -35,7 +35,11 @@ unrequested-termination waits from it: the SIGTERM-to-SIGKILL wait plus the
 inherited-lock proof plus a five second margin equal the grace, so the whole
 sequence finishes before kubelet's SIGKILL (15 s + 10 s + 5 s at the default
 grace of 30; the lock proof is capped at ten seconds, and longer graces go to
-the SIGTERM wait). The v0.4.1 drain-token wait follows the shutdown budget.
+the SIGTERM wait). A stop the controller requested is not racing kubelet and
+keeps the whole grace minus the margin for the child, which the cross-field rule
+above makes at least `shutdownSeconds`; that wait must never be the shorter
+unrequested slice, or the launcher kills the runtime part way through its own
+graceful shutdown. The v0.4.1 drain-token wait follows the shutdown budget.
 
 The design's requirement of equal requests and limits is not enforced: the
 historical default has no CPU limit and a memory limit above its request, and

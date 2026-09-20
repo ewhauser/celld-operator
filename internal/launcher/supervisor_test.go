@@ -341,3 +341,24 @@ func TestTerminationBudgetFitsTheGracePeriod(t *testing.T) {
 		t.Fatalf("default grace splits as %v+%v, want 15s+10s", stop, proof)
 	}
 }
+
+// A stop the controller requested is not racing kubelet's SIGKILL, so it must
+// never escalate before the runtime's own CELLD_SHUTDOWN_TOTAL_MS budget has
+// elapsed: a PersistentFleet member killed part way through its shutdown never
+// hands its ensemble obligations over, and the survivors that still name it
+// wedge the restart. Admission (api/v1alpha1/validation.go) keeps
+// terminationGraceSeconds at least shutdownSeconds+graceMargin, so the whole
+// admissible range has to hold, not just the default template.
+func TestRequestedStopWaitCoversTheRuntimeShutdownBudget(t *testing.T) {
+	for _, c := range []struct{ shutdown, grace time.Duration }{
+		{20 * time.Second, 0},                    // the default template, which tells the launcher nothing
+		{20 * time.Second, 30 * time.Second},     // the same pair stated explicitly
+		{time.Second, 6 * time.Second},           // the smallest admissible pair
+		{120 * time.Second, 180 * time.Second},   // the tuned sample
+		{3600 * time.Second, 3605 * time.Second}, // the largest admissible pair
+	} {
+		if wait := requestedStopWait(c.grace); wait < c.shutdown {
+			t.Fatalf("grace %v: a requested stop escalates after %v, inside the %v shutdown budget", c.grace, wait, c.shutdown)
+		}
+	}
+}

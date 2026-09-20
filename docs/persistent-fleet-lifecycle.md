@@ -66,19 +66,25 @@ and real-runtime tests separately exercise this assumption. This is a
 version-specific integration, not a generic promise about arbitrary executables.
 
 For a signed stop request, the launcher signals its exact `os.Process` child handle, waits
-for that child, and escalates that same handle after 15 seconds if necessary.
+for that child, and escalates that same handle after the pod's
+`terminationGracePeriodSeconds` less a five second margin if necessary, which is
+25 seconds at the default grace. Admission keeps that grace at least
+`shutdownSeconds` plus five, so a requested stop never escalates inside the
+runtime's own stop budget: a member killed part way through a graceful shutdown
+never hands its ensemble obligations over, and the survivors that still name it
+cannot retire it.
 It does not signal a numeric PID or process group after reaping; descendants
 that remain alive keep their inherited lock and prevent completion.
 It closes only its own lock descriptor and attempts an independent exclusive
 open, reporting `ReleasingInheritedLock` while a descendant still holds the
 inherited descriptor. For a requested stop that wait is unbounded (the pod
 exists until the controller decrements); after an unrequested termination it is
-capped at ten seconds because no certificate is owed. Both bounds are derived
-from the pod's `terminationGracePeriodSeconds`: the launcher splits the grace
-minus a five second margin into the SIGTERM wait and the inherited-lock wait
-(15 s + 10 s + 5 s for the default 30 second grace, with the lock wait capped at
-ten seconds for longer graces), so an unrequested termination gives up
-fail-closed before kubelet's SIGKILL rather than after it. Only successful
+capped at ten seconds because no certificate is owed. An unrequested termination
+is the only case the grace bounds as a whole: there the launcher splits the
+grace minus the same five second margin into the SIGTERM wait and the
+inherited-lock wait (15 s + 10 s + 5 s for the default 30 second grace, with the
+lock wait capped at ten seconds for longer graces), so it gives up fail-closed
+before kubelet's SIGKILL rather than after it. Only successful
 reacquisition of the same file allows `Stopped`; exit code 0 alone is
 irrelevant. The re-open never creates the file and compares a token written
 into the lock at first acquisition, because inode numbers are recycled on common

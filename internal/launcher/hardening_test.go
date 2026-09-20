@@ -228,6 +228,51 @@ func TestStopGraceEscalatesToKillOnSchedule(t *testing.T) {
 	t.Fatal("child ignoring SIGTERM was never killed")
 }
 
+// A requested stop spends the whole grace period less the margin on the child,
+// not the shorter SIGTERM slice that an unrequested termination reserves so its
+// lock proof also fits. With a nine second grace the split would escalate after
+// two seconds; the request must wait the full four.
+func TestRequestedStopSpendsTheWholeGraceOnTheChild(t *testing.T) {
+	if os.Getenv("LAUNCHER_TESTS_EMULATED") != "" {
+		t.Skip("SIGTERM-ignoring fixture is not reproducible under CPU emulation")
+	}
+	c := config(t)
+	ready, command := shellFixture(t)
+	c.Command = command("trap '' TERM")
+	// No StopGrace override: the wait has to come from the pod's grace period,
+	// which is how the controller configures a real launcher.
+	c.Grace = 9 * time.Second
+	want := c.Grace - graceMargin
+	if split, _ := terminationBudget(c.Grace); split >= want {
+		t.Fatalf("fixture proves nothing: unrequested split %v is not shorter than the requested wait %v", split, want)
+	}
+	startSupervisor(t, c)
+	awaitChildReady(t, ready)
+	running := awaitPhase(t, c.Address, c.Key, "Running")
+	awaitReady(t, ready)
+	started := time.Now()
+	if _, err := query(t, c.Address, c.Key, "retire", running.Generation); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		st, err := query(t, c.Address, c.Key, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.Phase == "Stopped" {
+			// The lower bound is the point of the test: escalating at the
+			// unrequested split would cut a graceful shutdown short.
+			if elapsed := time.Since(started); elapsed < 3500*time.Millisecond || elapsed > 8*time.Second {
+				t.Fatalf("requested stop escalated after %v, want about %v", elapsed, want)
+			}
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("child ignoring SIGTERM was never killed")
+}
+
 func TestChildExitWithoutRequestRetainsLockAndRejectsAdoption(t *testing.T) {
 	c := config(t)
 	// File-controlled exit ensures the test observes Running before the child exits.

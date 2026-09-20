@@ -30,7 +30,9 @@ type Config struct {
 	// Grace is the pod's terminationGracePeriodSeconds: the whole span kubelet
 	// allows between its SIGTERM and its SIGKILL. Zero selects the 30 second
 	// default. Both bounds an unrequested termination spends are derived from
-	// it by terminationBudget, so their sum stays inside the grace period.
+	// it by terminationBudget, so their sum stays inside the grace period; a
+	// requested stop instead spends requestedStopWait on the child, because
+	// nothing is going to kill this pod while the controller still wants it.
 	Grace time.Duration
 	// StopGrace overrides only the wait for the child after SIGTERM before
 	// SIGKILL. Zero derives that wait from Grace. Tests use it to escalate
@@ -64,17 +66,30 @@ const requestExpiryBound = 10 * time.Second
 // after SIGTERM before SIGKILL, and proof caps the wait for inherited lock
 // holders to release afterwards. stop+proof+graceMargin == grace, so the
 // launcher gives up (fail-closed: no certificate, no retired marker) before
-// kubelet's SIGKILL rather than after it. Requested stops ignore proof and
-// wait indefinitely: the pod lives until the controller decrements.
+// kubelet's SIGKILL rather than after it. It bounds only that case: a requested
+// stop spends requestedStopWait on the child and waits indefinitely for the
+// proof, because the pod lives until the controller decrements.
 func terminationBudget(grace time.Duration) (stop, proof time.Duration) {
+	usable := requestedStopWait(grace)
+	proof = min(usable/2, maxLockProof)
+	return usable - proof, proof
+}
+
+// requestedStopWait is the wait for the child after SIGTERM when the controller
+// asked for this stop: the whole grace period less the margin the rest of the
+// shutdown needs. Nothing is racing kubelet here, and admission keeps
+// terminationGraceSeconds at least shutdownSeconds+graceMargin, so the child
+// always keeps its entire CELLD_SHUTDOWN_TOTAL_MS budget. Escalating earlier
+// would truncate a graceful shutdown: a PersistentFleet member killed mid-stop
+// never hands its ensemble obligations over, and its survivors keep naming it
+// forever.
+func requestedStopWait(grace time.Duration) time.Duration {
 	if grace <= 0 {
 		grace = defaultGrace
 	}
 	// A grace period too small to split leaves kubelet's SIGKILL as the only
-	// outer bound; keep both waits usable rather than zero.
-	usable := max(grace-graceMargin, time.Second)
-	proof = min(usable/2, maxLockProof)
-	return usable - proof, proof
+	// outer bound; keep the waits usable rather than zero.
+	return max(grace-graceMargin, time.Second)
 }
 
 type supervisor struct {
@@ -380,8 +395,10 @@ func Run(ctx context.Context, c Config) error {
 	// Signal the exact os.Process handle, never a numeric PID/group that could
 	// be recycled after Wait. Descendants retain FD3 and must release it before
 	// the independent lock acquisition can certify completion.
+	var requested bool
 	select {
 	case <-s.stop:
+		requested = true
 	case <-ctx.Done():
 		// Termination the controller did not request. Close the binding window
 		// now: a stop request arriving during shutdown must not adopt this exit.
@@ -398,6 +415,11 @@ func Run(ctx context.Context, c Config) error {
 	}
 	_ = cmd.Process.Signal(syscall.SIGTERM)
 	stopGrace, proofBound := terminationBudget(c.Grace)
+	if requested {
+		// Only an unrequested termination has to fit both waits inside the grace
+		// period. This stop was asked for, so the child keeps the whole window.
+		stopGrace = requestedStopWait(c.Grace)
+	}
 	if c.StopGrace > 0 {
 		stopGrace = c.StopGrace
 	}
