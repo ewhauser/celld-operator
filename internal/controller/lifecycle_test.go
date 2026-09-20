@@ -13,6 +13,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -272,6 +273,108 @@ func TestLifecycleRetainedPVCReplacementBlocks(t *testing.T) {
 	}
 	f = desiredCount(t, r, f, 4)
 	reason(t, reconcile(t, r, f), "StorageIdentityConflict")
+}
+
+// The listed retained inventory must refuse exactly what a per-claim Get
+// refused: a replaced UID, a claim being deleted, a claim that left the fleet's
+// labels, an adopted claim and a re-pointed reservation annotation.
+func TestLifecycleRetainedClaimIdentityChecks(t *testing.T) {
+	cases := map[string]func(*testing.T, *Reconciler, *fleet.CelldFleet, *corev1.PersistentVolumeClaim){
+		"missing": func(t *testing.T, r *Reconciler, _ *fleet.CelldFleet, pvc *corev1.PersistentVolumeClaim) {
+			if err := r.Delete(t.Context(), pvc); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"wrong uid": func(t *testing.T, r *Reconciler, f *fleet.CelldFleet, pvc *corev1.PersistentVolumeClaim) {
+			res := &fleet.CelldStorageReservation{}
+			if err := r.Get(t.Context(), types.NamespacedName{Name: reservationName(f)}, res); err != nil {
+				t.Fatal(err)
+			}
+			j, err := readJournal(res)
+			if err != nil {
+				t.Fatal(err)
+			}
+			j.Claims[pvc.Name] = "replaced-disk-uid"
+			if err := r.saveJournal(t.Context(), res, j); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"deleted": func(t *testing.T, r *Reconciler, _ *fleet.CelldFleet, pvc *corev1.PersistentVolumeClaim) {
+			pvc.Finalizers = append(pvc.Finalizers, "example.com/hold")
+			if err := r.Update(t.Context(), pvc); err != nil {
+				t.Fatal(err)
+			}
+			if err := r.Delete(t.Context(), pvc); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"label mismatch": func(t *testing.T, r *Reconciler, _ *fleet.CelldFleet, pvc *corev1.PersistentVolumeClaim) {
+			pvc.Labels[FleetLabel] = "other-fleet-uid"
+			if err := r.Update(t.Context(), pvc); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"adopted": func(t *testing.T, r *Reconciler, _ *fleet.CelldFleet, pvc *corev1.PersistentVolumeClaim) {
+			pvc.OwnerReferences = []metav1.OwnerReference{{APIVersion: "v1", Kind: "Pod", Name: "old", UID: "old"}}
+			if err := r.Update(t.Context(), pvc); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"foreign reservation": func(t *testing.T, r *Reconciler, _ *fleet.CelldFleet, pvc *corev1.PersistentVolumeClaim) {
+			pvc.Annotations["celld.eric.dev/storage-reservation"] = "someone-elses-reservation"
+			if err := r.Update(t.Context(), pvc); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			r, f := lifecycleSetup(t, "PersistentFleet")
+			pvc := &corev1.PersistentVolumeClaim{Name: "data-alpha-0", Namespace: f.Namespace}
+			if err := r.Get(t.Context(), client.ObjectKeyFromObject(pvc), pvc); err != nil {
+				t.Fatal(err)
+			}
+			mutate(t, r, f, pvc)
+			reason(t, reconcile(t, r, f), "StorageIdentityConflict")
+		})
+	}
+}
+
+// Retained claim revalidation costs one List per reconcile, never one Get per
+// journaled claim: the direct client is uncached, so a large fleet used to pay
+// a live API round trip per disk every few seconds.
+func TestLifecycleRetainedClaimsCostOneList(t *testing.T) {
+	f := fixture("alpha", "bucket-alpha", "PersistentFleet")
+	f.Spec.Replicas = 12
+	f.Spec.Placement.AZCount = 1
+	f.Spec.Placement.Zones = []string{"us-east-1a"}
+	r := setup(t, f)
+	reconcile(t, r, f)
+	reconcile(t, r, f)
+	if got := len(getJournal(t, r, f).Claims); got != 12 {
+		t.Fatalf("journal records %d claims, want 12", got)
+	}
+	var gets, lists int
+	base := r.Client
+	r.Client = interceptor.NewClient(base.(client.WithWatch), interceptor.Funcs{
+		Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if _, ok := obj.(*corev1.PersistentVolumeClaim); ok {
+				gets++
+			}
+			return c.Get(ctx, key, obj, opts...)
+		},
+		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			if _, ok := list.(*corev1.PersistentVolumeClaimList); ok {
+				lists++
+			}
+			return c.List(ctx, list, opts...)
+		},
+	})
+	reconcile(t, r, f)
+	r.Client = base
+	if gets != 0 || lists != 1 {
+		t.Fatalf("idle reconcile of a 12-replica fleet issued %d PVC Gets and %d PVC Lists, want 0 and 1", gets, lists)
+	}
 }
 
 func TestLifecycleConcurrentIntentAndReplicaCAS(t *testing.T) {
