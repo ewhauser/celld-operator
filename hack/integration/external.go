@@ -24,7 +24,13 @@ func (h *harness) exerciseExternal() {
 		return decode(h.k("get", "--raw", "/apis/celld.eric.dev/v1alpha1/namespaces/fleets/celldfleets/alpha/scale"))
 	}
 	settled := func(count int64) bool {
-		return specReplicas(h.get("statefulset", "alpha")) == count && h.ready("alpha") && len(sub(h.currentState("alpha"), "Operation")) == 0
+		if !h.settled("alpha", count) {
+			return false
+		}
+		// The fleet status projection can lag the workload and reservation.
+		// /scale must catch up before its observed count is used as evidence.
+		view := scale()
+		return specReplicas(view) == count && num(view, "status", "replicas") == count
 	}
 	h.merge("alpha", `{"spec":{"capacity":{"mode":"External"}}}`)
 	h.wait("External mode names the /scale writer as owner", func() bool {
@@ -87,15 +93,14 @@ func (h *harness) exerciseExternal() {
 	assert(generation(h.get("celldfleet", "alpha")) == gen, "operator or HPA kept rewriting spec.replicas")
 	fmt.Println("PASS: External mode never fights the HPA; desired 3 applied 3")
 
-	// Lower the ceiling: the HPA requests contraction; the fixture executor runs
-	// it. That executor demands fresh low-demand survivor evidence, so the load
-	// generator stops before the ceiling moves.
+	// Stop the load and lower the ceiling. The HPA requests contraction, and the
+	// operator executes it through the strict control plane.
 	h.stopFleetLoad()
 	h.k("-n", "fleets", "patch", "hpa", "alpha", "--type=merge", "-p", `{"spec":{"minReplicas":2,"maxReplicas":2}}`)
 	h.waitFor("HPA lowers spec.replicas", 300*time.Second, func() bool {
 		return specReplicas(h.get("celldfleet", "alpha")) == 2
 	})
-	h.waitFor("HPA-requested contraction executes through the gated Bucket executor (local fixture)", 600*time.Second, func() bool { return settled(2) })
+	h.waitFor("HPA-requested contraction completes through the strict control plane and /scale catches up", 600*time.Second, func() bool { return settled(2) })
 	assert(h.ackStored("client", "alpha"), "acknowledged write unreadable after HPA-driven shrink")
 	view = scale()
 	assert(specReplicas(view) == 2 && num(view, "status", "replicas") == 2, "%v", view)
