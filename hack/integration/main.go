@@ -31,6 +31,7 @@ type harness struct {
 	arch, launcherImage         string
 	operatorArgs                []string
 	created, builtLauncher      bool
+	ledgers                     map[string][]string
 }
 
 func main() {

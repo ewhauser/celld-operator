@@ -40,17 +40,23 @@ func (h *harness) goneVolumes(claims map[string]claimIdentity) {
 }
 
 func (h *harness) writeLedger(probe, fleetName string) {
+	if h.ledgers == nil {
+		h.ledgers = map[string][]string{}
+	}
+	batch := fmt.Sprintf("ack-%d", time.Now().UnixNano())
 	for i := range 12 {
-		path := fmt.Sprintf("/?cell=integration&id=ack-%d", i)
+		path := fmt.Sprintf("/?cell=integration&id=%s-%d", batch, i)
 		assert(stored(h.app(probe, fleetName, "PUT", path)), "write %s not acknowledged", path)
+		h.ledgers[fleetName] = append(h.ledgers[fleetName], path)
 	}
 }
 func (h *harness) readLedger(probe, fleetName string) {
-	for i := range 12 {
-		path := fmt.Sprintf("/?cell=integration&id=ack-%d", i)
+	paths := h.ledgers[fleetName]
+	assert(len(paths) > 0, "no acknowledged ledger writes for %s", fleetName)
+	for _, path := range paths {
 		assert(stored(h.app(probe, fleetName, "GET", path)), "acknowledged write lost: %s %s", fleetName, path)
 	}
-	fmt.Println("PASS:", fleetName, "12/12 acknowledged writes readable")
+	fmt.Printf("PASS: %s %d/%d acknowledged writes readable\n", fleetName, len(paths), len(paths))
 }
 
 func (h *harness) exerciseLifecycle() {
