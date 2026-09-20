@@ -44,3 +44,7 @@ and [recorded test evidence](docs/qualification/README.md).
 
 Test layers: `make test` (unit, fake client), `make test-envtest` (real API server),
 `make integration` and its variants (disposable kind cluster).
+
+## License
+
+celld-operator is licensed under the [Apache License, Version 2.0](LICENSE).
