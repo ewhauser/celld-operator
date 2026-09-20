@@ -106,8 +106,8 @@ func (r *Reconciler) finishDeletion(ctx context.Context, f *fleet.CelldFleet, h 
 	if !apierrors.IsNotFound(err) {
 		return ctrl.Result{}, err
 	}
-	// PVCs were individually removed under captured proof. PVs, EBS disks and the
-	// bucket reservation remain retained. Never DeleteAllOf or cascade storage.
+	// PVCs and CSI disks were removed under captured proof. The bucket
+	// reservation remains permanent. Never DeleteAllOf or cascade storage.
 	base := f.DeepCopy()
 	controllerutil.RemoveFinalizer(f, Finalizer)
 	return ctrl.Result{}, r.Patch(ctx, f, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))

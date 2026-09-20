@@ -36,7 +36,6 @@ type fleetState struct {
 	RestartToken          string               `json:",omitempty"`
 	Completion            *operationCompletion `json:",omitempty"`
 	Capacity              *capacity.State      `json:",omitempty"`
-	DiskCleanupPending    bool                 `json:",omitempty"`
 }
 type operationCompletion struct {
 	ID, Kind, Outcome string
@@ -65,6 +64,8 @@ type operationTarget struct {
 type volumeIdentity struct {
 	Claim, ClaimVersion, Volume, Handle string
 	ClaimUID, VolumeUID                 types.UID
+	DeletionProtected                   bool
+	CleanupStarted                      bool `json:",omitempty"`
 }
 type loadedState struct {
 	res *fleet.CelldStorageReservation
@@ -151,8 +152,11 @@ func validateState(s *fleetState) error {
 				return errors.New("invalid operation target")
 			}
 			seen[t.PodUID] = true
-			if t.Storage != nil && (t.Storage.ClaimUID == "" || t.Storage.VolumeUID == "" || t.Storage.Handle == "" || t.Storage.Claim == "" || t.Storage.Volume == "") {
+			if t.Storage != nil && (!t.Storage.DeletionProtected || t.Storage.ClaimVersion == "" || t.Storage.ClaimUID == "" || t.Storage.VolumeUID == "" || t.Storage.Handle == "" || t.Storage.Claim == "" || t.Storage.Volume == "") {
 				return errors.New("invalid target storage")
+			}
+			if t.Storage != nil && t.Storage.CleanupStarted && (t.Proof == nil || (o.Phase != "DeleteClaims" && o.Phase != "Resume" && o.Phase != "ApplyResume" && o.Phase != "Joining")) {
+				return errors.New("cleanup intent precedes proof or compute removal")
 			}
 			if t.Proof != nil && !validProof(o, t, *t.Proof) {
 				return errors.New("invalid captured proof")

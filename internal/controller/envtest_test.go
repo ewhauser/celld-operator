@@ -94,7 +94,7 @@ type envtestFixture struct {
 }
 
 // envtestSetup creates an isolated namespace, the referenced ServiceAccount, the
-// shared retained StorageClass, and a fleet with a unique bucket, then returns a
+// shared disposable StorageClass, and a fleet with a unique bucket, then returns a
 // reconciler wired exactly as production is (uncached client, no fake seams).
 func envtestSetup(t *testing.T, profile string) (*Reconciler, *envtestFixture) {
 	t.Helper()
@@ -109,9 +109,9 @@ func envtestSetup(t *testing.T, profile string) (*Reconciler, *envtestFixture) {
 		t.Fatal(err)
 	}
 	sc := &storagev1.StorageClass{
-		Name:              "retained",
+		Name:              "disposable",
 		Provisioner:       "ebs.csi.aws.com",
-		ReclaimPolicy:     ptr.To(corev1.PersistentVolumeReclaimRetain),
+		ReclaimPolicy:     ptr.To(corev1.PersistentVolumeReclaimDelete),
 		VolumeBindingMode: ptr.To(storagev1.VolumeBindingWaitForFirstConsumer),
 	}
 	if err := c.Create(ctx, sc); err != nil && !apierrors.IsAlreadyExists(err) {
@@ -179,7 +179,7 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 			f.Spec.Replicas = 1
 		}},
 		{"zone outside region", func(f *fleet.CelldFleet) { f.Spec.Placement.Zones = []string{"us-west-2a"} }},
-		{"storageClassName on Bucket", func(f *fleet.CelldFleet) { f.Spec.Storage.StorageClassName = "retained" }},
+		{"storageClassName on Bucket", func(f *fleet.CelldFleet) { f.Spec.Storage.StorageClassName = "disposable" }},
 		{"PersistentFleet without storageClassName", func(f *fleet.CelldFleet) { f.Spec.Profile = "PersistentFleet" }},
 		{"production qualification", func(f *fleet.CelldFleet) { f.Spec.Qualification = "Production" }},
 		{"capacity minimum below azCount", func(f *fleet.CelldFleet) {
@@ -206,7 +206,7 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 	}{
 		{"profile", func(f *fleet.CelldFleet) {
 			f.Spec.Profile = "PersistentFleet"
-			f.Spec.Storage.StorageClassName = "retained"
+			f.Spec.Storage.StorageClassName = "disposable"
 		}},
 		{"bucket", func(f *fleet.CelldFleet) { f.Spec.Storage.Bucket = "other-" + ns }},
 		{"zones", func(f *fleet.CelldFleet) { f.Spec.Placement.Zones = []string{"us-east-1b"} }},

@@ -249,7 +249,8 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, h *load
 			return block("StorageCleanupBlocked", err)
 		}
 		if !done {
-			return ctrl.Result{RequeueAfter: time.Second}, true, nil
+			v, e := r.report(ctx, f, h, "LifecycleProgress", "Waiting for exact PVC/PV deletion and CSI attachment removal", true)
+			return v, true, e
 		}
 		if o.Kind == "Delete" || o.Kind == "Scale" {
 			return r.completeOperation(ctx, f, h, w)
@@ -456,11 +457,7 @@ func (r *Reconciler) completeOperation(ctx context.Context, f *fleet.CelldFleet,
 		v, e := r.report(ctx, f, h, "EffectPending", err.Error(), false)
 		return v, true, e
 	}
-	outcome := "Completed"
-	if s.DiskCleanupPending {
-		outcome = "ComputeCompleteDiskCleanupPending"
-	}
-	s.Completion = &operationCompletion{ID: o.ID, Kind: o.Kind, Outcome: outcome, At: r.capacityNow()}
+	s.Completion = &operationCompletion{ID: o.ID, Kind: o.Kind, Outcome: "Completed", At: r.capacityNow()}
 	s.Applied = o.To
 	if o.Kind == "Restart" {
 		s.RestartToken = o.RestartToken

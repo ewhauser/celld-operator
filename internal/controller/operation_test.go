@@ -139,6 +139,7 @@ func (x *operationFixture) finish() {
 func (x *operationFixture) syncWorkload() {
 	t := x.t
 	ctx := t.Context()
+	x.syncStorage()
 	w := x.workload()
 	n := replicas(w)
 	pods := &corev1.PodList{}
@@ -209,7 +210,7 @@ func (x *operationFixture) syncWorkload() {
 			if err := x.r.Status().Update(ctx, claim); err != nil {
 				t.Fatal(err)
 			}
-			pv := &corev1.PersistentVolume{Name: claim.Spec.VolumeName, UID: types.UID("volume-" + string(claim.UID)), Spec: corev1.PersistentVolumeSpec{PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimRetain, ClaimRef: &corev1.ObjectReference{Name: claim.Name, Namespace: claim.Namespace, UID: claim.UID}, PersistentVolumeSource: corev1.PersistentVolumeSource{CSI: &corev1.CSIPersistentVolumeSource{Driver: "ebs.csi.aws.com", VolumeHandle: "vol-" + string(claim.UID)}}}}
+			pv := &corev1.PersistentVolume{Name: claim.Spec.VolumeName, UID: types.UID("volume-" + string(claim.UID)), Finalizers: []string{csiDeletionFinalizer}, Annotations: map[string]string{"pv.kubernetes.io/provisioned-by": "ebs.csi.aws.com"}, Spec: corev1.PersistentVolumeSpec{PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimDelete, StorageClassName: x.f.Spec.Storage.StorageClassName, ClaimRef: &corev1.ObjectReference{Name: claim.Name, Namespace: claim.Namespace, UID: claim.UID}, PersistentVolumeSource: corev1.PersistentVolumeSource{CSI: &corev1.CSIPersistentVolumeSource{Driver: "ebs.csi.aws.com", VolumeHandle: "vol-" + string(claim.UID)}}}}
 			if err := x.r.Create(ctx, pv); err != nil && !apierrors.IsAlreadyExists(err) {
 				t.Fatal(err)
 			}
@@ -271,11 +272,8 @@ func TestStrictRemovalBothProfiles(t *testing.T) {
 			}
 			if profile == "PersistentFleet" {
 				pv := &corev1.PersistentVolume{}
-				if err := x.r.Get(t.Context(), client.ObjectKey{Name: disk.Volume}, pv); err != nil {
-					t.Fatal("Retain PV deleted", err)
-				}
-				if pv.Spec.PersistentVolumeReclaimPolicy != corev1.PersistentVolumeReclaimRetain || !s.DiskCleanupPending {
-					t.Fatal("disk cleanup falsely completed")
+				if err := x.r.Get(t.Context(), client.ObjectKey{Name: disk.Volume}, pv); !apierrors.IsNotFound(err) {
+					t.Fatal("CSI disk cleanup did not complete", err)
 				}
 				if len(s.Claims) != 2 {
 					t.Fatal("removed claim identity retained")
@@ -790,7 +788,7 @@ func TestDeploymentBucketMaintenanceAndContractionBoundary(t *testing.T) {
 		t.Fatal("deployment working set failed")
 	}
 }
-func TestDeleteUsesStrictWorkingSetAndRetainsDisks(t *testing.T) {
+func TestDeleteUsesStrictWorkingSetAndDisposesDisks(t *testing.T) {
 	for _, profile := range []string{"Bucket", "PersistentFleet"} {
 		t.Run(profile, func(t *testing.T) {
 			x := newOperationFixture(t, profile)
@@ -823,8 +821,8 @@ func TestDeleteUsesStrictWorkingSetAndRetainsDisks(t *testing.T) {
 				if err := x.r.List(t.Context(), pvs); err != nil {
 					t.Fatal(err)
 				}
-				if len(pvs.Items) != 3 {
-					t.Fatal("retained disks deleted")
+				if len(pvs.Items) != 0 {
+					t.Fatal("CSI disks not deleted")
 				}
 			}
 		})
@@ -838,6 +836,7 @@ func TestHundredMemberMaintenanceFitsBound(t *testing.T) {
 	s := x.state()
 	o := s.Operation
 	o.Kind = "Restart"
+	o.Phase = "DeleteClaims"
 	o.From = 100
 	o.To = 100
 	s.Applied = 100
@@ -854,7 +853,7 @@ func TestHundredMemberMaintenanceFitsBound(t *testing.T) {
 		t.HostUID = fmt.Sprintf("11234567-0123-4567-89ab-%012d", i)
 		t.Container = string(t.PodUID) + "/containerd://" + strings.Repeat("a", 64) + "/0"
 		t.Identity = processIdentity{Node: t.Pod, Host: "ip-10-123-123-123.ec2.internal", BootID: "21234567-0123-4567-89ab-012345678901", Invocation: strings.Repeat("b", 64), Generation: strings.Repeat("c", 64), DiskID: strings.Repeat("d", 64), PID: 123456}
-		t.Storage = &volumeIdentity{Claim: "data-" + t.Pod, ClaimUID: types.UID(fmt.Sprintf("31234567-0123-4567-89ab-%012d", i)), ClaimVersion: "12345678901234", Volume: "pvc-" + string(t.PodUID), VolumeUID: types.UID(fmt.Sprintf("41234567-0123-4567-89ab-%012d", i)), Handle: "ebs.csi.aws.com:vol-0123456789abcdef0"}
+		t.Storage = &volumeIdentity{Claim: "data-" + t.Pod, ClaimUID: types.UID(fmt.Sprintf("31234567-0123-4567-89ab-%012d", i)), ClaimVersion: "12345678901234", Volume: "pvc-" + string(t.PodUID), VolumeUID: types.UID(fmt.Sprintf("41234567-0123-4567-89ab-%012d", i)), Handle: "ebs.csi.aws.com:vol-0123456789abcdef0", DeletionProtected: true, CleanupStarted: true}
 		t.Proof = &operationProof{Removal: launcher.RemovalResult{Operation: o.ID, Generation: t.Identity.Generation, Mode: "remove-disk", Phase: "data_safe", ControlOnly: true, DataSafe: true}, ChildExited: true, InheritedLockReleased: true, RestartDenied: true}
 		o.Targets = append(o.Targets, t)
 		s.Claims[t.Storage.Claim] = t.Storage.ClaimUID

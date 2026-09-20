@@ -177,10 +177,10 @@ func TestStrictRuntimeCurrentOperation(t *testing.T) {
 	stop()
 	x.r = &Reconciler{Client: x.r.Client, Options: x.r.Options, NetworkPolicyEnforced: true, Collector: x.r.Collector, now: x.r.now}
 	x.finish()
-	if x.state().Applied != 2 || !x.state().DiskCleanupPending {
-		t.Fatal("strict operation did not finish with Retain cleanup pending")
+	if x.state().Applied != 2 || x.state().Operation != nil {
+		t.Fatal("strict operation did not finish after CSI cleanup")
 	}
-	t.Log("real fork runtime + launcher HTTP -> persisted exact proof -> controller restart -> guarded replica/PVC removal; Kubernetes/CSI are fixtures, retained PV remains")
+	t.Log("real fork runtime + launcher HTTP -> persisted exact proof -> controller restart -> guarded replica/PVC removal -> simulated CSI completion; Kubernetes/CSI are fixtures")
 }
 func strictTestAddress(t *testing.T) string {
 	t.Helper()

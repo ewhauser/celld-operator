@@ -42,7 +42,7 @@ func fixture(name, bucket, profile string) *fleet.CelldFleet {
 	}
 	f.Default()
 	if profile == "PersistentFleet" {
-		f.Spec.Storage.StorageClassName = "retained"
+		f.Spec.Storage.StorageClassName = "disposable"
 	}
 	return f
 }
@@ -56,9 +56,9 @@ func setup(t *testing.T, objects ...client.Object) *Reconciler {
 		t.Fatal(err)
 	}
 	objects = append(objects, &corev1.ServiceAccount{Name: "runtime", Namespace: "fleets"}, &storagev1.StorageClass{
-		Name:              "retained",
+		Name:              "disposable",
 		Provisioner:       "ebs.csi.aws.com",
-		ReclaimPolicy:     ptr.To(corev1.PersistentVolumeReclaimRetain),
+		ReclaimPolicy:     ptr.To(corev1.PersistentVolumeReclaimDelete),
 		VolumeBindingMode: ptr.To(storagev1.VolumeBindingWaitForFirstConsumer),
 	})
 	return &Reconciler{
@@ -192,7 +192,7 @@ func TestNoUnsafeMutationsOrRecreation(t *testing.T) {
 				f.Spec.Replicas = 4
 			case "profile":
 				f.Spec.Profile = "PersistentFleet"
-				f.Spec.Storage.StorageClassName = "retained"
+				f.Spec.Storage.StorageClassName = "disposable"
 			case "missing":
 				if err := r.Delete(t.Context(), &appsv1.Deployment{Name: f.Name, Namespace: f.Namespace}); err != nil {
 					t.Fatal(err)
@@ -282,15 +282,15 @@ func TestDependenciesBlockBeforeReservation(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "storageclass":
-				if err := r.Delete(t.Context(), &storagev1.StorageClass{Name: "retained"}); err != nil {
+				if err := r.Delete(t.Context(), &storagev1.StorageClass{Name: "disposable"}); err != nil {
 					t.Fatal(err)
 				}
 			case "reclaim-policy":
 				sc := &storagev1.StorageClass{}
-				if err := r.Get(t.Context(), types.NamespacedName{Name: "retained"}, sc); err != nil {
+				if err := r.Get(t.Context(), types.NamespacedName{Name: "disposable"}, sc); err != nil {
 					t.Fatal(err)
 				}
-				sc.ReclaimPolicy = new(corev1.PersistentVolumeReclaimDelete)
+				sc.ReclaimPolicy = new(corev1.PersistentVolumeReclaimRetain)
 				if err := r.Update(t.Context(), sc); err != nil {
 					t.Fatal(err)
 				}

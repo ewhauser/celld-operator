@@ -114,8 +114,8 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 			}
 			return r.report(ctx, f, nil, "StorageClassMissing", "Referenced StorageClass does not exist", false)
 		}
-		if sc.ReclaimPolicy == nil || *sc.ReclaimPolicy != corev1.PersistentVolumeReclaimRetain || sc.VolumeBindingMode == nil || *sc.VolumeBindingMode != storagev1.VolumeBindingWaitForFirstConsumer || (!r.Options.LocalTest && sc.Provisioner != "ebs.csi.aws.com") {
-			return r.report(ctx, f, nil, "InvalidStorageClass", "Requires EBS CSI, Retain reclaim policy and WaitForFirstConsumer binding (local test permits a different provisioner)", false)
+		if sc.ReclaimPolicy == nil || *sc.ReclaimPolicy != corev1.PersistentVolumeReclaimDelete || sc.VolumeBindingMode == nil || *sc.VolumeBindingMode != storagev1.VolumeBindingWaitForFirstConsumer || !r.supportedCSI(sc.Provisioner) {
+			return r.report(ctx, f, nil, "InvalidStorageClass", "Requires EBS CSI, Delete reclaim policy and WaitForFirstConsumer binding (local test permits the qualified hostpath CSI driver)", false)
 		}
 	}
 	reservation := &fleet.CelldStorageReservation{Name: reservationName(f), Spec: fleet.ReservationSpec{InitialReplicas: f.Spec.Replicas, Bucket: f.Spec.Storage.Bucket, FleetNamespace: f.Namespace, FleetName: f.Name, FleetUID: string(f.UID), SpecHash: specHash(f)}}
@@ -297,7 +297,7 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, h *loadedS
 			f.Status.Lifecycle.RequestID = o.ID
 			f.Status.Lifecycle.RequestKind = o.Kind
 			f.Status.Lifecycle.TargetImage = o.TargetImage
-			f.Status.Lifecycle.EvidenceBlocker = o.Blocker
+			f.Status.Lifecycle.Blocker = o.Blocker
 			f.Status.Lifecycle.StartedAt = o.StartedAt.UTC().Format(time.RFC3339)
 			f.Status.Lifecycle.Deadline = o.Deadline.UTC().Format(time.RFC3339)
 			f.Status.Lifecycle.Stalled = !r.capacityNow().Before(o.Deadline)
@@ -347,7 +347,7 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, h *loadedS
 		footprint = measureState(h.res)
 	}
 	set("OperationSizeWarning", footprint.nearCapacity(), "BoundedOperation", stateSizeMessage(footprint))
-	set("DiskCleanupPending", h.j != nil && h.j.DiskCleanupPending, "RetainStoragePolicy", "PVC removal does not delete retained PVs or EBS disks; disposable disk policy and CSI/EBS qualification remain pending")
+	set("DiskCleanupPending", diskCleanupPending(h.j), "CSIDeletionPending", "Current strict proof remains reserved until exact PVC/PV deletion and attachment removal are observed")
 	if meta.IsStatusConditionTrue(f.Status.Conditions, "Blocked") {
 		if f.Status.BlockedSince == "" || !meta.IsStatusConditionTrue(before.Status.Conditions, "Blocked") {
 			f.Status.BlockedSince = r.capacityNow().UTC().Format(time.RFC3339)

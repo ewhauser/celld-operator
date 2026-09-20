@@ -108,6 +108,7 @@ func TestClusterRoleGrantsTheVerbsTheReconcilerUses(t *testing.T) {
 		{"", "persistentvolumes", "get"},
 		{"", "nodes", "get"},
 		{"storage.k8s.io", "storageclasses", "get"},
+		{"storage.k8s.io", "volumeattachments", "list"},
 	} {
 		if !grantedByClusterRole(role, want.group, want.resource, want.verb) {
 			t.Errorf("ClusterRole does not grant %q on %s/%s; the reconciler would be Forbidden in a real cluster", want.verb, want.group, want.resource)

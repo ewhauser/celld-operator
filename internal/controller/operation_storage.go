@@ -8,10 +8,13 @@ import (
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+const csiDeletionFinalizer = "external-provisioner.volume.kubernetes.io/finalizer"
 
 func sameVolume(a, b volumeIdentity) bool {
 	return a.Claim == b.Claim && a.ClaimUID == b.ClaimUID && a.Volume == b.Volume && a.VolumeUID == b.VolumeUID && a.Handle == b.Handle
@@ -40,22 +43,35 @@ func (r *Reconciler) targetVolume(ctx context.Context, f *fleet.CelldFleet, s *f
 	if err := r.Get(ctx, client.ObjectKey{Name: c.Spec.VolumeName}, pv); err != nil {
 		return nil, err
 	}
-	ref := pv.Spec.ClaimRef
-	if pv.UID == "" || !pv.DeletionTimestamp.IsZero() || ref == nil || ref.UID != c.UID || ref.Name != c.Name || ref.Namespace != c.Namespace || pv.Spec.PersistentVolumeReclaimPolicy != corev1.PersistentVolumeReclaimRetain {
-		return nil, errors.New("target PV identity, claim binding or Retain policy changed")
+	v := &volumeIdentity{Claim: c.Name, ClaimUID: c.UID, ClaimVersion: c.ResourceVersion, Volume: pv.Name, VolumeUID: pv.UID, Handle: volumeHandle(pv), DeletionProtected: slices.Contains(pv.Finalizers, csiDeletionFinalizer)}
+	if err := r.validateDisposableVolume(f, v, pv, false); err != nil {
+		return nil, err
 	}
-	handle := ""
-	if pv.Spec.CSI != nil && pv.Spec.CSI.VolumeHandle != "" && (pv.Spec.CSI.Driver == "ebs.csi.aws.com" || (r.Options.LocalTest && pv.Spec.CSI.Driver == localCSIDriver)) {
-		handle = pv.Spec.CSI.Driver + ":" + pv.Spec.CSI.VolumeHandle
-	}
-	if r.Options.LocalTest && pv.Spec.HostPath != nil && pv.Spec.HostPath.Path != "" {
-		handle = "local-hostPath:" + pv.Spec.HostPath.Path
-	}
-	if handle == "" {
-		return nil, errors.New("qualified volume identity unavailable")
-	}
-	return &volumeIdentity{Claim: c.Name, ClaimUID: c.UID, ClaimVersion: c.ResourceVersion, Volume: pv.Name, VolumeUID: pv.UID, Handle: handle}, nil
+	return v, nil
 }
+func (r *Reconciler) supportedCSI(driver string) bool {
+	return driver == "ebs.csi.aws.com" || (r.Options.LocalTest && driver == localCSIDriver)
+}
+func volumeHandle(pv *corev1.PersistentVolume) string {
+	if pv.Spec.CSI == nil || pv.Spec.CSI.VolumeHandle == "" {
+		return ""
+	}
+	return pv.Spec.CSI.Driver + ":" + pv.Spec.CSI.VolumeHandle
+}
+func (r *Reconciler) validateDisposableVolume(f *fleet.CelldFleet, v *volumeIdentity, pv *corev1.PersistentVolume, cleanupStarted bool) error {
+	ref, csi := pv.Spec.ClaimRef, pv.Spec.CSI
+	if pv.UID == "" || pv.UID != v.VolumeUID || pv.Name != v.Volume || ref == nil || ref.UID != v.ClaimUID || ref.Name != v.Claim || ref.Namespace != f.Namespace || pv.Spec.PersistentVolumeReclaimPolicy != corev1.PersistentVolumeReclaimDelete {
+		return errors.New("target PV identity, claim binding or Delete policy changed")
+	}
+	if csi == nil || !r.supportedCSI(csi.Driver) || volumeHandle(pv) == "" || volumeHandle(pv) != v.Handle || pv.Spec.StorageClassName != f.Spec.Storage.StorageClassName || pv.Annotations["pv.kubernetes.io/provisioned-by"] != csi.Driver {
+		return errors.New("qualified dynamically provisioned CSI volume identity unavailable")
+	}
+	if !v.DeletionProtected || (!cleanupStarted && (!pv.DeletionTimestamp.IsZero() || !slices.Contains(pv.Finalizers, csiDeletionFinalizer))) {
+		return errors.New("CSI backing-volume deletion finalizer is required before cleanup")
+	}
+	return nil
+}
+
 func (r *Reconciler) freshGrowth(ctx context.Context, f *fleet.CelldFleet, o *currentOperation) error {
 	if f.Spec.Profile != "PersistentFleet" {
 		return nil
@@ -76,45 +92,80 @@ func (r *Reconciler) freshGrowth(ctx context.Context, f *fleet.CelldFleet, o *cu
 	}
 	return nil
 }
+
+// cleanupClaims retains the current strict proof until CSI completes deletion.
+// It never deletes a PV or mutates reclaim policy, finalizers or attachments.
 func (r *Reconciler) cleanupClaims(ctx context.Context, f *fleet.CelldFleet, h *loadedState) (bool, error) {
 	s, o := h.j, h.j.Operation
+	if o == nil || o.Phase != "DeleteClaims" {
+		return false, errors.New("cleanup lacks current operation")
+	}
+	w := emptyObject(workload(f, r.Options))
+	if err := r.Get(ctx, client.ObjectKeyFromObject(f), w); err != nil {
+		return false, err
+	}
+	if err := r.effectObserved(ctx, f, s, w, false); err != nil {
+		return false, err
+	}
 	for i := range o.Targets {
 		t := &o.Targets[i]
 		if t.Storage == nil {
 			continue
 		}
+		if t.Proof == nil || !validProof(o, *t, *t.Proof) {
+			return false, errors.New("cleanup lacks exact strict proof")
+		}
 		v := t.Storage
 		c := &corev1.PersistentVolumeClaim{}
-		err := r.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: v.Claim}, c)
-		if apierrors.IsNotFound(err) {
+		claimErr := r.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: v.Claim}, c)
+		if claimErr != nil && !apierrors.IsNotFound(claimErr) {
+			return false, claimErr
+		}
+		if claimErr == nil && (c.UID != v.ClaimUID || c.Spec.VolumeName != v.Volume || len(c.OwnerReferences) != 0 || c.Labels[FleetLabel] != string(f.UID) || c.Annotations["celld.eric.dev/storage-reservation"] != reservationName(f)) {
+			return false, errors.New("claim replacement or binding drift during cleanup")
+		}
+		pv := &corev1.PersistentVolume{}
+		volumeErr := r.Get(ctx, client.ObjectKey{Name: v.Volume}, pv)
+		if volumeErr != nil && !apierrors.IsNotFound(volumeErr) {
+			return false, volumeErr
+		}
+		if volumeErr == nil {
+			if err := r.validateDisposableVolume(f, v, pv, v.CleanupStarted && (apierrors.IsNotFound(claimErr) || !c.DeletionTimestamp.IsZero())); err != nil {
+				return false, err
+			}
+		} else if !v.CleanupStarted {
+			return false, errors.New("PV disappeared before authorized cleanup")
+		}
+		if apierrors.IsNotFound(claimErr) {
+			if !v.CleanupStarted {
+				return false, errors.New("PVC disappeared before authorized cleanup")
+			}
+			if volumeErr == nil {
+				return false, nil
+			}
+			detached, err := r.volumeDetached(ctx, v.Volume)
+			if err != nil || !detached {
+				return false, err
+			}
 			delete(s.Claims, v.Claim)
-			s.DiskCleanupPending = true
 			continue
 		}
-		if err != nil {
-			return false, err
+		if !v.CleanupStarted && !c.DeletionTimestamp.IsZero() {
+			return false, errors.New("PVC deletion preceded authorized cleanup")
 		}
-		if c.UID != v.ClaimUID {
-			return false, errors.New("claim replacement during cleanup")
-		}
-		// Validate PV/handle even during PVC termination; deleting the PVC does not
-		// authorize deleting a PV or changing its reclaim policy.
 		if !c.DeletionTimestamp.IsZero() {
 			return false, nil
 		}
-		current, err := r.targetVolume(ctx, f, s, t.Pod)
-		if err != nil {
-			return false, err
+		if volumeErr != nil {
+			return false, errors.New("bound PV disappeared while claim remains")
 		}
-		if !sameVolume(*v, *current) {
-			return false, errors.New("disk changed during cleanup")
-		}
-		if v.ClaimVersion != c.ResourceVersion {
+		// Persist intent and the exact claim resourceVersion before issuing deletion.
+		// A lost response can then be recovered by observing these same objects.
+		if !v.CleanupStarted || v.ClaimVersion != c.ResourceVersion {
+			v.CleanupStarted = true
 			v.ClaimVersion = c.ResourceVersion
 			return false, r.saveState(ctx, h.res, s)
 		}
-		// Recheck no pod can still reference the claim. The workload remains at the
-		// exact stopped count until this operation has observed every deletion.
 		all := &corev1.PodList{}
 		if err := r.List(ctx, all, client.InNamespace(f.Namespace)); err != nil {
 			return false, err
@@ -126,12 +177,39 @@ func (r *Reconciler) cleanupClaims(ctx context.Context, f *fleet.CelldFleet, h *
 				}
 			}
 		}
+		live := &fleet.CelldStorageReservation{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(h.res), live); err != nil {
+			return false, err
+		}
+		if live.UID != h.res.UID || live.ResourceVersion != h.res.ResourceVersion {
+			return false, errors.New("cleanup reservation changed")
+		}
 		r.faultPoint("before-cleanup")
-		err = r.Delete(ctx, c, client.Preconditions{UID: &v.ClaimUID, ResourceVersion: &v.ClaimVersion})
+		err := r.Delete(ctx, c, client.Preconditions{UID: &v.ClaimUID, ResourceVersion: &v.ClaimVersion})
 		r.faultPoint("after-cleanup")
-		return false, err
+		return false, client.IgnoreNotFound(err)
 	}
 	return true, r.saveState(ctx, h.res, s)
+}
+func (r *Reconciler) volumeDetached(ctx context.Context, volume string) (bool, error) {
+	// A terminating or detached attachment object can still represent unfinished
+	// CSI teardown. Only absence completes this operation; never force detach.
+	attachments := &storagev1.VolumeAttachmentList{}
+	if err := r.List(ctx, attachments); err != nil {
+		return false, err
+	}
+	for _, a := range attachments.Items {
+		if a.Spec.Source.PersistentVolumeName != nil && *a.Spec.Source.PersistentVolumeName == volume {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+func diskCleanupPending(s *fleetState) bool {
+	if s == nil || s.Operation == nil || s.Operation.Phase != "DeleteClaims" {
+		return false
+	}
+	return slices.ContainsFunc(s.Operation.Targets, func(t operationTarget) bool { return t.Storage != nil })
 }
 func (r *Reconciler) admitNewClaims(ctx context.Context, f *fleet.CelldFleet, h *loadedState) error {
 	if f.Spec.Profile != "PersistentFleet" {

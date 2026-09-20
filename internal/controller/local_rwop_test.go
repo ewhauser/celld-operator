@@ -23,7 +23,7 @@ func TestLocalRWOPUsesReadWriteOncePodAndHostpathCSIIdentity(t *testing.T) {
 		t.Fatal("LocalRWOP without LocalTest or a launcher must have no effect")
 	}
 	claim := &corev1.PersistentVolumeClaim{Name: "data-x-0", Namespace: "fleets", UID: "claim", Spec: corev1.PersistentVolumeClaimSpec{VolumeName: "pv-x"}, Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimBound}}
-	csi := &corev1.PersistentVolume{Name: "pv-x", UID: "pvuid", Spec: corev1.PersistentVolumeSpec{PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimRetain, ClaimRef: &corev1.ObjectReference{Name: claim.Name, Namespace: claim.Namespace, UID: claim.UID}, PersistentVolumeSource: corev1.PersistentVolumeSource{CSI: &corev1.CSIPersistentVolumeSource{Driver: localCSIDriver, VolumeHandle: "vol-1"}}}}
+	csi := &corev1.PersistentVolume{Name: "pv-x", UID: "pvuid", Finalizers: []string{csiDeletionFinalizer}, Annotations: map[string]string{"pv.kubernetes.io/provisioned-by": localCSIDriver}, Spec: corev1.PersistentVolumeSpec{PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimDelete, StorageClassName: "disposable", ClaimRef: &corev1.ObjectReference{Name: claim.Name, Namespace: claim.Namespace, UID: claim.UID}, PersistentVolumeSource: corev1.PersistentVolumeSource{CSI: &corev1.CSIPersistentVolumeSource{Driver: localCSIDriver, VolumeHandle: "vol-1"}}}}
 	other := csi.DeepCopy()
 	other.Name, other.UID = "pv-other", "pvuid-other"
 	other.Spec.CSI.Driver = "someone.else.csi"

@@ -13,4 +13,4 @@ Launcher-managed PersistentFleet lifecycle is disabled; set launcherImage to a q
 No fleet namespaces configured: set fleetNamespaces or apply config/rbac/fleet-namespace.yaml
 in each namespace that will hold CelldFleet resources.
 {{- end }}
-CRDs and retained fleet resources are not removed on Helm uninstall.
+CRDs, fleet resources and permanent bucket reservations are not removed on Helm uninstall.
