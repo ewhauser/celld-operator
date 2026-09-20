@@ -2,14 +2,12 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import starlightLinksValidator from 'starlight-links-validator';
-import { readFileSync } from 'node:fs';
 
 const repo = 'https://github.com/ewhauser/celld-operator';
 // GitHub Pages serves a project site under /celld-operator. Override both for a
 // custom domain: SITE_URL=https://docs.example.com SITE_BASE=/ pnpm build
 const site = process.env.SITE_URL ?? 'https://ewhauser.github.io';
 const base = process.env.SITE_BASE ?? '/celld-operator';
-const sidebar = JSON.parse(readFileSync(new URL('./src/generated-sidebar.json', import.meta.url), 'utf8'));
 
 export default defineConfig({
 	site,
