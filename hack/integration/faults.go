@@ -50,17 +50,8 @@ func (h *harness) exerciseFaults() {
 		h.scale("alpha", 2)
 		h.readLedger("client", "alpha")
 	}()
-	h.toxic("POST", "/proxies/minio/toxics", object{"name": "partition", "type": "timeout", "stream": "upstream", "attributes": object{"timeout": 0}})
-	func() {
-		defer h.toxic("DELETE", "/proxies/minio/toxics/partition", nil)
-		h.hold(10*time.Second, "steady-state storage outage creates no operation or disk deletion", func() bool {
-			return specReplicas(h.get("statefulset", "alpha")) == 2 && specReplicas(h.get("statefulset", "beta")) == 2 && len(sub(h.currentState("alpha"), "Operation")) == 0 && len(sub(h.currentState("beta"), "Operation")) == 0
-		})
-	}()
-	h.waitFor("fleets observable after storage transport restoration", 5*time.Minute, func() bool { return h.ready("alpha") && h.ready("beta") })
-	h.readLedger("client", "alpha")
-	h.readLedger("client-beta", "beta")
-	fmt.Println("PASS: both profiles preserve acknowledged writes across before/after-effect manager crashes; storage latency and short outage")
+	h.exerciseLeaseLoss()
+	fmt.Println("PASS: both profiles preserve acknowledged writes across before/after-effect manager crashes, storage latency and explicit administrative recovery after lease loss")
 }
 
 func (h *harness) toxic(method, path string, body any) {

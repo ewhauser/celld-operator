@@ -43,9 +43,16 @@ The operator's unit tests independently cover the upgrade state machine.
 
 Fault tests terminate the actual manager before and after a guarded workload
 update, then require the same operation to complete with exactly one replica
-write. They also run contraction through injected S3 latency and preserve fleet
-counts through a short storage outage. The external suite uses a real HPA and
-Metrics Server to write the fleet's `/scale` subresource.
+write. They also run contraction through injected S3 latency, then exceed the
+runtime's S3 lease TTL. Authenticated launcher observations must show every child
+stopped without a strict removal proof, while Pod/PVC/PV identities remain intact
+after storage returns. Recovery is an explicit administrative replacement of only
+those failed Pods, with UID preconditions and ordinary deletion grace. The test
+requires new runtime generations, all acknowledged writes, and unchanged
+PersistentFleet PVC/PV/CSI identity on the same Node UID and boot. This is not
+automatic controller recovery or permission to move an old disk to another host.
+No retirement markers or binding files are reset. The external suite uses a real
+HPA and Metrics Server to write the fleet's `/scale` subresource.
 
 These suites establish local Kubernetes, protocol and hostpath CSI behavior.
 MinIO data is not durable across replacement of its Pod; these scenarios do not
