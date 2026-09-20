@@ -94,4 +94,10 @@ chart has been published. `make chart-check` validates rendering and RBAC parity
 
 Release publication refuses a version if its image, chart or GitHub release already exists. A partial publish requires investigation and a new version; rerunning cannot silently overwrite that version. The preflight fails closed on authentication or network errors.
 
-The workflow uses the repository `GITHUB_TOKEN` with package write permission. First publication defaults to private visibility; make an explicit visibility decision or configure pull credentials before installation ([GitHub Container registry documentation](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)).
+The workflow uses the repository `GITHUB_TOKEN` with package write permission.
+The `celld-operator` image and `charts/celld-operator` chart packages on GHCR are
+public (set on 19 September 2026 after the first publication, which GHCR
+creates private): pulls and the `cosign verify` commands need no credentials.
+The first release, `v0.1.0-rc.3`, was verified anonymously this way: both
+platforms listed in the index, image and chart signatures valid, chart pulled
+and its values pinned to the image digest.
