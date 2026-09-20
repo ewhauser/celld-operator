@@ -26,14 +26,7 @@ func (r *Reconciler) admitBucketHistory(ctx context.Context, f *fleet.CelldFleet
 	if err != nil {
 		changed := false
 		if invalidated, ok := errors.AsType[*v050.BucketExpiryInvalidatedError](err); ok {
-			for i := range j.BucketHistory {
-				s := &j.BucketHistory[i]
-				if s.Node == invalidated.Node && s.Generation == invalidated.Generation && (!s.ExpiryInvalidated || s.ExpiryObserved) {
-					s.ExpiryObserved = false
-					s.ExpiryInvalidated = true
-					changed = true
-				}
-			}
+			changed = invalidateBucketExpiry([][]bucketSession{j.BucketHistory}, invalidated)
 		}
 		return changed, err
 	}

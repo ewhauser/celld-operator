@@ -29,6 +29,40 @@ type bucketSession struct {
 	ExpiryInvalidated                     bool
 }
 
+// resolvedBucketSession reports whether a session carries positive expiry
+// authority that no later contrary lease observation has revoked. Only such a
+// session may let the runtime adapter tolerate a garbage-collected record.
+// Retirement alone is membership state, never expiry proof.
+func resolvedBucketSession(s bucketSession) bool {
+	return s.ExpiryObserved && !s.ExpiryInvalidated
+}
+
+// invalidateBucketExpiry durably revokes positive expiry proof for the exact
+// generation named by a typed renewed-lease or generation-replacement
+// observation, across every record set it is given. Sibling writers keep their
+// own authority: contrary lease evidence about one generation says nothing
+// about another, and blanket invalidation would un-resolve writers whose
+// records the runtime may already have garbage-collected, wedging the
+// operation on "unresolved bucket writer record missing". It reports whether
+// any record changed.
+func invalidateBucketExpiry(records [][]bucketSession, e *v050.BucketExpiryInvalidatedError) bool {
+	changed := false
+	for _, sessions := range records {
+		for i := range sessions {
+			s := &sessions[i]
+			if s.Node != e.Node || s.Generation != e.Generation {
+				continue
+			}
+			if s.ExpiryObserved || !s.ExpiryInvalidated {
+				changed = true
+			}
+			s.ExpiryObserved = false
+			s.ExpiryInvalidated = true
+		}
+	}
+	return changed
+}
+
 func (r *Reconciler) bucketAssessment(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal, count int32, issued bool) ([]bucketSession, time.Time, error) {
 	return r.bucketAssessmentMode(ctx, f, j, count, issued, false)
 }
@@ -110,12 +144,12 @@ func (r *Reconciler) bucketAssessmentMode(ctx context.Context, f *fleet.CelldFle
 		}
 		s.Retired = !present || s.SupersededBy != ""
 		members = append(members, v050.BucketMember{Node: s.Node, Generation: s.Generation, SupersededBy: s.SupersededBy, Retired: s.Retired, Resolved: slices.ContainsFunc(j.BucketHistory, func(old bucketSession) bool {
-			return old.Node == s.Node && old.Generation == s.Generation && old.Retired && !old.ExpiryInvalidated
+			return old.Node == s.Node && old.Generation == s.Generation && old.Retired && resolvedBucketSession(old)
 		}) || (issued && j.Operation.Phase == "Recovering" && slices.ContainsFunc(j.Operation.BucketCandidates, func(old bucketSession) bool {
 			// Recovering candidates record ExpiryObserved only after a successful
 			// issued assessment positively reads their expired lease. Persist proof
 			// before settling so runtime GC cannot erase an already observed fact.
-			return old.Node == s.Node && old.Generation == s.Generation && old.Retired && !old.ExpiryInvalidated && old.ExpiryObserved
+			return old.Node == s.Node && old.Generation == s.Generation && old.Retired && resolvedBucketSession(old)
 		}))})
 	}
 	reader, err := r.Evidence.reader(ctx, f)
@@ -269,14 +303,8 @@ func (r *Reconciler) contractBucket(ctx context.Context, f *fleet.CelldFleet, re
 		}
 		dirty := false
 		if invalidated, ok := errors.AsType[*v050.BucketExpiryInvalidatedError](err); ok {
-			for _, sessions := range [][]bucketSession{op.BucketCandidates, j.BucketHistory} {
-				for i := range sessions {
-					if sessions[i].Node == invalidated.Node && sessions[i].Generation == invalidated.Generation {
-						sessions[i].ExpiryObserved = false
-						sessions[i].ExpiryInvalidated = true
-						dirty = true
-					}
-				}
+			if invalidateBucketExpiry([][]bucketSession{op.BucketCandidates, j.BucketHistory}, invalidated) {
+				dirty = true
 			}
 		}
 		if !op.SettledAt.IsZero() {
