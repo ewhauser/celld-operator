@@ -16,6 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 type bucketReader struct {
@@ -175,5 +176,54 @@ func TestBucketPreflightNeverAuthorizesContraction(t *testing.T) {
 			t.Fatalf("candidate %d omitted: %s", i, reason)
 		}
 		observation.Samples[i].CPU = 10
+	}
+}
+
+// The reconciler's client is uncached, so a per-pod owner fetch is a real API
+// call per pod. Every pod of a fleet shares one owner: one Get must cover them all.
+func TestBucketCandidatesFetchesOwningStatefulSetOncePerCall(t *testing.T) {
+	f := fixture("ordered", "ordered-data", "Bucket")
+	f.Spec.BucketWorkload = "Ordered"
+	opts := Options{OperatorNamespace: "celld-system"}
+	now := time.Unix(10000, 0)
+	sts := workload(f, opts).(*appsv1.StatefulSet)
+	sts.UID = "workload"
+	objects := []client.Object{f, sts}
+	for i := range 5 {
+		name := fmt.Sprintf("%s-%d", f.Name, i)
+		zone := f.Spec.Placement.Zones[i%len(f.Spec.Placement.Zones)]
+		pod := &corev1.Pod{
+			Name: name, Namespace: f.Namespace, UID: types.UID(name), Labels: labels(f),
+			OwnerReferences: []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "StatefulSet", Name: f.Name, UID: sts.UID, Controller: new(true)}},
+			Spec:            *sts.Spec.Template.Spec.DeepCopy(),
+			Status: corev1.PodStatus{
+				Conditions:        []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
+				ContainerStatuses: []corev1.ContainerStatus{{Name: "celld", ContainerID: "container-" + name, State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: metav1.NewTime(now.Add(-time.Minute))}}}},
+			},
+		}
+		pod.Spec.SchedulingGates = nil
+		pod.Spec.NodeName = "host-" + name
+		pod.Spec.NodeSelector = map[string]string{corev1.LabelTopologyZone: zone}
+		objects = append(objects, pod, &corev1.Node{Name: pod.Spec.NodeName, UID: types.UID("node-" + name), Labels: map[string]string{corev1.LabelHostname: pod.Spec.NodeName, corev1.LabelTopologyZone: zone}})
+	}
+	r := setup(t, objects...)
+	gets := 0
+	counting := interceptor.NewClient(r.Client.(client.WithWatch), interceptor.Funcs{Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, o ...client.GetOption) error {
+		if _, ok := obj.(*appsv1.StatefulSet); ok {
+			gets++
+		}
+		return c.Get(ctx, key, obj, o...)
+	}})
+	p := &ProductionEvidence{client: counting, now: func() time.Time { return now }}
+	j := &lifecycleJournal{WorkloadUID: sts.UID, Operation: &lifecycleOperation{ID: "op", From: 5, To: 4, Phase: "Blocked"}}
+	candidates, err := p.bucketCandidates(t.Context(), f, j, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 5 {
+		t.Fatalf("admitted %d of 5 bucket candidates", len(candidates))
+	}
+	if gets != 1 {
+		t.Fatalf("fetched the shared StatefulSet %d times for one candidate sweep, want 1", gets)
 	}
 }
