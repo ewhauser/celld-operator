@@ -140,6 +140,7 @@ func (h *harness) exerciseLeaseLoss() {
 				return false
 			}
 			if target.fleet == "beta" {
+				assert(str(pod, "status", "podIP") != str(target.pod, "status", "podIP"), "PersistentFleet reused its Pod IP; DNS rebinding was not exercised")
 				assert(str(pod, "spec", "nodeName") == str(target.pod, "spec", "nodeName") && uidOf(h.cluster("node", str(pod, "spec", "nodeName"))) == target.node, "persistent recovery moved to another node identity")
 				assert(state.BootID == target.state.BootID && state.DiskID == target.state.DiskID, "persistent recovery changed boot or disk identity")
 			}
@@ -148,6 +149,13 @@ func (h *harness) exerciseLeaseLoss() {
 	})
 	for fleetName, before := range oldClaims {
 		assert(same(h.claims(fleetName), before), "administrative recovery replaced claims or CSI disks")
+	}
+	for _, target := range targets {
+		if target.fleet == "beta" {
+			pod := h.get("pod", nameOf(target.pod))
+			advertise := strings.TrimSpace(h.k("-n", "fleets", "exec", nameOf(pod), "-c", "celld", "--", "printenv", "CELLD_ADVERTISE"))
+			fmt.Printf("PASS: PersistentFleet DNS rebinding pod=%s old_ip=%s new_ip=%s advertise=%s\n", nameOf(pod), str(target.pod, "status", "podIP"), str(pod, "status", "podIP"), advertise)
+		}
 	}
 	h.readLedger("client", "alpha")
 	h.readLedger("client-beta", "beta")
