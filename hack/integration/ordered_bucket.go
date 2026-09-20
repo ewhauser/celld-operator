@@ -60,7 +60,7 @@ func (h *harness) exerciseOrderedBucket() {
 	}
 	h.waitFor("Ordered Bucket gated pods start across two AZs", 360*time.Second, func() bool { return settled(3) })
 	placement(3)
-	client := sleepPod("ordered-client", "fleets", curlImage, map[string]string{"celld.eric.dev/client-of": "alpha"})
+	client := sleepPod("ordered-client", "fleets", map[string]string{"celld.eric.dev/client-of": "alpha"})
 	client.Spec.Containers[0].Name = "client"
 	h.apply(client)
 	h.k("-n", "fleets", "wait", "--for=condition=Ready", "pod/ordered-client", "--timeout=90s")

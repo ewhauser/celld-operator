@@ -185,12 +185,12 @@ func truncate(s string, n int) string {
 	return s[:n]
 }
 
-func sleepPod(name, ns, image string, labels map[string]string) *corev1.Pod {
+func sleepPod(name, ns string, labels map[string]string) *corev1.Pod {
 	return &corev1.Pod{
 		APIVersion: "v1", Kind: "Pod",
 		Name: name, Namespace: ns, Labels: labels,
 		Spec: corev1.PodSpec{Containers: []corev1.Container{{
-			Name: strings.SplitN(name, "-", 2)[0], Image: image, Command: []string{"/bin/sh", "-c", "sleep 3600"},
+			Name: strings.SplitN(name, "-", 2)[0], Image: curlImage, Command: []string{"/bin/sh", "-c", "sleep 3600"},
 		}}},
 	}
 }
@@ -242,7 +242,7 @@ func (h *harness) deployStore() {
 		})
 		h.storeService("minio", "proxy", 9000)
 		h.storeService("toxiproxy-api", "proxy", 8474)
-		ctl := sleepPod("toxi-ctl", storeNS, curlImage, nil)
+		ctl := sleepPod("toxi-ctl", storeNS, nil)
 		ctl.Spec.Containers[0].Name = "ctl"
 		ctl.Spec.Containers[0].Command = []string{"/bin/sh", "-c", "sleep 7200"}
 		h.apply(ctl)
@@ -448,7 +448,7 @@ func bucketFleet(name, bucket string) *v1alpha1.CelldFleet {
 // probe starts a curl pod. A fleet-uid label also sets an owner reference so the
 // ReplicaSet cannot adopt it and it stays out of ready Service endpoints.
 func (h *harness) probe(name, ns string, labels map[string]string) {
-	pod := sleepPod(name, ns, curlImage, labels)
+	pod := sleepPod(name, ns, labels)
 	pod.Spec.Containers[0].Name = "probe"
 	pod.Spec.ReadinessGates = []corev1.PodReadinessGate{{ConditionType: "integration.celld.eric.dev/NotServing"}}
 	if uid, ok := labels["celld.eric.dev/fleet-uid"]; ok {
