@@ -38,6 +38,10 @@ func (p *ProductionEvidence) bucketCandidates(ctx context.Context, f *fleet.Cell
 	normalizePod(&base)
 	identities := map[types.UID]bucketCandidate{}
 	nodes := map[string]*corev1.Node{}
+	// Every pod of a fleet shares one owner, and the client is uncached: fetch
+	// each distinct owner once per call rather than once per pod.
+	statefulSets := map[string]*appsv1.StatefulSet{}
+	replicaSets := map[string]*appsv1.ReplicaSet{}
 	for i := range pods {
 		pod := &pods[i]
 		node := nodes[pod.Spec.NodeName]
@@ -60,11 +64,15 @@ func (p *ProductionEvidence) bucketCandidates(ctx context.Context, f *fleet.Cell
 			return nil, errors.New("bucket candidate unready or lacks exact ownership")
 		}
 		if orderedBucket(f) {
-			sts := &appsv1.StatefulSet{}
-			if err := p.client.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: f.Name}, sts); err != nil {
-				return nil, err
+			sts := statefulSets[f.Name]
+			if sts == nil {
+				sts = &appsv1.StatefulSet{}
+				if err := p.client.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: f.Name}, sts); err != nil {
+					return nil, err
+				}
+				normalizePod(&sts.Spec.Template.Spec)
+				statefulSets[f.Name] = sts
 			}
-			normalizePod(&sts.Spec.Template.Spec)
 			if sts.UID != j.WorkloadUID || !sts.DeletionTimestamp.IsZero() || !equality.Semantic.DeepEqual(base, sts.Spec.Template.Spec) || sts.Spec.PodManagementPolicy != appsv1.OrderedReadyPodManagement || len(sts.Spec.VolumeClaimTemplates) != 0 {
 				return nil, errors.New("ordered Bucket workload changed")
 			}
@@ -79,15 +87,19 @@ func (p *ProductionEvidence) bucketCandidates(ctx context.Context, f *fleet.Cell
 			if owner.Kind != "ReplicaSet" {
 				return nil, errors.New("bucket candidate lacks ReplicaSet owner")
 			}
-			rs := &appsv1.ReplicaSet{}
-			if err := p.client.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: owner.Name}, rs); err != nil {
-				return nil, err
+			rs := replicaSets[owner.Name]
+			if rs == nil {
+				rs = &appsv1.ReplicaSet{}
+				if err := p.client.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: owner.Name}, rs); err != nil {
+					return nil, err
+				}
+				normalizePod(&rs.Spec.Template.Spec)
+				replicaSets[owner.Name] = rs
 			}
 			deployment := metav1.GetControllerOf(rs)
 			if rs.UID != owner.UID || !rs.DeletionTimestamp.IsZero() || deployment == nil || deployment.APIVersion != "apps/v1" || deployment.Kind != "Deployment" || deployment.Name != f.Name || deployment.UID != j.WorkloadUID || j.WorkloadUID == "" {
 				return nil, errors.New("bucket candidate owner chain changed")
 			}
-			normalizePod(&rs.Spec.Template.Spec)
 			if !equality.Semantic.DeepEqual(base, rs.Spec.Template.Spec) {
 				return nil, errors.New("bucket candidate ReplicaSet runtime template differs")
 			}
