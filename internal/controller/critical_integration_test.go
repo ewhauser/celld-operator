@@ -45,7 +45,7 @@ func TestMaintenanceRetainsStorageAndLossFences(t *testing.T) {
 			if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), f); err != nil {
 				t.Fatal(err)
 			}
-			if _, _, err := r.lifecycle(t.Context(), f, res, w); err != nil {
+			if _, _, err := r.lifecycle(t.Context(), f, r.hydrate(t.Context(), res), w); err != nil {
 				t.Fatal(err)
 			}
 			if failure == "loss" {

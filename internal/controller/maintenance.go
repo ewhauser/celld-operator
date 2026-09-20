@@ -118,7 +118,7 @@ func (r *Reconciler) disruption(ctx context.Context, f *fleet.CelldFleet, res *f
 	if kind == "Delete" {
 		reason = "DeletionBlocked"
 	}
-	result, err := r.report(ctx, f, reason, "Request retained in shared lifecycle journal; no upgrade, rollback, restart or final shutdown is qualified. Workloads, PVCs, storage reservation and recovery evidence remain retained", false)
+	result, err := r.report(ctx, f, hydrated(res, j), reason, "Request retained in shared lifecycle journal; no upgrade, rollback, restart or final shutdown is qualified. Workloads, PVCs, storage reservation and recovery evidence remain retained", false)
 	return result, true, err
 }
 
@@ -142,7 +142,7 @@ func (r *Reconciler) maintenanceFleet(ctx context.Context, f *fleet.CelldFleet) 
 		if !f.DeletionTimestamp.IsZero() {
 			candidate := emptyObject(workload(f, r.Options))
 			if err := r.Get(ctx, client.ObjectKeyFromObject(f), candidate); err == nil {
-				return r.report(ctx, f, "DeletionBlocked", "Missing reservation for existing workload; refusing reconstruction of runtime authority", false)
+				return r.report(ctx, f, nil, "DeletionBlocked", "Missing reservation for existing workload; refusing reconstruction of runtime authority", false)
 			} else if !apierrors.IsNotFound(err) {
 				return ctrl.Result{}, err
 			}
@@ -151,7 +151,7 @@ func (r *Reconciler) maintenanceFleet(ctx context.Context, f *fleet.CelldFleet) 
 				return ctrl.Result{}, err
 			}
 			if len(pods.Items) != 0 {
-				return r.report(ctx, f, "DeletionBlocked", "Missing reservation with live pod identities requires investigation", false)
+				return r.report(ctx, f, nil, "DeletionBlocked", "Missing reservation with live pod identities requires investigation", false)
 			}
 			res = &fleet.CelldStorageReservation{Name: reservationName(f), Spec: fleet.ReservationSpec{InitialReplicas: f.Spec.Replicas, Bucket: f.Spec.Storage.Bucket, FleetNamespace: f.Namespace, FleetName: f.Name, FleetUID: string(f.UID), SpecHash: specHash(f)}}
 			res.Annotations = map[string]string{attemptAnnotation: "deletion-before-workload"}
@@ -160,14 +160,20 @@ func (r *Reconciler) maintenanceFleet(ctx context.Context, f *fleet.CelldFleet) 
 			}
 			return ctrl.Result{RequeueAfter: time.Second}, nil
 		}
-		return r.report(ctx, f, reason, "No reservation found; provisioning suspended", false)
+		return r.report(ctx, f, nil, reason, "No reservation found; provisioning suspended", false)
 	}
-	if result, handled, err := r.migrateBucket(ctx, f, res); handled || err != nil {
+	// One hydration for this pass, as in reconcileFleet: migration, matching,
+	// the retained-deletion journal below and every report read this copy.
+	h := r.hydrate(ctx, res)
+	if h.err != nil {
+		return r.report(ctx, f, h, "JournalInvalid", h.err.Error(), false)
+	}
+	if result, handled, err := r.migrateBucket(ctx, f, h); handled || err != nil {
 		return result, err
 	}
 	want := fleet.ReservationSpec{InitialReplicas: f.Spec.Replicas, Bucket: f.Spec.Storage.Bucket, FleetNamespace: f.Namespace, FleetName: f.Name, FleetUID: string(f.UID), SpecHash: specHash(f)}
-	if len(res.OwnerReferences) != 0 || !res.DeletionTimestamp.IsZero() || !r.reservationMatches(ctx, f, res, want) {
-		return r.report(ctx, f, "StorageScopeConflict", "Cannot bind maintenance to retained storage authority", false)
+	if len(res.OwnerReferences) != 0 || !res.DeletionTimestamp.IsZero() || !r.reservationMatches(ctx, f, h, want) {
+		return r.report(ctx, f, h, "StorageScopeConflict", "Cannot bind maintenance to retained storage authority", false)
 	}
 	w := emptyObject(workload(f, r.Options))
 	if err := r.Get(ctx, client.ObjectKeyFromObject(f), w); err != nil {
@@ -175,10 +181,7 @@ func (r *Reconciler) maintenanceFleet(ctx context.Context, f *fleet.CelldFleet) 
 			return ctrl.Result{}, err
 		}
 		if !f.DeletionTimestamp.IsZero() {
-			j, err := r.loadJournal(ctx, res)
-			if err != nil {
-				return ctrl.Result{}, err
-			}
+			j := h.j
 			if j != nil && j.Maintenance != nil && j.Maintenance.Kind == "Delete" && j.Maintenance.Phase == "Cleanup" {
 				result, _, err := r.completeRetainedDeletion(ctx, f, res, j)
 				return result, err
@@ -196,6 +199,7 @@ func (r *Reconciler) maintenanceFleet(ctx context.Context, f *fleet.CelldFleet) 
 					initial = f.Spec.Replicas
 				}
 				j = &lifecycleJournal{Version: 8, RuntimeImage: runtimeImage(f), Initial: initial, Applied: initial, Maintenance: &maintenanceOperation{ID: string(uuid.NewUUID()), Kind: "Delete", Phase: "Cleanup"}}
+				h.j = j
 				if err := r.saveJournal(ctx, res, j); err != nil {
 					return ctrl.Result{}, err
 				}
@@ -203,21 +207,21 @@ func (r *Reconciler) maintenanceFleet(ctx context.Context, f *fleet.CelldFleet) 
 				return result, err
 			}
 		}
-		return r.report(ctx, f, reason, "Workload absent; retain finalizer and reservation because absence is not process fencing or recovery evidence", false)
+		return r.report(ctx, f, h, reason, "Workload absent; retain finalizer and reservation because absence is not process fencing or recovery evidence", false)
 	}
 	if w.GetLabels()[FleetLabel] != string(f.UID) || len(w.GetOwnerReferences()) != 0 {
-		return r.report(ctx, f, "LifecycleBlocked", "Workload identity or garbage collection ownership changed", false)
+		return r.report(ctx, f, h, "LifecycleBlocked", "Workload identity or garbage collection ownership changed", false)
 	}
 	if w.GetAnnotations()[maintenanceFenceKey] != maintenanceFence(f) {
 		if err := r.setMaintenanceFence(ctx, f, w, maintenanceFence(f)); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
-	result, handled, err := r.lifecycle(ctx, f, res, w)
+	result, handled, err := r.lifecycle(ctx, f, h, w)
 	if handled || err != nil {
 		return result, err
 	}
-	return r.report(ctx, f, reason, "Workload fence acknowledged; new actions suspended, issued operations continue recovery; all data and identities retained", false)
+	return r.report(ctx, f, h, reason, "Workload fence acknowledged; new actions suspended, issued operations continue recovery; all data and identities retained", false)
 }
 
 func resetMaintenanceCapacity(j *lifecycleJournal) {

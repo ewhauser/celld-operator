@@ -34,7 +34,7 @@ func coordinatedExpectedReplicas(m *maintenanceOperation, applied int32, w clien
 func (r *Reconciler) beginCoordinatedContraction(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, j *lifecycleJournal, w client.Object) (ctrl.Result, bool, error) {
 	op := j.Operation
 	if !coordinatedDowntime(f) || paused(f) || !f.DeletionTimestamp.IsZero() || op == nil || op.Automatic || op.From != 2 || op.To != 1 || f.Spec.Replicas != 1 || f.Spec.Placement.AZCount > 1 || !r.capacityNow().Before(op.Deadline) || w.GetAnnotations()[maintenanceFenceKey] != "" {
-		result, err := r.report(ctx, f, "CoordinatedDowntimeBlocked", "Manual 2-to-1 requires explicit downtime permission and a one-AZ floor", false)
+		result, err := r.report(ctx, f, hydrated(res, j), "CoordinatedDowntimeBlocked", "Manual 2-to-1 requires explicit downtime permission and a one-AZ floor", false)
 		return result, true, err
 	}
 	j.Maintenance = &maintenanceOperation{ID: op.ID, Kind: "Contract", Coordinated: true, TargetReplicas: 1, Phase: "Capture", StartedAt: op.StartedAt, Deadline: op.Deadline}

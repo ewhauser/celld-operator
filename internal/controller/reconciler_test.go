@@ -319,6 +319,37 @@ func TestReservationCannotBeReclaimedByNewUID(t *testing.T) {
 	reason(t, reconcile(t, other, replacement), "StorageScopeConflict")
 }
 
+// A journal that cannot be read is reported as unreadable, with the load error,
+// not as a storage scope conflict: the reservation still binds exactly this
+// fleet, and the reason an operator sees has to name the actual failure.
+func TestUnreadableJournalReportsJournalInvalid(t *testing.T) {
+	r, f := lifecycleSetup(t, "Bucket")
+	res := &fleet.CelldStorageReservation{}
+	if err := r.Get(t.Context(), types.NamespacedName{Name: reservationName(f)}, res); err != nil {
+		t.Fatal(err)
+	}
+	res.Annotations[journalKey] = `{"Version":99,"Initial":3,"Applied":3}`
+	if err := r.Update(t.Context(), res); err != nil {
+		t.Fatal(err)
+	}
+	_, want := r.loadJournal(t.Context(), res)
+	if want == nil {
+		t.Fatal("fixture journal is still readable")
+	}
+	got := reconcile(t, r, f)
+	reason(t, got, "JournalInvalid")
+	if c := meta.FindStatusCondition(got.Status.Conditions, "Ready"); c.Message != want.Error() {
+		t.Fatalf("message %q does not carry the load error %q", c.Message, want)
+	}
+	after := &fleet.CelldStorageReservation{}
+	if err := r.Get(t.Context(), types.NamespacedName{Name: reservationName(f)}, after); err != nil {
+		t.Fatal(err)
+	}
+	if after.Annotations[journalKey] != res.Annotations[journalKey] || after.ResourceVersion != res.ResourceVersion {
+		t.Fatal("unreadable journal was rewritten; evidence must be retained for review")
+	}
+}
+
 func TestReadinessRequiresObservedWorkload(t *testing.T) {
 	f := fixture("alpha", "bucket-alpha", "Bucket")
 	r := setup(t, f)

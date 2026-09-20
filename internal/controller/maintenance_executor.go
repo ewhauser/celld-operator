@@ -115,7 +115,7 @@ func (r *Reconciler) beginMaintenance(ctx context.Context, f *fleet.CelldFleet, 
 		return ctrl.Result{}, true, errors.New("maintenance workload changed")
 	}
 	if j.Loss != "" {
-		result, err := r.report(ctx, f, "PossibleDataLoss", j.Loss, false)
+		result, err := r.report(ctx, f, hydrated(res, j), "PossibleDataLoss", j.Loss, false)
 		return result, true, err
 	}
 	if j.Operation != nil {
@@ -158,7 +158,7 @@ func (r *Reconciler) executeMaintenance(ctx context.Context, f *fleet.CelldFleet
 		if saveErr := r.saveJournal(ctx, res, j); saveErr != nil {
 			return ctrl.Result{}, true, saveErr
 		}
-		result, reportErr := r.report(ctx, f, "MaintenanceRecoveryBlocked", err.Error(), false)
+		result, reportErr := r.report(ctx, f, hydrated(res, j), "MaintenanceRecoveryBlocked", err.Error(), false)
 		return result, true, reportErr
 	}
 	expected, denied := r.admitMaintenancePass(ctx, p)
@@ -253,7 +253,7 @@ func (r *Reconciler) admitMaintenancePass(ctx context.Context, p *maintenancePas
 func (r *Reconciler) admitNextMaintenanceAction(ctx context.Context, p *maintenancePass) *transition {
 	f, j, m := p.f, p.j, p.m
 	if paused(f) {
-		result, err := r.report(ctx, f, "MaintenancePaused", "No new maintenance action admitted", false)
+		result, err := r.report(ctx, f, hydrated(p.res, j), "MaintenancePaused", "No new maintenance action admitted", false)
 		return asTransition(result, true, err)
 	}
 	withdrawn := false
@@ -585,7 +585,7 @@ func (r *Reconciler) saveMaintenance(ctx context.Context, f *fleet.CelldFleet, r
 	if err := r.saveJournal(ctx, res, j); err != nil {
 		return ctrl.Result{}, true, err
 	}
-	_, err := r.report(ctx, f, "LifecycleProgress", "Durable maintenance transition recorded; inspect lifecycle maintenance phase", false)
+	_, err := r.report(ctx, f, hydrated(res, j), "LifecycleProgress", "Durable maintenance transition recorded; inspect lifecycle maintenance phase", false)
 	return ctrl.Result{RequeueAfter: time.Second}, true, err
 }
 

@@ -83,7 +83,7 @@ func TestPolicyDesiredReplicaReporting(t *testing.T) {
 			if err := r.saveJournal(t.Context(), res, j); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := r.report(t.Context(), f, "Ready", "test", true); err != nil {
+			if _, err := r.report(t.Context(), f, nil, "Ready", "test", true); err != nil {
 				t.Fatal(err)
 			}
 			want := int32(5)

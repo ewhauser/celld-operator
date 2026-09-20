@@ -144,7 +144,7 @@ func TestMaintenanceDeletionRetainsEvidenceAndRejectsAdoption(t *testing.T) {
 	impostor.UID = "replacement"
 	want := res.Spec
 	want.FleetUID = "replacement"
-	if r.reservationMatches(t.Context(), impostor, res, want) {
+	if r.reservationMatches(t.Context(), impostor, r.hydrate(t.Context(), res), want) {
 		t.Fatal("retained reservation adopted")
 	}
 }
@@ -352,7 +352,7 @@ func TestMaintenanceUnknownAppliedRuntimeBlocksRollbackAndEvidenceInterpretation
 	if _, err := readJournal(res); err == nil {
 		t.Fatal("unknown runtime selected v0.5.0 evidence interpretation")
 	}
-	reason(t, reconcile(t, r, f), "StorageScopeConflict")
+	reason(t, reconcile(t, r, f), "JournalInvalid")
 }
 
 func TestMaintenanceLegacyJournalUpgradePreservesIdentity(t *testing.T) {

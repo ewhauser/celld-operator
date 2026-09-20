@@ -204,9 +204,12 @@ func sameJournal(rendering []byte, j *lifecycleJournal) bool {
 	return rendering != nil && current != nil && bytes.Equal(rendering, current)
 }
 
-func (r *Reconciler) reservationMatches(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, want fleet.ReservationSpec) bool {
-	j, err := r.loadJournal(ctx, res)
-	if err != nil {
+// reservationMatches decides the retained reservation against this reconcile's
+// single hydration; a journal that could not be read has already been reported
+// by the caller, and can never match.
+func (r *Reconciler) reservationMatches(ctx context.Context, f *fleet.CelldFleet, h *hydratedJournal, want fleet.ReservationSpec) bool {
+	res, j := h.res, h.j
+	if h.err != nil {
 		return false
 	}
 	baseline := f.DeepCopy()
@@ -250,6 +253,15 @@ type lifecycleRun struct {
 	w   client.Object
 	j   *lifecycleJournal
 	op  *lifecycleOperation
+	// h is the reconcile's single hydration of j, and what every report of this
+	// run projects. Assign the journal through adopt so the two never diverge.
+	h *hydratedJournal
+}
+
+// adopt records the journal this run decides on, in the hydration the reports
+// below project from.
+func (s *lifecycleRun) adopt(j *lifecycleJournal) {
+	s.j, s.h.j = j, j
 }
 
 // stop ends the lifecycle with a result an executor already produced.
@@ -264,7 +276,7 @@ func (s *lifecycleRun) fail(err error) *lifecycleOutcome {
 
 // block ends the lifecycle by reporting a blocking condition on the fleet.
 func (s *lifecycleRun) block(ctx context.Context, reason, message string) *lifecycleOutcome {
-	result, err := s.r.report(ctx, s.f, reason, message, false)
+	result, err := s.r.report(ctx, s.f, s.h, reason, message, false)
 	return s.stop(result, true, err)
 }
 
@@ -291,8 +303,8 @@ func (s *lifecycleRun) save(ctx context.Context) *lifecycleOutcome {
 	return s.progress(ctx, "Durable lifecycle transition recorded; inspect status.lifecycle for the operation and target")
 }
 
-func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, w client.Object) (ctrl.Result, bool, error) {
-	s := &lifecycleRun{r: r, f: f, res: res, w: w}
+func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, h *hydratedJournal, w client.Object) (ctrl.Result, bool, error) {
+	s := &lifecycleRun{r: r, f: f, res: h.res, w: w, h: h}
 	for _, step := range []func(context.Context) *lifecycleOutcome{
 		s.loadOrBootstrapJournal,
 		s.verifyWorkloadIdentity,
@@ -332,11 +344,11 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 // loadOrBootstrapJournal establishes that a loadable journal backed by a recorded
 // creation attempt exists before anything else reads or writes lifecycle state.
 func (s *lifecycleRun) loadOrBootstrapJournal(ctx context.Context) *lifecycleOutcome {
-	j, err := s.r.loadJournal(ctx, s.res)
+	j, err := s.h.j, s.h.err
 	if err != nil {
 		return s.block(ctx, "JournalInvalid", err.Error())
 	}
-	s.j = j
+	s.adopt(j)
 	if s.res.Annotations[attemptAnnotation] == "" {
 		return s.block(ctx, "LifecycleBlocked", "Missing creation journal; refusing workload adoption")
 	}
@@ -361,7 +373,7 @@ func (s *lifecycleRun) bootstrapJournal(ctx context.Context) *lifecycleOutcome {
 		initial = replicas(w)
 	}
 	j := &lifecycleJournal{Version: 8, RuntimeImage: runtimeImage(f), Initial: initial, Applied: replicas(w), WorkloadUID: w.GetUID(), Claims: map[string]types.UID{}}
-	s.j = j
+	s.adopt(j)
 	// Creation records claim UIDs before workload creation. Verify those bindings;
 	// missing or replaced claims can never be adopted.
 	var created map[string]types.UID
@@ -1200,7 +1212,7 @@ func (r *Reconciler) applyReplicas(ctx context.Context, w client.Object, op *lif
 func (r *Reconciler) expand(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, j *lifecycleJournal, w client.Object) (ctrl.Result, bool, error) {
 	op := j.Operation
 	fail := func(err error) (ctrl.Result, bool, error) {
-		result, reportErr := r.report(ctx, f, "ScaleOutBlocked", err.Error(), false)
+		result, reportErr := r.report(ctx, f, hydrated(res, j), "ScaleOutBlocked", err.Error(), false)
 		return result, true, reportErr
 	}
 	if op.Phase == "Reactivating" {
@@ -1298,6 +1310,6 @@ func (r *Reconciler) recordLoss(ctx context.Context, f *fleet.CelldFleet, w clie
 	if err := r.saveJournal(ctx, res, j); err != nil {
 		return ctrl.Result{}, true, err
 	}
-	result, err := r.report(ctx, f, "PossibleDataLoss", message, false)
+	result, err := r.report(ctx, f, hydrated(res, j), "PossibleDataLoss", message, false)
 	return result, true, err
 }
