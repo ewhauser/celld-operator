@@ -27,22 +27,55 @@ type Config struct {
 	Key                                       []byte
 	Command                                   []string
 	Spacing                                   time.Duration
-	// StopGrace bounds the wait for the child after SIGTERM before SIGKILL. Zero
-	// selects the default that fits the 30 second pod grace period.
+	// Grace is the pod's terminationGracePeriodSeconds: the whole span kubelet
+	// allows between its SIGTERM and its SIGKILL. Zero selects the 30 second
+	// default. Both bounds an unrequested termination spends are derived from
+	// it by terminationBudget, so their sum stays inside the grace period.
+	Grace time.Duration
+	// StopGrace overrides only the wait for the child after SIGTERM before
+	// SIGKILL. Zero derives that wait from Grace. Tests use it to escalate
+	// quickly; production leaves it zero and passes Grace instead.
 	StopGrace      time.Duration
 	Stdout, Stderr io.Writer
 }
 
-const defaultStopGrace = 25 * time.Second
+// defaultGrace mirrors the operator's default terminationGracePeriodSeconds
+// (fleet.DefaultTerminationGrace); the controller passes the fleet's own value
+// when it differs.
+const defaultGrace = 30 * time.Second
+
+// graceMargin reserves the tail of the pod's grace period for the work that
+// follows the lock proof: reacquiring the lock, reading back its token and
+// linking the retired-pod marker. It matches the operator's
+// terminationGraceHeadroom.
+const graceMargin = 5 * time.Second
+
+// maxLockProof caps the derived inherited-lock wait. Descendants that survived
+// the child's SIGKILL only have to close FD3; ten seconds is generous, and any
+// grace left beyond that is better spent letting the child stop gracefully.
+const maxLockProof = 10 * time.Second
 
 // requestExpiryBound is the longest future expiry a request may carry: the
 // controller uses three seconds, plus tolerance for clock skew between pods.
 const requestExpiryBound = 10 * time.Second
 
-// lockProofBound caps the wait for inherited lock holders to release after a
-// termination the controller did not request; kubelet will kill this process
-// soon anyway and no certificate is owed. Requested stops wait indefinitely.
-const lockProofBound = 20 * time.Second
+// terminationBudget splits a pod grace period into the two waits an
+// unrequested termination spends in sequence: stop is the wait for the child
+// after SIGTERM before SIGKILL, and proof caps the wait for inherited lock
+// holders to release afterwards. stop+proof+graceMargin == grace, so the
+// launcher gives up (fail-closed: no certificate, no retired marker) before
+// kubelet's SIGKILL rather than after it. Requested stops ignore proof and
+// wait indefinitely: the pod lives until the controller decrements.
+func terminationBudget(grace time.Duration) (stop, proof time.Duration) {
+	if grace <= 0 {
+		grace = defaultGrace
+	}
+	// A grace period too small to split leaves kubelet's SIGKILL as the only
+	// outer bound; keep both waits usable rather than zero.
+	usable := max(grace-graceMargin, time.Second)
+	proof = min(usable/2, maxLockProof)
+	return usable - proof, proof
+}
 
 type supervisor struct {
 	mu              sync.Mutex
@@ -364,9 +397,9 @@ func Run(ctx context.Context, c Config) error {
 		return ctx.Err()
 	}
 	_ = cmd.Process.Signal(syscall.SIGTERM)
-	stopGrace := c.StopGrace
-	if stopGrace <= 0 {
-		stopGrace = defaultStopGrace
+	stopGrace, proofBound := terminationBudget(c.Grace)
+	if c.StopGrace > 0 {
+		stopGrace = c.StopGrace
 	}
 	select {
 	case <-done:
@@ -382,14 +415,18 @@ func Run(ctx context.Context, c Config) error {
 		return err
 	}
 	lock = nil
-	// Descendants may hold FD3 a little longer than the child. Keep waiting for
-	// a requested stop: the pod exists until the controller decrements, and
-	// certifying early would be wrong. Report the wait so operators can see it.
+	// Descendants may hold FD3 a little longer than the child: SIGKILL reaches
+	// the child process itself, not its group, so a grandchild can outlive it.
+	// Keep waiting for a requested stop: the pod exists until the controller
+	// decrements, and certifying early would be wrong. After an unrequested
+	// termination the wait is capped at proofBound, which with stopGrace and
+	// graceMargin fits inside the pod's grace period. Report the wait so
+	// operators can see it.
 	s.phase("ReleasingInheritedLock", nil)
 	proofCtx, proofCancel := context.WithCancel(context.WithoutCancel(ctx))
 	defer proofCancel()
 	if ctx.Err() != nil {
-		proofCtx, proofCancel = context.WithTimeout(context.WithoutCancel(ctx), lockProofBound)
+		proofCtx, proofCancel = context.WithTimeout(context.WithoutCancel(ctx), proofBound)
 		defer proofCancel()
 	} else {
 		go func() {

@@ -66,14 +66,19 @@ and real-runtime tests separately exercise this assumption. This is a
 version-specific integration, not a generic promise about arbitrary executables.
 
 For a signed stop request, the launcher signals its exact `os.Process` child handle, waits
-for that child, and escalates that same handle after 25 seconds if necessary.
+for that child, and escalates that same handle after 15 seconds if necessary.
 It does not signal a numeric PID or process group after reaping; descendants
 that remain alive keep their inherited lock and prevent completion.
 It closes only its own lock descriptor and attempts an independent exclusive
 open, reporting `ReleasingInheritedLock` while a descendant still holds the
 inherited descriptor. For a requested stop that wait is unbounded (the pod
 exists until the controller decrements); after an unrequested termination it is
-capped at twenty seconds because no certificate is owed. Only successful
+capped at ten seconds because no certificate is owed. Both bounds are derived
+from the pod's `terminationGracePeriodSeconds`: the launcher splits the grace
+minus a five second margin into the SIGTERM wait and the inherited-lock wait
+(15 s + 10 s + 5 s for the default 30 second grace, with the lock wait capped at
+ten seconds for longer graces), so an unrequested termination gives up
+fail-closed before kubelet's SIGKILL rather than after it. Only successful
 reacquisition of the same file allows `Stopped`; exit code 0 alone is
 irrelevant. The re-open never creates the file and compares a token written
 into the lock at first acquisition, because inode numbers are recycled on common

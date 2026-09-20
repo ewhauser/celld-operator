@@ -192,9 +192,12 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 		c.Command = []string{"/launcher/celld-launcher"}
 		c.Env = append(c.Env, corev1.EnvVar{Name: "POD_UID", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.uid"}}}, corev1.EnvVar{Name: "NODE_NAME", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "spec.nodeName"}}})
 		if lifecycle.TerminationGraceSeconds != fleet.DefaultTerminationGrace {
-			// The launcher escalates SIGTERM to SIGKILL five seconds before kubelet
-			// would, so its lock proof still runs inside the pod's grace period.
-			c.Env = append(c.Env, corev1.EnvVar{Name: "LAUNCHER_STOP_GRACE_SECONDS", Value: strconv.Itoa(int(lifecycle.TerminationGraceSeconds - 5))})
+			// Hand the launcher the pod's grace period; it splits that into the
+			// SIGTERM wait and the inherited-lock proof, leaving a five second
+			// margin, so an unrequested termination finishes before kubelet's
+			// SIGKILL. A fleet on the default grace is told nothing and the
+			// launcher assumes the same 30 seconds this template sets.
+			c.Env = append(c.Env, corev1.EnvVar{Name: "LAUNCHER_TERMINATION_GRACE_SECONDS", Value: strconv.Itoa(int(lifecycle.TerminationGraceSeconds))})
 		}
 		c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: "launcher", MountPath: "/launcher", ReadOnly: true}, corev1.VolumeMount{Name: "launcher-key", MountPath: "/launcher-key", ReadOnly: true})
 		c.Ports = append(c.Ports, corev1.ContainerPort{Name: "launcher", ContainerPort: 8083})

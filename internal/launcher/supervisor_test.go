@@ -221,3 +221,27 @@ func TestRequestMACDomainSeparated(t *testing.T) {
 		t.Fatal("request accepted as response")
 	}
 }
+
+// The two waits an unrequested termination spends must fit inside the pod's
+// grace period, leaving the margin the rest of the shutdown needs.
+func TestTerminationBudgetFitsTheGracePeriod(t *testing.T) {
+	for _, grace := range []time.Duration{0, 6 * time.Second, 30 * time.Second, 180 * time.Second, 3605 * time.Second} {
+		stop, proof := terminationBudget(grace)
+		want := grace
+		if want == 0 {
+			want = defaultGrace
+		}
+		if stop <= 0 || proof <= 0 {
+			t.Fatalf("grace %v: unusable bounds stop=%v proof=%v", grace, stop, proof)
+		}
+		if proof > maxLockProof {
+			t.Fatalf("grace %v: lock proof %v exceeds the cap", grace, proof)
+		}
+		if stop+proof+graceMargin > want {
+			t.Fatalf("grace %v: %v+%v+%v exceeds the grace period", grace, stop, proof, graceMargin)
+		}
+	}
+	if stop, proof := terminationBudget(30 * time.Second); stop != 15*time.Second || proof != 10*time.Second {
+		t.Fatalf("default grace splits as %v+%v, want 15s+10s", stop, proof)
+	}
+}

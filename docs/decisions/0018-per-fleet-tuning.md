@@ -30,8 +30,12 @@ future qualified migration, exactly as for storage and placement.
 Cross-field rules: limits must be at least requests; `terminationGraceSeconds`
 must exceed `shutdownSeconds` by at least five seconds, leaving room for signal
 delivery and the launcher's inherited-lock proof. When the grace is not the
-default, the launcher is told to escalate SIGTERM to SIGKILL five seconds before
-kubelet would. The v0.4.1 drain-token wait follows the shutdown budget.
+default, the launcher is told the grace itself and derives both of its
+unrequested-termination waits from it: the SIGTERM-to-SIGKILL wait plus the
+inherited-lock proof plus a five second margin equal the grace, so the whole
+sequence finishes before kubelet's SIGKILL (15 s + 10 s + 5 s at the default
+grace of 30; the lock proof is capped at ten seconds, and longer graces go to
+the SIGTERM wait). The v0.4.1 drain-token wait follows the shutdown budget.
 
 The design's requirement of equal requests and limits is not enforced: the
 historical default has no CPU limit and a memory limit above its request, and
