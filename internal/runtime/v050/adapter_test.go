@@ -88,55 +88,6 @@ func TestNode(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-func TestState(t *testing.T) {
-	a, _ := New(Image)
-	b := fixture(t, "state")
-	var raw struct {
-		Load struct {
-			Sampled int64 `json:"sampled_ms"`
-		} `json:"node_load"`
-	}
-	if err := json.Unmarshal(b, &raw); err != nil {
-		t.Fatal(err)
-	}
-	now := time.UnixMilli(raw.Load.Sampled).Add(time.Second)
-	s, err := a.ParseState(200, b, now, now, 5*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if s.SampledAt.UnixMilli() != raw.Load.Sampled {
-		t.Fatal("sample changed")
-	}
-	for _, field := range []string{"capacity_waiting", "activation_waiting", "restoring", "occupied", "owned_cells", "node_load"} {
-		t.Run(field, func(t *testing.T) {
-			for _, value := range []any{nil, "unknown", -1} {
-				bad := mutate(t, b, func(m map[string]any) { m[field] = value })
-				if _, err := a.ParseState(200, bad, now, now, 5*time.Second); err == nil {
-					t.Fatal("accepted invalid observation")
-				}
-			}
-		})
-	}
-	for _, field := range []string{"draining", "rebalance_paused", "pressured", "memory_headroom", "sampled_ms", "resident_cells", "rss_bytes", "in_use_bytes"} {
-		bad := mutate(t, b, func(m map[string]any) { delete(m["node_load"].(map[string]any), field) })
-		if _, err := a.ParseState(200, bad, now, now, 5*time.Second); err == nil {
-			t.Fatalf("accepted missing %s", field)
-		}
-	}
-	for _, tc := range []struct {
-		code         int
-		received, at time.Time
-		age          time.Duration
-	}{
-		{503, now, now, time.Second}, {200, now.Add(-time.Minute), now, time.Second},
-		{200, now, now.Add(time.Minute), time.Second}, {200, now, now, 0},
-		{200, now, now.Add(-time.Minute), time.Second},
-	} {
-		if _, err := a.ParseState(tc.code, b, tc.received, tc.at, tc.age); err == nil {
-			t.Fatal("accepted stale/unavailable state")
-		}
-	}
-}
 
 type reader struct {
 	data  []byte

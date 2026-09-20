@@ -1,10 +1,8 @@
 package catalog
 
 import (
-	"encoding/json"
 	"os"
 	"testing"
-	"time"
 
 	v041 "github.com/ewhauser/celld-operator/internal/runtime/v041"
 	v050 "github.com/ewhauser/celld-operator/internal/runtime/v050"
@@ -26,22 +24,7 @@ func TestReleasedV041Evidence(t *testing.T) {
 	if parsed.Name != "a" || parsed.LogState != "open" || parsed.Epoch != 1 {
 		t.Fatal(parsed)
 	}
-	state, err := os.ReadFile("testdata/v041-state.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var capture struct {
-		Load struct {
-			Sampled int64 `json:"sampled_ms"`
-		} `json:"node_load"`
-	}
-	if err := json.Unmarshal(state, &capture); err != nil {
-		t.Fatal(err)
-	}
-	now := time.UnixMilli(capture.Load.Sampled)
-	if _, err := adapter.ParseState(200, state, now, now, time.Second); err != nil {
-		t.Fatal(err)
-	}
+
 }
 func TestDirectionalReleaseRegistry(t *testing.T) {
 	if !StoppedUpgrade(v041.Image, v050.Image) || StoppedUpgrade(v050.Image, v041.Image) || StoppedUpgrade(v050.Image, v050.Image) {

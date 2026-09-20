@@ -4,16 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
-	"net/http"
 	"slices"
 	"sync"
 	"time"
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	"github.com/ewhauser/celld-operator/internal/capacity"
-	"github.com/ewhauser/celld-operator/internal/runtime/catalog"
+	"github.com/ewhauser/celld-operator/internal/runtime/controlplane"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -25,12 +23,12 @@ type capacityCollector interface {
 	Collect(context.Context, *fleet.CelldFleet) capacity.Observation
 }
 
-// Collector reads the pinned /state endpoint and individual metrics.k8s.io PodMetrics.
+// Collector reads the typed /state endpoint and individual metrics.k8s.io PodMetrics.
 // It never calls runtime mutations, Pod proxy, Prometheus, or Kubernetes /scale.
 type Collector struct {
 	client  client.Client
 	metrics rest.Interface
-	http    *http.Client
+	runtime controlplane.Lifecycle
 	now     func() time.Time
 }
 
@@ -39,11 +37,7 @@ func NewCollector(c client.Client, config *rest.Config) (*Collector, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Collector{client: c, metrics: k.CoreV1().RESTClient(), now: time.Now, http: &http.Client{
-		Timeout:       2 * time.Second,
-		Transport:     &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: time.Second}).DialContext, MaxConnsPerHost: 2, MaxIdleConns: 100, IdleConnTimeout: 30 * time.Second},
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}}, nil
+	return &Collector{client: c, metrics: k.CoreV1().RESTClient(), now: time.Now, runtime: controlplane.New(nil)}, nil
 }
 func podIdentity(p *corev1.Pod) (string, time.Time) {
 	if len(p.Spec.Containers) != 1 || p.Spec.Containers[0].Name != "celld" || !knownRuntime(p.Spec.Containers[0].Image) || !p.DeletionTimestamp.IsZero() {
@@ -102,27 +96,21 @@ func (c *Collector) sample(ctx context.Context, f *fleet.CelldFleet, p *corev1.P
 	if identity == "" || net.ParseIP(p.Status.PodIP) == nil {
 		return s
 	}
-	requestCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, "http://"+net.JoinHostPort(p.Status.PodIP, "8081")+"/state", http.NoBody)
+	target, err := runtimeTarget(f, p, "")
+	if err != nil {
+		return s
+	}
+	snapshot, err := c.runtime.State(ctx, target)
 	if err == nil {
-		response, requestErr := c.http.Do(req)
-		if requestErr == nil {
-			data, readErr := io.ReadAll(io.LimitReader(response.Body, 1024*1024+1))
-			closeErr := response.Body.Close()
-			received := c.now()
-			adapter, adapterErr := catalog.New(p.Spec.Containers[0].Image)
-			if readErr == nil && closeErr == nil && adapterErr == nil && len(data) <= 1024*1024 {
-				state, parseErr := adapter.ParseState(response.StatusCode, data, received, received, capacity.Seconds(f.Spec.Capacity.MaxAgeSeconds))
-				if parseErr == nil && !state.SampledAt.Before(started) && state.RSSBytes <= 1<<50 && state.InUseBytes <= 1<<50 {
-					s.RuntimeMemoryMiB = int64((max(state.RSSBytes, state.InUseBytes) + (1 << 20) - 1) / (1 << 20))
-					s.RuntimeAt, s.RuntimeReceived = state.SampledAt, received
-					s.Pressured = state.Pressured || !state.MemoryHeadroom
-					s.Backlog = state.Draining || state.RebalancePaused || state.CapacityWaiting > 0 || state.ActivationWaiting > 0 || state.Restoring > 0
-				}
-			}
+		received := c.now()
+		state, parseErr := snapshot.Capacity(capacity.Seconds(f.Spec.Capacity.MaxAgeSeconds))
+		if parseErr == nil && !state.SampledAt.Before(started) && state.RSSBytes <= 1<<50 && state.InUseBytes <= 1<<50 {
+			s.RuntimeMemoryMiB = int64((max(state.RSSBytes, state.InUseBytes) + (1 << 20) - 1) / (1 << 20))
+			s.RuntimeAt, s.RuntimeReceived = state.SampledAt, received
+			s.Pressured = state.Pressured || !state.MemoryHeadroom
+			s.Backlog = state.Draining || state.RebalancePaused || state.CapacityWaiting > 0 || state.ActivationWaiting > 0 || state.Restoring > 0
 		}
 	}
-	cancel()
 	metricsCtx, cancelMetrics := context.WithTimeout(ctx, 2*time.Second)
 	defer cancelMetrics()
 	data, err := c.metrics.Get().AbsPath("/apis/metrics.k8s.io/v1beta1/namespaces/" + p.Namespace + "/pods/" + p.Name).Do(metricsCtx).Raw()

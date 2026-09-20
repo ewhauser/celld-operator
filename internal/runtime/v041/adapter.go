@@ -1,6 +1,5 @@
 // Package v041 binds the shared protocol-5 evidence codec to celld v0.4.1.
-// Source comparison confirms NodeLeaseWire/NodeLogWire and the required /state
-// fields have the same shape and sealing meaning as v0.5.0. Codec compatibility
+// Source comparison confirms NodeLeaseWire/NodeLogWire fields have the same shape and sealing meaning as v0.5.0. Codec compatibility
 // does not imply permission to mix runtime versions or to roll back stored data.
 package v041
 

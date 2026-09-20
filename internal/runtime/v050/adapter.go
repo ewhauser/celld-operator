@@ -116,46 +116,6 @@ func fresh(sample, now time.Time, age time.Duration) bool {
 	return age > 0 && !sample.IsZero() && !sample.After(now) && now.Sub(sample) <= age
 }
 
-type State struct {
-	CapacityWaiting, ActivationWaiting, Restoring, Occupied, OwnedCells uint64
-	ResidentCells, RSSBytes, InUseBytes                                 uint64
-	Draining, RebalancePaused, Pressured, MemoryHeadroom                bool
-	SampledAt                                                           time.Time
-}
-
-// ParseState validates required capacity fields; optional cgroup measurements
-// are intentionally not converted to zero. HTTP status is part of the evidence.
-func (*Adapter) ParseState(status int, data []byte, received, now time.Time, age time.Duration) (State, error) {
-	var s State
-	if status != 200 || !fresh(received, now, age) {
-		return s, errors.New("unavailable or stale HTTP state")
-	}
-	m, err := object(data)
-	if err != nil {
-		return s, err
-	}
-	for k, p := range map[string]*uint64{"capacity_waiting": &s.CapacityWaiting, "activation_waiting": &s.ActivationWaiting, "restoring": &s.Restoring, "occupied": &s.Occupied, "owned_cells": &s.OwnedCells} {
-		if err := required(m, k, p); err != nil {
-			return s, err
-		}
-	}
-	load, err := object(m["node_load"])
-	if err != nil {
-		return s, err
-	}
-	var sampled int64
-	for k, p := range map[string]any{"draining": &s.Draining, "rebalance_paused": &s.RebalancePaused, "sampled_ms": &sampled, "resident_cells": &s.ResidentCells, "rss_bytes": &s.RSSBytes, "in_use_bytes": &s.InUseBytes, "pressured": &s.Pressured, "memory_headroom": &s.MemoryHeadroom} {
-		if err := required(load, k, p); err != nil {
-			return s, err
-		}
-	}
-	s.SampledAt = time.UnixMilli(sampled)
-	if !fresh(s.SampledAt, now, age) {
-		return s, errors.New("stale or future runtime sample")
-	}
-	return s, nil
-}
-
 type Node struct {
 	Name, Generation, LogState string
 	Address                    string

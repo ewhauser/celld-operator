@@ -45,5 +45,14 @@
   "restoring": 0,
   "rss_bytes": 54042624,
   "shedding": null,
-  "stops": 0
+  "stops": 0,
+  "shutdown": {
+    "capabilities": {
+      "strict_disk_removal": true
+    },
+    "control_only": false,
+    "operation": null,
+    "runtime_generation": "generation-a",
+    "schema_version": 1
+  }
 }
