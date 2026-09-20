@@ -328,7 +328,7 @@ func (r *Reconciler) migrateBucketRecovering(ctx context.Context, p *migrationPa
 	evidence, err := r.migrationRetirementEvidence(ctx, old, j)
 	if err != nil {
 		result, handled, failErr := r.migrationFailure(ctx, f, res, j, w, err)
-		return tighten(result, probe.Pending), handled, failErr
+		return tighten(result, probe), handled, failErr
 	}
 	for i := range j.BucketHistory {
 		j.BucketHistory[i].Retired = true

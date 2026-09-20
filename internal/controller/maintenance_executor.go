@@ -139,10 +139,10 @@ type maintenancePass struct {
 	view  lifecycleJournal
 	save  func() (ctrl.Result, bool, error)
 	block func(error) (ctrl.Result, bool, error)
-	// window is set while a retired writer's record may still be readable, so a
-	// blocked pass repolls inside that window rather than waiting out the
-	// ordinary reconcile delay.
-	window bool
+	// window is the last retirement reading of this pass. While a retired
+	// writer's record may still be readable it pulls a blocked pass's requeue
+	// down to the window, aimed at the lease the probe actually read.
+	window bucketRetirementProbe
 }
 
 func (r *Reconciler) executeMaintenance(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, j *lifecycleJournal, w client.Object) (ctrl.Result, bool, error) {
@@ -182,7 +182,7 @@ func (r *Reconciler) executeMaintenance(ctx context.Context, f *fleet.CelldFleet
 	// reconcile before that step runs.
 	if f.Spec.Profile == "Bucket" {
 		probe := r.observeRetirementExpiry(ctx, f, j, [][]bucketSession{m.Sessions, j.BucketHistory})
-		p.window = probe.Pending
+		p.window = probe
 		if probe.Changed {
 			if err := r.saveJournal(ctx, res, j); err != nil {
 				return ctrl.Result{}, true, err

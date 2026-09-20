@@ -110,13 +110,35 @@ type bucketRetirementProbe struct {
 	// record has gone: absence means the window is closed, and a fleet wedged on
 	// lost evidence must fall back to the ordinary cadence rather than spin.
 	Pending bool
+	// NextRead is when to come back, measured from the lease the probe just
+	// read. Polling on a fixed interval loses a window narrower than the
+	// interval: a pass that reads 140ms of lease left and then sleeps a whole
+	// second wakes up after the runtime has already collected the record. The
+	// record says when it expires, so aim just past that instant instead.
+	NextRead time.Duration
 }
+
+// retirementAim is how far past a known lease expiry to schedule the next read.
+// Far enough to be certain the lease has elapsed against the runtime's clock,
+// well inside the second or so the pinned dead_node_gc waits before deleting.
+const retirementAim = 200 * time.Millisecond
+
+// retirementFloor bounds how tightly successive reads may be scheduled, so a
+// clock disagreement cannot turn into a spin.
+const retirementFloor = 100 * time.Millisecond
 
 // tighten replaces the ordinary reconcile delay with the retirement window
 // while a readable-expired record may still be waiting to be read.
-func tighten(result ctrl.Result, pending bool) ctrl.Result {
-	if pending && result.RequeueAfter > retirementWindow {
-		result.RequeueAfter = retirementWindow
+func tighten(result ctrl.Result, probe bucketRetirementProbe) ctrl.Result {
+	if !probe.Pending {
+		return result
+	}
+	next := retirementWindow
+	if probe.NextRead > 0 && probe.NextRead < next {
+		next = probe.NextRead
+	}
+	if result.RequeueAfter == 0 || result.RequeueAfter > next {
+		result.RequeueAfter = next
 	}
 	return result
 }
@@ -125,9 +147,9 @@ func tighten(result ctrl.Result, pending bool) ctrl.Result {
 // the pass actually returns. A blocked executor reports at reconcileDelay, and
 // the whole point is that an open window overrides it, so the effective cadence
 // has to be visible rather than inferred.
-func tightenLogged(ctx context.Context, result ctrl.Result, pending bool) ctrl.Result {
-	out := tighten(result, pending)
-	if pending {
+func tightenLogged(ctx context.Context, result ctrl.Result, probe bucketRetirementProbe) ctrl.Result {
+	out := tighten(result, probe)
+	if probe.Pending {
 		logf.FromContext(ctx).WithName("bucket-retirement").Info("retirement window holds the cadence",
 			"requeue", out.RequeueAfter.String(), "wouldHaveBeen", result.RequeueAfter.String())
 	}
@@ -250,6 +272,14 @@ func (r *Reconciler) observeRetirementExpiry(ctx context.Context, f *fleet.Celld
 		}
 	}
 	probe := bucketRetirementProbe{Pending: len(reading.Live) > 0}
+	// Aim at the soonest lease the probe actually read, so the next read lands
+	// just after that record expires rather than wherever a fixed interval falls.
+	for _, o := range reading.Live {
+		aim := max(time.Duration(int64(o.ExpiresMS)-o.At.UnixMilli())*time.Millisecond+retirementAim, retirementFloor)
+		if probe.NextRead == 0 || aim < probe.NextRead {
+			probe.NextRead = aim
+		}
+	}
 	for _, o := range reading.Expired {
 		for _, sessions := range records {
 			for i := range sessions {
@@ -590,7 +620,7 @@ func (r *Reconciler) contractBucket(ctx context.Context, f *fleet.CelldFleet, re
 	}
 	// Set once the post-effect probe below runs; a blocked pass keeps polling
 	// inside the readable-expired window instead of waiting out reconcileDelay.
-	window := false
+	var window bucketRetirementProbe
 	fail := func(err error) (ctrl.Result, bool, error) {
 		if _, ok := errors.AsType[*v050.LossError](err); ok {
 			return r.recordLoss(ctx, f, w, res, j, err.Error())
@@ -699,7 +729,7 @@ func (r *Reconciler) contractBucket(ctx context.Context, f *fleet.CelldFleet, re
 	// sweep, placement validation and survivor collection can each fail this
 	// pass while the record is still readable and then gone by the next one.
 	probe := r.observeRetirementExpiry(ctx, f, j, [][]bucketSession{op.BucketCandidates, j.BucketHistory})
-	window = probe.Pending
+	window = probe
 	if probe.Changed {
 		if err := r.saveJournal(ctx, res, j); err != nil {
 			return ctrl.Result{}, true, err

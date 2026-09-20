@@ -29,7 +29,17 @@ requires every captured own-log obligation already sealed before replacing Pods.
 
 The same release's `crates/celld/dead_node_gc.rs` preserves folded log records,
 but lines 396–406 CAS a no-log Bucket record into a tombstone and then issue an
-unconditional delete. That delete can arrive after a successor installs the same
+unconditional delete.
+
+**Measured**: the delete follows *lease expiry*, not process death, and follows
+it closely. In a kind run the operator read a writer's record with 140ms of
+lease remaining (`expires_ms` 1789939130530), and the next read, 983ms after
+that instant, already found it absent. So the readable-expired window for that
+writer was **at most 983ms**, and the record was gone within a second of the
+lease elapsing rather than roughly ten seconds after the process stopped. The
+operator polls that window aimed at the `expires_ms` it just read, which is the
+best timing available to it, but a window this narrow is not something a client
+of the object store can be relied on to hit. That delete can arrive after a successor installs the same
 node key, or remove the old record before the operator observes positive expiry.
 
 The smallest runtime change is to retain the no-log CAS tombstone, just as folded

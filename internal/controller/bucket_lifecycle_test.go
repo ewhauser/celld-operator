@@ -601,7 +601,9 @@ func TestBucketRetirementWindowCadence(t *testing.T) {
 	if !probe.Pending {
 		t.Fatal("an unresolved retirement did not hold the tight cadence")
 	}
-	if got := tighten(ordinary, probe.Pending); got.RequeueAfter != retirementWindow {
+	// The fake reader writes a lease a minute out, far past the window, so the
+	// pass falls back to the window rather than aiming at the lease.
+	if got := tighten(ordinary, probe); got.RequeueAfter != retirementWindow {
 		t.Fatalf("requeue %s, want %s while the window may be open", got.RequeueAfter, retirementWindow)
 	}
 	// The lease elapses and the record is read. The proof is durable now, so the
@@ -611,7 +613,7 @@ func TestBucketRetirementWindowCadence(t *testing.T) {
 	if !probe.Changed || probe.Pending {
 		t.Fatalf("expired record was not recorded: %+v", probe)
 	}
-	if got := tighten(ordinary, probe.Pending); got.RequeueAfter != ordinary.RequeueAfter {
+	if got := tighten(ordinary, probe); got.RequeueAfter != ordinary.RequeueAfter {
 		t.Fatalf("requeue %s, want the ordinary %s once expiry is observed", got.RequeueAfter, ordinary.RequeueAfter)
 	}
 	// A second pass has nothing left to read and must not re-poll tightly.
@@ -758,17 +760,28 @@ func TestBlockedPassStillRequeuesInsideTheWindow(t *testing.T) {
 	if blocked.RequeueAfter <= retirementWindow {
 		t.Fatalf("ordinary blocked cadence %s does not exceed the window", blocked.RequeueAfter)
 	}
-	if got := tightenLogged(t.Context(), blocked, true); got.RequeueAfter != retirementWindow {
+	open := bucketRetirementProbe{Pending: true}
+	if got := tightenLogged(t.Context(), blocked, open); got.RequeueAfter != retirementWindow {
 		t.Fatalf("blocked pass requeued at %s during an open window, want %s", got.RequeueAfter, retirementWindow)
 	}
 	// A closed window leaves the ordinary cadence exactly alone.
-	if got := tightenLogged(t.Context(), blocked, false); got.RequeueAfter != blocked.RequeueAfter {
+	if got := tightenLogged(t.Context(), blocked, bucketRetirementProbe{}); got.RequeueAfter != blocked.RequeueAfter {
 		t.Fatalf("closed window changed the ordinary cadence to %s", got.RequeueAfter)
 	}
 	// And a pass that already comes back sooner keeps its own pace.
 	quick := ctrl.Result{RequeueAfter: 200 * time.Millisecond}
-	if got := tightenLogged(t.Context(), quick, true); got.RequeueAfter != quick.RequeueAfter {
+	if got := tightenLogged(t.Context(), quick, open); got.RequeueAfter != quick.RequeueAfter {
 		t.Fatalf("window slowed a faster pass to %s", got.RequeueAfter)
+	}
+	// A lease the probe actually read beats the flat window: a pass that sees
+	// 140ms of lease left must come back just after it elapses, not a whole
+	// second later, which is how a sub-second window gets stepped over.
+	aimed := bucketRetirementProbe{Pending: true, NextRead: 140*time.Millisecond + retirementAim}
+	if got := tightenLogged(t.Context(), blocked, aimed); got.RequeueAfter != aimed.NextRead {
+		t.Fatalf("requeue %s, want the lease-aimed %s", got.RequeueAfter, aimed.NextRead)
+	}
+	if aimed.NextRead >= retirementWindow {
+		t.Fatalf("a 140ms lease aimed at %s, no better than the flat window", aimed.NextRead)
 	}
 }
 

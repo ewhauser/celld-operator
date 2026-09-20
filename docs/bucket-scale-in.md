@@ -157,14 +157,20 @@ under deletion or one that has stopped being Ready is not treated as membership
 for this purpose: a termination grace period outlives the ten-second lease by
 far, so counting it would skip the one writer whose record is expiring.
 
-Because that window is roughly a second wide -- `CELLD_TTL_MS` is 10s and
-`dead_node_gc` deletes a no-log record about a second after the lease elapses --
+Because that window is under a second wide -- `CELLD_TTL_MS` is 10s, and a kind
+run measured the record already absent 983ms after the lease instant the
+operator had just read, so the delete follows lease expiry rather than trailing
+process death by ten seconds --
 a post-effect pass reads the retired writer's record **first** and persists the
 observation immediately, ahead of the candidate sweep, placement validation,
 Collector fan-out and freshness checks that can each abort the pass while the
 record is still readable. Until that reading is taken the phase repolls every
-second instead of waiting out the 5-7s reconcile delay; afterwards the ordinary
-cadence returns. This is ordering and cadence, not evidence: the reading applies
+second instead of waiting out the 5-7s reconcile delay, and aims each read just
+past the `expires_ms` it last read rather than at a fixed interval, because a
+fixed interval loses a window narrower than itself; afterwards the ordinary
+cadence returns. Timing is all this can buy: a window this narrow cannot be
+reliably hit from outside the runtime, and the tombstone retention described in
+[runtime dependencies](runtime-dependencies.md) is the actual fix. This is ordering and cadence, not evidence: the reading applies
 the same per-record predicate the full assessment applies to a retired member
 (exact generation, no epoch, no peer-log state, lease already elapsed against a
 single clock read), reports positives only, and is refused for a superseded or
