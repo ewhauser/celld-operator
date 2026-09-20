@@ -168,19 +168,31 @@ func (r *Reconciler) observeRetirementExpiry(ctx context.Context, f *fleet.Celld
 		return bucketRetirementProbe{Pending: true}
 	}
 	present := map[string]bool{}
+	// departed[uid]=false marks a Pod that still exists and is not being
+	// deleted; anything absent from this map has genuinely gone away.
+	departed := map[string]bool{}
 	for i := range pods {
-		// A Pod under deletion, or one that has stopped being Ready, is not
-		// membership worth trusting here. A grace period outlives the lease by
-		// far -- shutdown defaults to 20s plus headroom, the lease to 10s -- and
-		// an unready Pod is exactly what a lost node leaves behind, so counting
-		// either as present would skip the one writer whose record is expiring
-		// right now. This only decides whether to attempt the read: a process
-		// still renewing its lease is read live and yields nothing, so the
-		// evidence gate is unchanged.
-		if !pods[i].DeletionTimestamp.IsZero() || !podReady(&pods[i]) {
+		// Two different questions. Whether to attempt the read: a Pod under
+		// deletion or one that has stopped being Ready is not membership worth
+		// trusting, because a grace period outlives the lease by far -- shutdown
+		// defaults to 20s plus headroom, the lease to 10s -- and an unready Pod
+		// is what a lost node leaves behind, so treating either as present would
+		// skip the very writer whose record is expiring.
+		//
+		// Whether the writer has *departed*, which is what may be recorded as
+		// retirement: only deletion says that. An unready Pod can become ready
+		// again on the same UID with a fresh invocation, and recording
+		// retirement for one would make its return look like a readopted retired
+		// identity, which the contract refuses outright.
+		uid := string(pods[i].UID)
+		if !pods[i].DeletionTimestamp.IsZero() {
 			continue
 		}
-		present[string(pods[i].UID)] = true
+		departed[uid] = false
+		if !podReady(&pods[i]) {
+			continue
+		}
+		present[uid] = true
 	}
 	var members []v050.BucketMember
 	probed := map[string]bool{}
@@ -245,10 +257,12 @@ func (r *Reconciler) observeRetirementExpiry(ctx context.Context, f *fleet.Celld
 				if s.Node != o.Node || s.Generation != o.Generation || s.SupersededBy != "" {
 					continue
 				}
-				if !s.Retired || !s.ExpiryObserved || s.ExpiryInvalidated {
+				_, stillThere := departed[s.Node]
+				if (!s.Retired && !stillThere) || !s.ExpiryObserved || s.ExpiryInvalidated {
 					probe.Changed = true
 				}
-				// Retire it here too. assessBucket recomputes Retired for the
+				// Retire it here too, but only for a writer that has actually
+				// departed. assessBucket recomputes Retired for the
 				// sessions it returns, but the Resolved lookup it feeds the
 				// adapter reads the *persisted* record and demands
 				// "old.Retired && resolvedBucketSession(old)". A record left at
@@ -257,7 +271,9 @@ func (r *Reconciler) observeRetirementExpiry(ctx context.Context, f *fleet.Celld
 				// record. The writer's Pod is gone or unready and its lease was
 				// just read elapsed, which is exactly what retirement means
 				// here; the deletion path records the same pair together.
-				s.Retired = true
+				if _, exists := departed[s.Node]; !exists {
+					s.Retired = true
+				}
 				s.ExpiryObserved = true
 				s.ExpiryInvalidated = false
 			}

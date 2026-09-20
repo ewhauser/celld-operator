@@ -673,18 +673,13 @@ func TestBucketUnplannedDeathObservedDespitePendingIntent(t *testing.T) {
 	if _, err := r.admitBucketHistory(t.Context(), f, j); err != nil {
 		t.Fatal(err)
 	}
-	// The node is lost: the Pod object survives but stops being Ready, which is
-	// what a cordoned/unreachable node leaves behind.
+	// The node is lost and the victim Pod is deleted, which is what the faults
+	// fixture does while the replacement stays Pending on the cordoned node.
 	pod := &corev1.Pod{}
 	if err := r.Get(t.Context(), client.ObjectKey{Namespace: f.Namespace, Name: "pod-1"}, pod); err != nil {
 		t.Fatal(err)
 	}
-	for i := range pod.Status.Conditions {
-		if pod.Status.Conditions[i].Type == corev1.PodReady {
-			pod.Status.Conditions[i].Status = corev1.ConditionFalse
-		}
-	}
-	if err := r.Status().Update(t.Context(), pod); err != nil {
+	if err := r.Delete(t.Context(), pod); err != nil {
 		t.Fatal(err)
 	}
 	for i := range j.BucketHistory {
@@ -774,5 +769,53 @@ func TestBlockedPassStillRequeuesInsideTheWindow(t *testing.T) {
 	quick := ctrl.Result{RequeueAfter: 200 * time.Millisecond}
 	if got := tightenLogged(t.Context(), quick, true); got.RequeueAfter != quick.RequeueAfter {
 		t.Fatalf("window slowed a faster pass to %s", got.RequeueAfter)
+	}
+}
+
+// An unready Pod is not a departed writer. Ordered Bucket restarts a container
+// inside the same Pod UID, so a session recorded as retired while its Pod was
+// merely unready would come back and be refused as a readopted retired
+// identity ("bucket retired member or changed host returned"). The reading is
+// still worth taking -- an unready Pod is also what a lost node leaves behind
+// -- but only deletion may be recorded as retirement.
+func TestBucketUnreadyWriterIsProbedButNotRetired(t *testing.T) {
+	p, f, j, opts, reader := bucketPreflightSetup(t)
+	j.Operation = nil
+	j.Applied = 3
+	r := &Reconciler{Client: p.client, Evidence: p, Options: opts, now: p.now}
+	if _, err := r.admitBucketHistory(t.Context(), f, j); err != nil {
+		t.Fatal(err)
+	}
+	pod := &corev1.Pod{}
+	if err := r.Get(t.Context(), client.ObjectKey{Namespace: f.Namespace, Name: "pod-1"}, pod); err != nil {
+		t.Fatal(err)
+	}
+	for i := range pod.Status.Conditions {
+		if pod.Status.Conditions[i].Type == corev1.PodReady {
+			pod.Status.Conditions[i].Status = corev1.ConditionFalse
+		}
+	}
+	if err := r.Status().Update(t.Context(), pod); err != nil {
+		t.Fatal(err)
+	}
+	for i := range j.BucketHistory {
+		if j.BucketHistory[i].Node == "pod-1" {
+			j.BucketHistory[i].Retired = false
+			j.BucketHistory[i].ExpiryObserved = false
+		}
+	}
+	// Its lease has elapsed, so the probe does read the record.
+	reader.expired = map[string]bool{"pod-1": true}
+	r.observeRetirementExpiry(t.Context(), f, j, [][]bucketSession{j.BucketHistory})
+	for _, s := range j.BucketHistory {
+		if s.Node != "pod-1" {
+			continue
+		}
+		if s.Retired {
+			t.Fatal("an unready Pod that still exists was recorded as retired")
+		}
+		if !s.ExpiryObserved {
+			t.Fatal("the reading was not taken for an unready writer")
+		}
 	}
 }
