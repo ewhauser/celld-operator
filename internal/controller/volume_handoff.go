@@ -44,7 +44,10 @@ func (r *Reconciler) verifyVolumeAttachment(ctx context.Context, f *fleet.CelldF
 	if err := r.Get(ctx, client.ObjectKey{Name: pv.Spec.StorageClassName}, class); err != nil {
 		return err
 	}
-	if class.Provisioner != "ebs.csi.aws.com" || (class.Parameters["type"] != "gp2" && class.Parameters["type"] != "gp3") || class.VolumeBindingMode == nil || *class.VolumeBindingMode != storagev1.VolumeBindingWaitForFirstConsumer || class.ReclaimPolicy == nil || *class.ReclaimPolicy != corev1.PersistentVolumeReclaimRetain {
+	singleAttachHardware := class.Provisioner == "ebs.csi.aws.com" && (class.Parameters["type"] == "gp2" || class.Parameters["type"] == "gp3")
+	delayedBinding := class.VolumeBindingMode != nil && *class.VolumeBindingMode == storagev1.VolumeBindingWaitForFirstConsumer
+	retainOnDelete := class.ReclaimPolicy != nil && *class.ReclaimPolicy == corev1.PersistentVolumeReclaimRetain
+	if !singleAttachHardware || !delayedBinding || !retainOnDelete {
 		return errors.New("handoff requires retained delayed-binding gp2/gp3 EBS; Multi-Attach capable or unknown storage is unsupported")
 	}
 	attachments := &storagev1.VolumeAttachmentList{}
