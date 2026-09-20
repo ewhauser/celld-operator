@@ -209,7 +209,8 @@ func launcherTestContext(t *testing.T) context.Context {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	t.Cleanup(cancel)
-	return ctx
+	deadline, _ := ctx.Deadline()
+	return withRemovalDeadline(ctx, deadline)
 }
 
 func TestLauncherClientRequiresEveryIndependentCompletionProof(t *testing.T) {
@@ -257,5 +258,24 @@ func TestLauncherMutationRequiresDeadlineButObservationDoesNot(t *testing.T) {
 	}
 	if _, err := r.callLauncher(t.Context(), f, pod, "", ""); err != nil {
 		t.Fatalf("observation requires no operation deadline: %v", err)
+	}
+}
+
+func TestLauncherKeepsFixedOperationDeadlineUnderShortReconcileContext(t *testing.T) {
+	r, f, pod, fake := launcherClientSetup(t)
+	deadline := time.Now().Add(30 * time.Minute).Truncate(time.Millisecond)
+	for _, timeout := range []time.Duration{time.Second, 2 * time.Second} {
+		ctx, cancel := context.WithTimeout(t.Context(), timeout)
+		_, err := r.callLauncher(withRemovalDeadline(ctx, deadline), f, pod, "op-1", "gen-1")
+		cancel()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fake.lastReq.DeadlineMS != deadline.UnixMilli() {
+			t.Fatal("transport context changed fixed operation deadline")
+		}
+		if fake.lastReq.NotAfterMS >= deadline.UnixMilli() {
+			t.Fatal("request replay bound lost")
+		}
 	}
 }

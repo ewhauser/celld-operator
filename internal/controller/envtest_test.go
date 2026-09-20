@@ -6,18 +6,20 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
+	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
@@ -123,15 +125,10 @@ func envtestSetup(t *testing.T, profile string) (*Reconciler, *envtestFixture) {
 	if err := c.Create(ctx, f); err != nil {
 		t.Fatal(err)
 	}
-	r := &Reconciler{Client: c, Options: Options{OperatorNamespace: "celld-system"}, NetworkPolicyEnforced: true}
+	r := &Reconciler{Client: c, Options: Options{OperatorNamespace: "celld-system", LauncherImage: fixtureLauncher}, NetworkPolicyEnforced: true}
 	return r, &envtestFixture{client: c, namespace: ns, fleet: f}
 }
 
-func envtestFreshReconciler(r *Reconciler) *Reconciler {
-	return &Reconciler{Client: r.Client, Options: r.Options, NetworkPolicyEnforced: r.NetworkPolicyEnforced}
-}
-
-// provision reconciles until the workload exists, as the fake-client tests do.
 func (x *envtestFixture) provision(t *testing.T, r *Reconciler) {
 	t.Helper()
 	reason(t, reconcile(t, r, x.fleet), "Provisioning")
@@ -140,15 +137,6 @@ func (x *envtestFixture) provision(t *testing.T, r *Reconciler) {
 	if err := r.Get(t.Context(), client.ObjectKeyFromObject(x.fleet), w); err != nil {
 		t.Fatalf("workload not created through the real API server: %v", err)
 	}
-}
-
-func envtestReservation(t *testing.T, c client.Client, f *fleet.CelldFleet) *fleet.CelldStorageReservation {
-	t.Helper()
-	res := &fleet.CelldStorageReservation{}
-	if err := c.Get(t.Context(), types.NamespacedName{Name: reservationName(f)}, res); err != nil {
-		t.Fatal(err)
-	}
-	return res
 }
 
 func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
@@ -278,257 +266,6 @@ func TestEnvtestFinalizerPatchPreservesConcurrentFinalizers(t *testing.T) {
 	}
 }
 
-func TestEnvtestProvisionAndJournaledScaleOut(t *testing.T) {
-	for _, profile := range []string{"Bucket", "PersistentFleet"} {
-		t.Run(profile, func(t *testing.T) {
-			r, x := envtestSetup(t, profile)
-			x.provision(t, r)
-			res := envtestReservation(t, r, x.fleet)
-			if res.Spec.FleetUID != string(reconcile(t, r, x.fleet).UID) || res.Spec.InitialReplicas != 3 {
-				t.Fatalf("reservation does not bind the server-assigned fleet UID: %+v", res.Spec)
-			}
-			f := desiredCount(t, r, x.fleet, 5)
-			for range 8 {
-				r = envtestFreshReconciler(r) // Every reconcile is a cold start: no in-memory state may carry the operation.
-				reconcile(t, r, f)
-			}
-			j := getJournal(t, r, f)
-			if j.Applied != 5 || j.Operation != nil {
-				t.Fatalf("scale-out did not complete against the real API server: %+v", j)
-			}
-			w := workload(f, r.Options)
-			if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), w); err != nil {
-				t.Fatal(err)
-			}
-			if replicas(w) != 5 {
-				t.Fatalf("workload replicas %d", replicas(w))
-			}
-			if profile == "PersistentFleet" {
-				if len(j.Claims) != 5 {
-					t.Fatalf("expected five exclusively created claim UIDs, got %d", len(j.Claims))
-				}
-				for name, uid := range j.Claims {
-					pvc := &corev1.PersistentVolumeClaim{}
-					if err := r.Get(t.Context(), types.NamespacedName{Namespace: x.namespace, Name: name}, pvc); err != nil {
-						t.Fatal(err)
-					}
-					if pvc.UID != uid {
-						t.Fatalf("journal records %s for %s but the server assigned %s", uid, name, pvc.UID)
-					}
-				}
-			}
-			// Status is a projection: wiping it through the real status subresource
-			// must not alter the journal's applied count.
-			f = &fleet.CelldFleet{}
-			if err := r.Get(t.Context(), client.ObjectKeyFromObject(x.fleet), f); err != nil {
-				t.Fatal(err)
-			}
-			f.Status = fleet.CelldFleetStatus{}
-			if err := r.Status().Update(t.Context(), f); err != nil {
-				t.Fatal(err)
-			}
-			reconcile(t, r, f)
-			if getJournal(t, r, f).Applied != 5 {
-				t.Fatal("status loss erased applied capacity")
-			}
-		})
-	}
-}
-
-func TestEnvtestJournalWriteLosesOnStaleResourceVersion(t *testing.T) {
-	r, x := envtestSetup(t, "Bucket")
-	x.provision(t, r)
-	ctx := t.Context()
-	first := envtestReservation(t, r, x.fleet)
-	second := envtestReservation(t, r, x.fleet)
-	j1, err := readJournal(first)
-	if err != nil || j1 == nil {
-		t.Fatalf("journal missing after provisioning: %v", err)
-	}
-	j2, err := readJournal(second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The first writer must change content: the API server does not advance
-	// resourceVersion for a byte-identical update, so a no-op write would leave the
-	// second reader current rather than stale.
-	j1.Inventory.CheckedAt = time.Now().UTC().Truncate(time.Second)
-	if err := r.saveJournal(ctx, first, j1); err != nil {
-		t.Fatal(err)
-	}
-	if first.ResourceVersion == second.ResourceVersion {
-		t.Fatal("first write did not advance the reservation resourceVersion")
-	}
-	err = r.saveJournal(ctx, second, j2)
-	if !apierrors.IsConflict(err) {
-		t.Fatalf("second writer with the stale resourceVersion must lose with 409 Conflict, got %v", err)
-	}
-	// saveJournal never refreshes the version; a retry on the same object still fails.
-	if err := r.saveJournal(ctx, second, j2); !apierrors.IsConflict(err) {
-		t.Fatalf("stale journal retry was accepted: %v", err)
-	}
-}
-
-func TestEnvtestDelayedIssuerLosesWorkloadCASAfterPause(t *testing.T) {
-	for _, profile := range []string{"Bucket", "PersistentFleet"} {
-		t.Run(profile, func(t *testing.T) {
-			r, x := envtestSetup(t, profile)
-			x.provision(t, r)
-			ctx := t.Context()
-			f := desiredCount(t, r, x.fleet, 5)
-			reconcile(t, r, f)
-			j := getJournal(t, r, f)
-			if j.Operation == nil || j.Operation.Phase != "Intent" {
-				t.Fatalf("expected durable intent before any effect: %+v", j.Operation)
-			}
-			op := *j.Operation
-			stale := emptyObject(workload(f, r.Options))
-			if err := r.Get(ctx, client.ObjectKeyFromObject(f), stale); err != nil {
-				t.Fatal(err)
-			}
-			if stale.GetResourceVersion() != op.WorkloadVersion {
-				t.Fatalf("intent recorded workload version %s but server has %s", op.WorkloadVersion, stale.GetResourceVersion())
-			}
-			f = editMaintenance(t, r, f, func(f *fleet.CelldFleet) { f.Spec.Maintenance = &fleet.MaintenanceSpec{Paused: true} })
-			reason(t, reconcile(t, r, f), "MaintenancePaused")
-			fenced := emptyObject(workload(f, r.Options))
-			if err := r.Get(ctx, client.ObjectKeyFromObject(f), fenced); err != nil {
-				t.Fatal(err)
-			}
-			if fenced.GetAnnotations()[maintenanceFenceKey] == "" || fenced.GetResourceVersion() == op.WorkloadVersion {
-				t.Fatal("pause did not CAS a fence onto the workload")
-			}
-			// The delayed issuer holds the pre-pause object: no fence is visible to it and
-			// the recorded version matches, so the only thing stopping it is the API
-			// server's resourceVersion precondition.
-			err := r.applyReplicas(ctx, stale, &op)
-			if !apierrors.IsConflict(err) {
-				t.Fatalf("delayed issuer must lose the CAS with 409 Conflict, got %v", err)
-			}
-			after := emptyObject(workload(f, r.Options))
-			if err := r.Get(ctx, client.ObjectKeyFromObject(f), after); err != nil {
-				t.Fatal(err)
-			}
-			if replicas(after) != 3 || after.GetAnnotations()[operationKey] != "" {
-				t.Fatalf("fenced workload was modified: replicas=%d annotations=%v", replicas(after), after.GetAnnotations())
-			}
-			// A fresh read sees the fence and refuses before contacting the server.
-			if err := r.applyReplicas(ctx, after, &op); err == nil || apierrors.IsConflict(err) {
-				t.Fatalf("fresh issuer must refuse on the fence itself: %v", err)
-			}
-		})
-	}
-}
-
-func TestEnvtestCrashAfterReplicaCASReconstructsOnce(t *testing.T) {
-	for _, profile := range []string{"Bucket", "PersistentFleet"} {
-		t.Run(profile, func(t *testing.T) {
-			r, x := envtestSetup(t, profile)
-			x.provision(t, r)
-			ctx := t.Context()
-			f := desiredCount(t, r, x.fleet, 4)
-			reconcile(t, r, f)
-			// PersistentFleet allocates claims before the replica effect; drive to the
-			// phase immediately preceding the workload CAS.
-			for range 3 {
-				if j := getJournal(t, r, f); j.Operation != nil && j.Operation.Phase == "Prepared" {
-					break
-				}
-				reconcile(t, r, f)
-			}
-			before := getJournal(t, r, f)
-			if before.Operation == nil {
-				t.Fatalf("operation completed before the crash could be injected: %+v", before)
-			}
-			opID := before.Operation.ID
-			base := r.Client
-			crashed := false
-			r.Client = interceptor.NewClient(base.(client.WithWatch), interceptor.Funcs{Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
-				if _, ok := obj.(*fleet.CelldStorageReservation); ok && !crashed {
-					w := emptyObject(workload(f, r.Options))
-					if err := c.Get(ctx, client.ObjectKeyFromObject(f), w); err == nil && replicas(w) == 4 {
-						crashed = true
-						return errors.New("leader crashed after replica CAS, before journal transition")
-					}
-				}
-				return c.Update(ctx, obj, opts...)
-			}})
-			for range 4 {
-				if crashed {
-					break
-				}
-				_, _ = r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(f)})
-			}
-			if !crashed {
-				t.Fatal("replica effect was never issued; crash point not reached")
-			}
-			issued := emptyObject(workload(f, r.Options))
-			if err := base.Get(ctx, client.ObjectKeyFromObject(f), issued); err != nil {
-				t.Fatal(err)
-			}
-			if replicas(issued) != 4 || issued.GetAnnotations()[operationKey] != opID {
-				t.Fatalf("effect not durable on the server: replicas=%d op=%s", replicas(issued), issued.GetAnnotations()[operationKey])
-			}
-			if getJournal(t, &Reconciler{Client: base}, f).Applied != 3 {
-				t.Fatal("journal advanced despite the injected crash")
-			}
-			// A new leader with no memory reconstructs the issued effect from the
-			// workload's operation ID and exact count, without a second effect.
-			r = &Reconciler{Client: base, Options: r.Options, NetworkPolicyEnforced: true}
-			for range 6 {
-				r = envtestFreshReconciler(r)
-				reconcile(t, r, f)
-			}
-			j := getJournal(t, r, f)
-			if j.Applied != 4 || j.Operation != nil {
-				t.Fatalf("reconstruction failed: %+v", j)
-			}
-			completed := 0
-			for _, h := range j.History {
-				if h.ID == opID {
-					completed++
-				}
-			}
-			if completed != 1 {
-				t.Fatalf("operation %s recorded %d times in history", opID, completed)
-			}
-			final := emptyObject(workload(f, r.Options))
-			if err := r.Get(ctx, client.ObjectKeyFromObject(f), final); err != nil {
-				t.Fatal(err)
-			}
-			if replicas(final) != 4 {
-				t.Fatalf("duplicate or reverted effect: replicas=%d", replicas(final))
-			}
-		})
-	}
-}
-
-func TestEnvtestCorruptJournalBlocksWithoutRewrite(t *testing.T) {
-	r, x := envtestSetup(t, "Bucket")
-	x.provision(t, r)
-	ctx := t.Context()
-	res := envtestReservation(t, r, x.fleet)
-	res.Annotations[journalKey] = `{"Version":99,"Initial":3,"Applied":3}`
-	if err := r.Update(ctx, res); err != nil {
-		t.Fatal(err)
-	}
-	for range 3 {
-		r = envtestFreshReconciler(r)
-		reason(t, reconcile(t, r, x.fleet), "JournalInvalid")
-	}
-	again := envtestReservation(t, r, x.fleet)
-	if again.Annotations[journalKey] != res.Annotations[journalKey] || again.ResourceVersion != res.ResourceVersion {
-		t.Fatal("unreadable journal was rewritten; evidence must be retained for review")
-	}
-	w := workload(x.fleet, r.Options)
-	if err := r.Get(ctx, client.ObjectKeyFromObject(x.fleet), w); err != nil {
-		t.Fatal(err)
-	}
-	if replicas(w) != 3 {
-		t.Fatal("workload changed while the journal was unreadable")
-	}
-}
-
 func TestEnvtestTuningAdmission(t *testing.T) {
 	c := envtestClient(t)
 	ctx := t.Context()
@@ -653,48 +390,122 @@ func TestEnvtestScaleSubresource(t *testing.T) {
 // the operator never writes that count back. The kind suite proves the same
 // contract against a real HPA; this pins it against a real API server, where the
 // CRD's own scale subresource, defaulting and CEL admission apply.
-func TestEnvtestExternalModeScaleContract(t *testing.T) {
+
+// A real apiserver, rather than fake-client counters, arbitrates cancellation,
+// persisted issuance and the independently guarded workload effect.
+func TestEnvtestBoundedOperationCASAndLostResponse(t *testing.T) {
 	r, x := envtestSetup(t, "Bucket")
 	x.provision(t, r)
-	ctx := t.Context()
-	f := enableCapacity(t, r, x.fleet, "External")
-	got := reconcile(t, r, f)
-	if got.Status.Capacity.Mode != "External" || got.Status.Capacity.Reason != "ExternalOwner" {
-		t.Fatalf("external ownership not published: %+v", got.Status.Capacity)
+	f := desiredCount(t, r, x.fleet, 4)
+	reconcile(t, r, f)
+	res := envReservation(t, r, f)
+	stale := r.hydrate(t.Context(), res)
+	if stale.j.Operation == nil || stale.j.Operation.Phase != "Intent" {
+		t.Fatal("missing durable intent")
 	}
-	selector := FleetLabel + "=" + string(x.fleet.UID)
-	scale := &autoscalingv1.Scale{}
-	if err := r.SubResource("scale").Get(ctx, f, scale); err != nil {
-		t.Fatalf("scale subresource unavailable in External mode: %v", err)
+	f = desiredCount(t, r, f, 3)
+	reconcile(t, r, f)
+	stale.j.Operation.Phase = "Requesting"
+	if err := r.saveState(t.Context(), stale.res, stale.j); !apierrors.IsConflict(err) {
+		t.Fatalf("old issuer passed cancellation: %v", err)
 	}
-	if scale.Spec.Replicas != got.Spec.Replicas || scale.Status.Selector != selector {
-		t.Fatalf("scale view %+v", scale)
+	f = desiredCount(t, r, f, 4)
+	for range 3 {
+		reconcile(t, r, f)
 	}
-	// The autoscaler's write, through the same subresource an HPA uses.
-	scale.Spec.Replicas = 5
-	if err := r.SubResource("scale").Update(ctx, f, client.WithSubResourceBody(scale)); err != nil {
-		t.Fatalf("external scale write rejected: %v", err)
-	}
-	for range 6 {
-		reconcile(t, envtestFreshReconciler(r), f)
-	}
-	after := &fleet.CelldFleet{}
-	if err := r.Get(ctx, client.ObjectKeyFromObject(f), after); err != nil {
+	old := emptyObject(workload(f, r.Options))
+	if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), old); err != nil {
 		t.Fatal(err)
 	}
-	if after.Spec.Replicas != 5 {
-		t.Fatalf("operator rewrote the /scale writer's count: %d", after.Spec.Replicas)
+	base := r.Client
+	lost := false
+	r.Client = interceptor.NewClient(base.(client.WithWatch), interceptor.Funcs{Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+		if _, ok := obj.(*appsv1.Deployment); ok && replicas(obj) == 4 && !lost {
+			if err := c.Update(ctx, obj, opts...); err != nil {
+				return err
+			}
+			lost = true
+			return errors.New("lost response after durable effect")
+		}
+		return c.Update(ctx, obj, opts...)
+	}})
+	for range 5 {
+		_, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(f)})
+		if err != nil && !strings.Contains(err.Error(), "lost response") {
+			t.Fatal(err)
+		}
+		if lost {
+			break
+		}
 	}
-	if after.Status.LabelSelector != selector || !after.Status.ReplicaObservationValid {
-		t.Fatalf("scale status stopped being projected: %+v", after.Status)
+	if !lost {
+		t.Fatal("effect boundary not exercised")
 	}
-	if after.Status.Capacity.Reason != "ExternalOwner" || after.Status.Capacity.DesiredReplicas != 5 {
-		t.Fatalf("external decision not refreshed: %+v", after.Status.Capacity)
+	r = &Reconciler{Client: base, Options: r.Options, NetworkPolicyEnforced: true}
+	reconcile(t, r, f)
+	state := getJournal(t, r, f)
+	if state.Operation == nil || state.Operation.Phase != "Observing" {
+		t.Fatalf("lost response not reconstructed: %+v", state.Operation)
 	}
-	if err := r.SubResource("scale").Get(ctx, after, scale); err != nil {
+	actual := emptyObject(old)
+	if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), actual); err != nil {
 		t.Fatal(err)
 	}
-	if scale.Spec.Replicas != 5 || scale.Status.Selector != selector {
-		t.Fatalf("scale view after the external write %+v", scale)
+	if replicas(actual) != 4 || actual.GetAnnotations()[operationKey] != state.Operation.ID+"/stop" {
+		t.Fatal("wrong effect identity")
+	}
+	setReplicas(old, 5)
+	if err := r.Update(t.Context(), old); !apierrors.IsConflict(err) {
+		t.Fatalf("delayed workload writer succeeded: %v", err)
+	}
+	// A corrupted projection supplies no infrastructure authority.
+	got := &fleet.CelldFleet{}
+	if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), got); err != nil {
+		t.Fatal(err)
+	}
+	got.Status.Lifecycle = fleet.LifecycleStatus{OperationID: "fabricated", Phase: "Completed"}
+	if err := r.Status().Update(t.Context(), got); err != nil {
+		t.Fatal(err)
+	}
+	reconcile(t, r, f)
+	if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Lifecycle.OperationID != state.Operation.ID || got.Status.Lifecycle.Phase == "Completed" {
+		t.Fatal("status substituted for operation authority")
+	}
+}
+
+func TestEnvtestCleanupPreconditionsRejectReplacement(t *testing.T) {
+	r, x := envtestSetup(t, "PersistentFleet")
+	x.provision(t, r)
+	name := "data-" + x.fleet.Name + "-2"
+	old := &corev1.PersistentVolumeClaim{}
+	if err := r.Get(t.Context(), client.ObjectKey{Namespace: x.namespace, Name: name}, old); err != nil {
+		t.Fatal(err)
+	}
+	uid, rv := old.UID, old.ResourceVersion
+	if err := r.Delete(t.Context(), old, client.Preconditions{UID: &uid, ResourceVersion: &rv}); err != nil {
+		t.Fatal(err)
+	}
+	// envtest has no PVC-protection controller. Simulate its release only
+	// after observing the deletion and confirming this fixture has no pods.
+	terminating := &corev1.PersistentVolumeClaim{}
+	if err := r.Get(t.Context(), client.ObjectKeyFromObject(old), terminating); err != nil {
+		t.Fatal(err)
+	}
+	terminating.Finalizers = nil
+	if err := r.Update(t.Context(), terminating); err != nil {
+		t.Fatal(err)
+	}
+	replacement := old.DeepCopy()
+	replacement.UID = ""
+	replacement.ResourceVersion = ""
+	replacement.CreationTimestamp = metav1.Time{}
+	if err := r.Create(t.Context(), replacement); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Delete(t.Context(), replacement, client.Preconditions{UID: &uid, ResourceVersion: &rv}); !apierrors.IsConflict(err) {
+		t.Fatalf("old cleanup deleted replacement: %v", err)
 	}
 }

@@ -99,16 +99,13 @@ inherited lock. A different host or boot is blocked before child startup because
 local flock cannot establish exclusion across kernels. Preserve-mode generation
 overrides (`.clean-reload.json`) are refused.
 
-## Remaining executor work
+## Operator integration
 
-Items #4–#6 replace the lifecycle journal and S3 evidence machinery and choose
-the disk policy. They must persist the current operation's independently bound
-runtime result, termination and restart denial in Kubernetes before authorizing
-removal. They must also replace retained-volume reactivation/scheduling and its
-cross-host exclusion policy; removing launcher grants intentionally leaves
-cross-host reuse blocked. The existing attachment checks remain for their other
-executor callers, not as a launcher fallback. The old controller S3/fencing
-paths are not qualified as the new strict disk-removal executor.
+[Bounded current operations](current-operation.md) now capture this result in
+Kubernetes before any compute or PVC removal. Completed operations discard
+runtime proof. Retained PV/EBS deletion and cross-host disk policy remain separate
+qualification work; neither negative restart markers nor the operator's
+DiskCleanupPending condition provide a positive historical deletion receipt.
 
 ## Verification
 

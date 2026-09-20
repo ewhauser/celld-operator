@@ -18,7 +18,6 @@ func TestOrderedBucketZoneGateAndDeterministicVictim(t *testing.T) {
 	if len(w.Spec.VolumeClaimTemplates) != 0 || w.Spec.PodManagementPolicy != appsv1.OrderedReadyPodManagement || len(w.Spec.Template.Spec.TopologySpreadConstraints) != 0 {
 		t.Fatal("ordered Bucket must use ephemeral disk and ordinal placement")
 	}
-	candidates := map[types.UID]bucketCandidate{}
 	objects := []client.Object{}
 	for i := range 3 {
 		name := fmt.Sprintf("ordered-%d", i)
@@ -26,7 +25,7 @@ func TestOrderedBucketZoneGateAndDeterministicVictim(t *testing.T) {
 		objects = append(objects, pod)
 	}
 	r := setup(t, objects...)
-	j := &lifecycleJournal{WorkloadUID: "workload"}
+	j := &fleetState{WorkloadUID: "workload"}
 	if err := r.scheduleOrderedBucket(t.Context(), f, j); err != nil {
 		t.Fatal(err)
 	}
@@ -39,15 +38,8 @@ func TestOrderedBucketZoneGateAndDeterministicVictim(t *testing.T) {
 		if len(pod.Spec.SchedulingGates) != 0 || pod.Spec.NodeSelector[corev1.LabelTopologyZone] != zone {
 			t.Fatal("ordinal escaped assigned zone")
 		}
-		candidates[pod.UID] = bucketCandidate{Pod: pod.Name, Zone: zone, Hostname: pod.Name}
 	}
-	if err := validateBucketPlacement(f, candidates, true); err != nil {
-		t.Fatal(err)
-	}
-	f.Spec.BucketWorkload = "Deployment"
-	if err := validateBucketPlacement(f, candidates, true); err == nil {
-		t.Fatal("arbitrary Deployment victim incorrectly safe")
-	}
+
 }
 
 func TestOrderedBucketGateRejectsForeignAndConflictingPods(t *testing.T) {
@@ -67,7 +59,7 @@ func TestOrderedBucketGateRejectsForeignAndConflictingPods(t *testing.T) {
 				pod.Spec.NodeName = "node"
 			}
 			r := setup(t, pod)
-			if err := r.scheduleOrderedBucket(t.Context(), f, &lifecycleJournal{WorkloadUID: "workload"}); err == nil {
+			if err := r.scheduleOrderedBucket(t.Context(), f, &fleetState{WorkloadUID: "workload"}); err == nil {
 				t.Fatal("unsafe gate release")
 			}
 			got := &corev1.Pod{}

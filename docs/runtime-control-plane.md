@@ -31,11 +31,10 @@ Ordinary shutdown/reload APIs cannot atomically bind a runtime generation. The
 client rejects requests that ask those APIs to enforce one; it does not
 simulate safety with a racy GET followed by an unguarded POST. There are currently
 no controller callers of these mutations. The [launcher](launcher-supervision.md) uses the strict API to capture completion
-before terminating celld. The lifecycle journal, private storage evidence,
-deletion policy and runtime image allowlist remain pending cutover. The journal/S3 evidence/old release adapters are explicitly
-queued for deletion in the later lifecycle cutover, not retained as compatibility
-requirements. That cutover must install a single compatible fork image digest
-across the fleet; no digest is invented while its release is pending. Disk deletion still requires the later executor rewrite.
+before terminating celld. The controller now uses the
+[bounded current-operation executor](current-operation.md); private S3 evidence,
+journal archives and old release adapters have no active reconciliation path.
+An explicitly qualified fork digest is still required for rollout.
 
 ## Strict schema alignment
 

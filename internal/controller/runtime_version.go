@@ -1,35 +1,27 @@
 package controller
 
 import (
+	"regexp"
+
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
-	"github.com/ewhauser/celld-operator/internal/runtime/catalog"
+	corev1 "k8s.io/api/core/v1"
 )
 
-func runtimeImage(f *fleet.CelldFleet) string {
-	if f.Spec.RuntimeImage != "" {
-		return f.Spec.RuntimeImage
-	}
-	return Image
-}
-func knownRuntime(image string) bool { _, ok := catalog.Lookup(image); return ok }
-func appliedRuntime(f *fleet.CelldFleet, j *lifecycleJournal) *fleet.CelldFleet {
-	current := f.DeepCopy()
-	current.Spec.RuntimeImage = j.RuntimeImage
-	return current
-}
+var runtimePin = regexp.MustCompile(`^ghcr.io/ewhauser/celld@sha256:[a-f0-9]{64}$`)
 
-// Runtime observations follow durable applied authority even when the user has
-// already requested another image. Only the all-stopped resume phase selects
-// the installed target before completion promotes RuntimeImage.
-func evidenceRuntime(f *fleet.CelldFleet, j *lifecycleJournal) *fleet.CelldFleet {
-	image := j.RuntimeImage
-	if m := j.Maintenance; m != nil && m.Kind == "Upgrade" && m.Phase == "Resuming" {
-		image = m.TargetImage
+func runtimeImage(f *fleet.CelldFleet) string { return f.Spec.RuntimeImage }
+
+// This validates a pin, not release qualification. Strict capability and exact
+// generation are independently required at the runtime/launcher boundary.
+func knownRuntime(image string) bool { return runtimePin.MatchString(image) }
+func runtimeNode(f *fleet.CelldFleet, p *corev1.Pod) string {
+	if f.Spec.Profile == "Bucket" {
+		return string(p.UID)
 	}
-	if runtimeImage(f) == image {
-		return f
-	}
-	current := f.DeepCopy()
-	current.Spec.RuntimeImage = image
-	return current
+	return p.Name
+}
+func appliedRuntime(f *fleet.CelldFleet, s *fleetState) *fleet.CelldFleet {
+	out := f.DeepCopy()
+	out.Spec.RuntimeImage = s.RuntimeImage
+	return out
 }

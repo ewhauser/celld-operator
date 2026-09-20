@@ -17,7 +17,7 @@ var SchemeBuilder = runtime.NewSchemeBuilder(func(s *runtime.Scheme) error {
 })
 var AddToScheme = SchemeBuilder.AddToScheme
 
-// CelldFleet supports journaled capacity and maintenance requests. The /scale
+// CelldFleet supports serialized capacity and maintenance requests. The /scale
 // subresource declared below exposes spec.replicas for external capacity mode.
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
@@ -28,7 +28,7 @@ var AddToScheme = SchemeBuilder.AddToScheme
 type CelldFleet struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	// +kubebuilder:validation:XValidation:rule="self.qualification == oldSelf.qualification && self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement && has(self.execution) == has(oldSelf.execution) && (!has(self.execution) || self.execution == oldSelf.execution) && has(self.lifecycle) == has(oldSelf.lifecycle) && (!has(self.lifecycle) || self.lifecycle == oldSelf.lifecycle) && (self.bucketWorkload == oldSelf.bucketWorkload || (oldSelf.bucketWorkload == 'Deployment' && self.bucketWorkload == 'Ordered' && has(self.maintenance) && has(self.maintenance.orderedMigrationToken) && size(self.maintenance.orderedMigrationToken) > 0 && has(self.maintenance.allowCoordinatedDowntime) && self.maintenance.allowCoordinatedDowntime))",message="only replicas, capacity, runtimeImage, maintenance and an authorized Deployment-to-Ordered migration may change; execution and lifecycle tuning are fixed at creation"
+	// +kubebuilder:validation:XValidation:rule="self.qualification == oldSelf.qualification && self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement && has(self.execution) == has(oldSelf.execution) && (!has(self.execution) || self.execution == oldSelf.execution) && has(self.lifecycle) == has(oldSelf.lifecycle) && (!has(self.lifecycle) || self.lifecycle == oldSelf.lifecycle) && self.bucketWorkload == oldSelf.bucketWorkload",message="only replicas, capacity, runtimeImage and maintenance may change; layout, execution and lifecycle tuning are fixed at creation"
 	Spec   CelldFleetSpec   `json:"spec"`
 	Status CelldFleetStatus `json:"status,omitempty"`
 }
@@ -40,16 +40,16 @@ type CelldFleet struct {
 // +kubebuilder:validation:XValidation:rule="self.placement.zones.all(z, z.startsWith(self.storage.region) && size(z) == size(self.storage.region) + 1 && z.matches('.*[a-z]$'))",message="zones must be standard AZ names in storage.region"
 // +kubebuilder:validation:XValidation:rule="!has(self.capacity) || self.capacity.minReplicas >= self.placement.azCount",message="capacity minimum must cover requested AZs"
 type CelldFleetSpec struct {
-	// Bucket workload layout. Defaults to Deployment; Ordered uses deterministic ordinal removal. Existing fleets require an explicit migration token and downtime permission to change to Ordered.
+	// Bucket workload layout. Defaults to Deployment; Ordered uses deterministic ordinal removal. Layout is immutable.
 	// +kubebuilder:default=Deployment
 	// +kubebuilder:validation:Enum=Deployment;Ordered
 	BucketWorkload string `json:"bucketWorkload,omitempty"`
-	// Requested immutable runtime digest. Omission selects the original v0.5.0 pin.
-	// Unsupported transitions are durably blocked, including rollback.
+	// Requested immutable runtime digest. Required for provisioning; no default release is assumed.
+	// Use a homogeneous compatible fork; release and recovery qualification remain required.
 	// +optional
-	// +kubebuilder:validation:Pattern=`^ghcr.io/denoland/celld@sha256:[a-f0-9]{64}$`
+	// +kubebuilder:validation:Pattern=`^ghcr.io/ewhauser/celld@sha256:[a-f0-9]{64}$`
 	RuntimeImage string `json:"runtimeImage,omitempty"`
-	// Maintenance requests share the retained lifecycle journal.
+	// Maintenance requests share the bounded current operation.
 	Maintenance *MaintenanceSpec `json:"maintenance,omitempty"`
 
 	// A required acknowledgment of the qualification boundary; production is unavailable.
@@ -188,12 +188,9 @@ func (s *CelldFleetSpec) EffectiveLifecycle() LifecycleSpec {
 type MaintenanceSpec struct {
 	// Explicitly permit an operation that stops the entire fleet.
 	AllowCoordinatedDowntime bool `json:"allowCoordinatedDowntime,omitempty"`
-	// Request one-way Deployment-to-Ordered migration together with bucketWorkload: Ordered.
-	// +kubebuilder:validation:MaxLength=128
-	OrderedMigrationToken string `json:"orderedMigrationToken,omitempty"`
 	// Pause new actions and unissued operations; continue recovery of issued actions.
 	Paused bool `json:"paused,omitempty"`
-	// Change to a new nonempty token to request a same-version restart. Completed tokens are not replayed. Placement and verified shutdown prerequisites must pass.
+	// Change to a new nonempty token to request a same-version restart. The current completed token is not replayed. Placement and verified shutdown prerequisites must pass.
 	// +kubebuilder:validation:MaxLength=128
 	RestartToken string `json:"restartToken,omitempty"`
 }

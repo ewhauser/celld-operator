@@ -31,7 +31,7 @@ func bucketOrdinal(f *fleet.CelldFleet, name string) (int, error) {
 // Assign before scheduling. StatefulSet scale-down removes the highest ordinal;
 // modulo assignment leaves a balanced prefix with every configured AZ represented.
 // No pod deletion-cost hint or scheduler-dependent victim choice is involved.
-func (r *Reconciler) scheduleOrderedBucket(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal) error {
+func (r *Reconciler) scheduleOrderedBucket(ctx context.Context, f *fleet.CelldFleet, j *fleetState) error {
 	pods := &corev1.PodList{}
 	if err := r.List(ctx, pods, client.InNamespace(f.Namespace), client.MatchingLabels(labels(f))); err != nil {
 		return err

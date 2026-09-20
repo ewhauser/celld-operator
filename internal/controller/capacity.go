@@ -12,7 +12,7 @@ import (
 // capacityTarget runs inside the existing lifecycle authority after identity/drift
 // checks. Its history and any new intent are committed together on the reservation.
 // It never edits spec.replicas or workload replicas.
-func (r *Reconciler) capacityTarget(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal) (int32, bool) {
+func (r *Reconciler) capacityTarget(ctx context.Context, f *fleet.CelldFleet, j *fleetState) (int32, bool) {
 	if f.Spec.Capacity == nil {
 		// Preserve timing across disable/re-enable. Manual intent remains independent.
 		if j.Capacity != nil {

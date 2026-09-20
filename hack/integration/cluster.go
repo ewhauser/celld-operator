@@ -357,7 +357,7 @@ func (h *harness) startOperator() {
 	}
 	// Run the actual manager under its in-cluster ServiceAccount so
 	// direct Pod IP state collection and Metrics Server are real.
-	args := []string{"--operator-namespace=" + operatorNS, "--network-policy-enforced", "--local-test", "--local-evidence"}
+	args := []string{"--operator-namespace=" + operatorNS, "--network-policy-enforced", "--local-test"}
 	container := object{"name": "operator", "args": args}
 	var volumes []object
 	if h.opts.operatorImage != "" {

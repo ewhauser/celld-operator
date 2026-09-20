@@ -24,7 +24,7 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          CelldFleet supports journaled capacity and maintenance requests. The /scale
+          CelldFleet supports serialized capacity and maintenance requests. The /scale
           subresource declared below exposes spec.replicas for external capacity mode.
         properties:
           apiVersion:
@@ -49,8 +49,7 @@ spec:
               bucketWorkload:
                 default: Deployment
                 description: Bucket workload layout. Defaults to Deployment; Ordered
-                  uses deterministic ordinal removal. Existing fleets require an explicit
-                  migration token and downtime permission to change to Ordered.
+                  uses deterministic ordinal removal. Layout is immutable.
                 enum:
                 - Deployment
                 - Ordered
@@ -300,25 +299,20 @@ spec:
                   rule: has(self.shutdownSeconds) || !has(self.terminationGraceSeconds)
                     || self.terminationGraceSeconds >= 25
               maintenance:
-                description: Maintenance requests share the retained lifecycle journal.
+                description: Maintenance requests share the bounded current operation.
                 properties:
                   allowCoordinatedDowntime:
                     description: Explicitly permit an operation that stops the entire
                       fleet.
                     type: boolean
-                  orderedMigrationToken:
-                    description: 'Request one-way Deployment-to-Ordered migration
-                      together with bucketWorkload: Ordered.'
-                    maxLength: 128
-                    type: string
                   paused:
                     description: Pause new actions and unissued operations; continue
                       recovery of issued actions.
                     type: boolean
                   restartToken:
                     description: Change to a new nonempty token to request a same-version
-                      restart. Completed tokens are not replayed. Placement and verified
-                      shutdown prerequisites must pass.
+                      restart. The current completed token is not replayed. Placement
+                      and verified shutdown prerequisites must pass.
                     maxLength: 128
                     type: string
                 type: object
@@ -381,9 +375,9 @@ spec:
                 type: integer
               runtimeImage:
                 description: |-
-                  Requested immutable runtime digest. Omission selects the original v0.5.0 pin.
-                  Unsupported transitions are durably blocked, including rollback.
-                pattern: ^ghcr.io/denoland/celld@sha256:[a-f0-9]{64}$
+                  Requested immutable runtime digest. Required for provisioning; no default release is assumed.
+                  Use a homogeneous compatible fork; release and recovery qualification remain required.
+                pattern: ^ghcr.io/ewhauser/celld@sha256:[a-f0-9]{64}$
                 type: string
               serviceAccountName:
                 description: Existing ServiceAccount in the fleet namespace with the
@@ -436,20 +430,15 @@ spec:
             - storage
             type: object
             x-kubernetes-validations:
-            - message: only replicas, capacity, runtimeImage, maintenance and an authorized
-                Deployment-to-Ordered migration may change; execution and lifecycle
-                tuning are fixed at creation
+            - message: only replicas, capacity, runtimeImage and maintenance may change;
+                layout, execution and lifecycle tuning are fixed at creation
               rule: self.qualification == oldSelf.qualification && self.profile ==
                 oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName
                 && self.storage == oldSelf.storage && self.placement == oldSelf.placement
                 && has(self.execution) == has(oldSelf.execution) && (!has(self.execution)
                 || self.execution == oldSelf.execution) && has(self.lifecycle) ==
                 has(oldSelf.lifecycle) && (!has(self.lifecycle) || self.lifecycle
-                == oldSelf.lifecycle) && (self.bucketWorkload == oldSelf.bucketWorkload
-                || (oldSelf.bucketWorkload == 'Deployment' && self.bucketWorkload
-                == 'Ordered' && has(self.maintenance) && has(self.maintenance.orderedMigrationToken)
-                && size(self.maintenance.orderedMigrationToken) > 0 && has(self.maintenance.allowCoordinatedDowntime)
-                && self.maintenance.allowCoordinatedDowntime))
+                == oldSelf.lifecycle) && self.bucketWorkload == oldSelf.bucketWorkload
             - message: Ordered bucketWorkload requires Bucket profile
               rule: self.bucketWorkload != 'Ordered' || self.profile == 'Bucket'
             - message: azCount must equal the zones count

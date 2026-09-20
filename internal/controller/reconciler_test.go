@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"slices"
-	"strings"
 	"sync"
 	"testing"
 
@@ -34,6 +33,7 @@ func fixture(name, bucket, profile string) *fleet.CelldFleet {
 		UID:       types.UID(name + "-uid"),
 		Spec: fleet.CelldFleetSpec{
 			Qualification:      "Experimental",
+			RuntimeImage:       fixtureRuntime,
 			Profile:            profile,
 			ServiceAccountName: "runtime",
 			Storage:            fleet.StorageSpec{Bucket: bucket, Region: "us-east-1"},
@@ -67,8 +67,13 @@ func setup(t *testing.T, objects ...client.Object) *Reconciler {
 		// selectors backed by a registered index.
 		Client: fake.NewClientBuilder().WithScheme(s).WithStatusSubresource(&fleet.CelldFleet{}, &appsv1.Deployment{}, &appsv1.StatefulSet{}).WithIndex(&corev1.Pod{}, "spec.nodeName", func(obj client.Object) []string {
 			return []string{obj.(*corev1.Pod).Spec.NodeName}
-		}).WithObjects(objects...).Build(),
-		Options:               Options{OperatorNamespace: "celld-system"},
+		}).WithObjects(objects...).WithInterceptorFuncs(interceptor.Funcs{Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+			if obj.GetUID() == "" {
+				obj.SetUID(types.UID("created-" + obj.GetName()))
+			}
+			return c.Create(ctx, obj, opts...)
+		}}).Build(),
+		Options:               Options{OperatorNamespace: "celld-system", LauncherImage: fixtureLauncher},
 		NetworkPolicyEnforced: true,
 	}
 }
@@ -105,7 +110,7 @@ func TestProvisionProfilesAndIsolation(t *testing.T) {
 		if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), p); err != nil {
 			t.Fatal(err)
 		}
-		if len(p.Spec.Ingress) != 2 || len(p.Spec.Ingress[0].From) != 2 || p.Spec.Ingress[0].From[0].PodSelector.MatchLabels[FleetLabel] != string(f.UID) || p.Spec.Ingress[0].From[1].NamespaceSelector == nil {
+		if len(p.Spec.Ingress) != 3 || len(p.Spec.Ingress[0].From) != 2 || p.Spec.Ingress[0].From[0].PodSelector.MatchLabels[FleetLabel] != string(f.UID) || p.Spec.Ingress[0].From[1].NamespaceSelector == nil {
 			t.Fatal("peer isolation is not constrained")
 		}
 		w := workload(f, r.Options)
@@ -124,7 +129,7 @@ func TestProvisionProfilesAndIsolation(t *testing.T) {
 		t.Fatal("unsafe persistent lifecycle")
 	}
 	container := sts.Spec.Template.Spec.Containers[0]
-	if container.LivenessProbe != nil || container.StartupProbe != nil || container.ReadinessProbe.HTTPGet.Path != "/.well-known/celld/health" || !strings.Contains(container.Command[2], "sleep 10") {
+	if container.LivenessProbe != nil || container.StartupProbe != nil || container.ReadinessProbe.HTTPGet.Path != "/.well-known/celld/health" || len(container.Command) != 1 || container.Command[0] != "/launcher/celld-launcher" {
 		t.Fatal("runtime startup/readiness contract bypassed")
 	}
 	spread := sts.Spec.Template.Spec.TopologySpreadConstraints[0]
@@ -328,16 +333,16 @@ func TestUnreadableJournalReportsJournalInvalid(t *testing.T) {
 	if err := r.Get(t.Context(), types.NamespacedName{Name: reservationName(f)}, res); err != nil {
 		t.Fatal(err)
 	}
-	res.Annotations[journalKey] = `{"Version":99,"Initial":3,"Applied":3}`
+	res.Annotations[stateKey] = `{"Version":99,"Initial":3,"Applied":3}`
 	if err := r.Update(t.Context(), res); err != nil {
 		t.Fatal(err)
 	}
-	_, want := r.loadJournal(t.Context(), res)
+	_, want := readState(res)
 	if want == nil {
 		t.Fatal("fixture journal is still readable")
 	}
 	got := reconcile(t, r, f)
-	reason(t, got, "JournalInvalid")
+	reason(t, got, "OperationInvalid")
 	if c := meta.FindStatusCondition(got.Status.Conditions, "Ready"); c.Message != want.Error() {
 		t.Fatalf("message %q does not carry the load error %q", c.Message, want)
 	}
@@ -345,7 +350,7 @@ func TestUnreadableJournalReportsJournalInvalid(t *testing.T) {
 	if err := r.Get(t.Context(), types.NamespacedName{Name: reservationName(f)}, after); err != nil {
 		t.Fatal(err)
 	}
-	if after.Annotations[journalKey] != res.Annotations[journalKey] || after.ResourceVersion != res.ResourceVersion {
+	if after.Annotations[stateKey] != res.Annotations[stateKey] || after.ResourceVersion != res.ResourceVersion {
 		t.Fatal("unreadable journal was rewritten; evidence must be retained for review")
 	}
 }
@@ -545,7 +550,7 @@ func TestComparisonAllowsOnlyKnownDefaults(t *testing.T) {
 	if matches(want, got) {
 		t.Fatal("nondefault scheduler accepted")
 	}
-	for _, obj := range prerequisites(f, Options{OperatorNamespace: "celld-system"}) {
+	for _, obj := range prerequisites(f, Options{OperatorNamespace: "celld-system", LauncherImage: fixtureLauncher}) {
 		s, ok := obj.(*corev1.Service)
 		if !ok {
 			continue

@@ -18,8 +18,6 @@ import (
 	"github.com/ewhauser/celld-operator/internal/launcher"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -27,6 +25,14 @@ const launcherGate = "celld.eric.dev/exclusive-volume"
 
 // launcherPort is the private launcher listener; tests point it at a local fake.
 var launcherPort = "8083"
+
+// A reconcile/HTTP context may have a shorter deadline than the operation.
+// Preserve the recorded protocol deadline separately from request cancellation.
+type removalDeadlineKey struct{}
+
+func withRemovalDeadline(ctx context.Context, deadline time.Time) context.Context {
+	return context.WithValue(ctx, removalDeadlineKey{}, deadline)
+}
 
 const launcherKeyDigest = "celld.eric.dev/launcher-key-digest"
 
@@ -110,8 +116,8 @@ func (r *Reconciler) callLauncher(ctx context.Context, f *fleet.CelldFleet, pod 
 	}
 	req := launcher.Request{Nonce: launcher.Nonce(), Operation: operation, Generation: generation, NotAfterMS: expires.UnixMilli()}
 	if operation != "" {
-		deadline, ok := ctx.Deadline()
-		if !ok {
+		deadline, ok := ctx.Value(removalDeadlineKey{}).(time.Time)
+		if !ok || deadline.IsZero() {
 			return zero, errors.New("strict launcher stop requires an operation deadline")
 		}
 		req.DeadlineMS = deadline.UnixMilli()
@@ -150,7 +156,7 @@ func (r *Reconciler) callLauncher(ctx context.Context, f *fleet.CelldFleet, pod 
 		Nonce string
 		State launcher.State
 	}{answer.Nonce, answer.State}
-	if answer.Nonce != req.Nonce || !launcher.Verify(key, "response", signed, answer.MAC) || answer.State.PodUID != string(pod.UID) || answer.State.Node != pod.Name || answer.State.Host != pod.Spec.NodeName || answer.State.Invocation == "" || answer.State.Generation == "" {
+	if answer.Nonce != req.Nonce || !launcher.Verify(key, "response", signed, answer.MAC) || answer.State.PodUID != string(pod.UID) || answer.State.Node != runtimeNode(f, pod) || answer.State.Host != pod.Spec.NodeName || answer.State.Invocation == "" || answer.State.Generation == "" {
 		return zero, errors.New("launcher association or authentication failed")
 	}
 	if (generation != "" && answer.State.Generation != generation) || (operation != "" && answer.State.Operation != operation) {
@@ -165,89 +171,4 @@ func healthyHost(node *corev1.Node) bool {
 	return node.UID != "" && node.Status.NodeInfo.BootID != "" && node.DeletionTimestamp.IsZero() && slices.ContainsFunc(node.Status.Conditions, func(c corev1.NodeCondition) bool {
 		return c.Type == corev1.NodeReady && c.Status == corev1.ConditionTrue
 	})
-}
-func (r *Reconciler) schedulePersistent(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, j *lifecycleJournal) error {
-	pods := &corev1.PodList{}
-	if err := r.List(ctx, pods, client.InNamespace(f.Namespace), client.MatchingLabels(labels(f))); err != nil {
-		return err
-	}
-	for i := range pods.Items {
-		pod := &pods.Items[i]
-		if !slices.ContainsFunc(pod.Spec.SchedulingGates, func(g corev1.PodSchedulingGate) bool { return g.Name == launcherGate }) {
-			if pod.Spec.NodeName != "" && len(j.PersistentHistory) > 0 {
-				if err := r.checkVolumeStartup(ctx, f, j, pod); err != nil {
-					return err
-				}
-			}
-			continue
-		}
-		owner := metav1.GetControllerOf(pod)
-		if owner == nil || owner.UID != j.WorkloadUID || owner.Kind != "StatefulSet" || pod.Spec.NodeName != "" || !pod.DeletionTimestamp.IsZero() {
-			return errors.New("gated PersistentFleet pod identity changed")
-		}
-		for index := range j.PersistentHistory {
-			previous := j.PersistentHistory[index]
-			if previous.Node != pod.Name {
-				continue
-			}
-			latest := latestPersistentMember(j.PersistentHistory, pod.Name)
-			if previous.Generation != latest.Generation {
-				continue
-			}
-			survivor := !previous.Retired
-			if previous.Retired && !previous.RestartDenied {
-				return errors.New("previous PersistentFleet invocation lacks completed retirement")
-			}
-			if survivor {
-				// A survivor's pod was recreated without any operation. Its old
-				// invocation is admitted back only on the same host incarnation and
-				// retained volume, where the successor launcher's exclusive lock is
-				// the exclusion authority. Cross-host return stays blocked.
-				if slices.ContainsFunc(pods.Items, func(other corev1.Pod) bool { return string(other.UID) == previous.PodUID }) {
-					return errors.New("previous PersistentFleet invocation still exists")
-				}
-			}
-			retained, err := r.retainedVolumeFor(ctx, f.Namespace, previous.Node)
-			if err != nil {
-				return err
-			}
-			if !retained.sameDisk(previous) {
-				return errors.New("retained volume changed before scheduling reactivation")
-			}
-
-			if previous.DiskID != "" && !r.Options.LocalTest && !survivor {
-				if previous.Zone == "" || !previous.Stopped {
-					return errors.New("retired disk lacks zone or termination authority")
-				}
-				if pod.Spec.NodeSelector == nil {
-					pod.Spec.NodeSelector = map[string]string{}
-				}
-				pod.Spec.NodeSelector[corev1.LabelTopologyZone] = previous.Zone
-			} else {
-				node := &corev1.Node{}
-				if err := r.Get(ctx, types.NamespacedName{Name: previous.Host}, node); err != nil {
-					return err
-				}
-				if !healthyHost(node) || string(node.UID) != previous.HostUID || node.Status.NodeInfo.BootID != previous.BootID || node.Labels[corev1.LabelHostname] != previous.Hostname {
-					return errors.New("legacy retained volume host incarnation unavailable")
-				}
-				if pod.Spec.NodeSelector == nil {
-					pod.Spec.NodeSelector = map[string]string{}
-				}
-				pod.Spec.NodeSelector[corev1.LabelHostname] = previous.Hostname
-			}
-			if survivor && !previous.Superseded {
-				// Durable before the gate opens: a crash between the two replays here.
-				j.PersistentHistory[index].Superseded = true
-				if err := r.saveJournal(ctx, res, j); err != nil {
-					return err
-				}
-			}
-		}
-		pod.Spec.SchedulingGates = slices.DeleteFunc(pod.Spec.SchedulingGates, func(g corev1.PodSchedulingGate) bool { return g.Name == launcherGate })
-		if err := r.Update(ctx, pod); err != nil {
-			return err
-		}
-	}
-	return nil
 }
