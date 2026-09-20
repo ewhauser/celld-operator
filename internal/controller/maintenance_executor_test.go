@@ -588,3 +588,147 @@ func TestOrderedRestartUsesActualTargetForAZSafety(t *testing.T) {
 		t.Fatal("placement admission mutated shared evidence")
 	}
 }
+
+// A blocked pass must not leave a half-built restart inventory behind. Capture is
+// replayed on the next reconcile, and appending there recorded a second copy of
+// every target, which validateMaintenanceJournal then rejects on every load.
+func TestBucketRestartCaptureIsIdempotentAcrossBlockedPasses(t *testing.T) {
+	p, f, j, opts, reader := bucketPreflightSetup(t)
+	p.now = func() time.Time { return reader.now }
+	p.reader = func(context.Context, *fleet.CelldFleet) (v050.Reader, error) {
+		return maintenanceReader{Reader: reader}, nil
+	}
+	f.Spec.Replicas = 3
+	f.Spec.Maintenance = &fleet.MaintenanceSpec{RestartToken: "one"}
+	if err := p.client.Update(t.Context(), f); err != nil {
+		t.Fatal(err)
+	}
+	j.Version = 6
+	j.RuntimeImage = Image
+	j.Initial = 3
+	j.Applied = 3
+	j.Operation = nil
+	j.Maintenance = &maintenanceOperation{ID: "restart", Kind: "Restart", Token: "one", Phase: "Capture", Deadline: reader.now.Add(time.Hour)}
+	w := workload(f, opts).(*appsv1.Deployment)
+	w.UID = j.WorkloadUID
+	res := &fleet.CelldStorageReservation{Name: reservationName(f)}
+	if err := p.client.Create(t.Context(), w); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.client.Create(t.Context(), res); err != nil {
+		t.Fatal(err)
+	}
+	pods := &corev1.PodList{}
+	if err := p.client.List(t.Context(), pods); err != nil {
+		t.Fatal(err)
+	}
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		pod.Status.PodIP = "10.0.0." + strings.TrimPrefix(pod.Name, "pod-")
+		if err := p.client.Status().Update(t.Context(), pod); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The workload copy this pass holds is stale, so the durable authorization CAS
+	// loses and the pass blocks after the target inventory has been captured.
+	stale := &appsv1.Deployment{}
+	if err := p.client.Get(t.Context(), client.ObjectKeyFromObject(w), stale); err != nil {
+		t.Fatal(err)
+	}
+	stale.Labels = map[string]string{"observed": "elsewhere"}
+	if err := p.client.Update(t.Context(), stale); err != nil {
+		t.Fatal(err)
+	}
+	r := &Reconciler{Client: p.client, Evidence: p, Options: opts, now: p.now}
+	step := func() {
+		t.Helper()
+		o := capacity.Observation{At: reader.now, Complete: true}
+		current := &corev1.PodList{}
+		if err := r.List(t.Context(), current); err != nil {
+			t.Fatal(err)
+		}
+		for i := range current.Items {
+			id, _ := podIdentity(&current.Items[i])
+			o.Samples = append(o.Samples, capacity.Sample{Identity: id, Ready: true, CPU: 10, MemoryMiB: 100, RuntimeAt: reader.now, RuntimeReceived: reader.now, MetricsAt: reader.now, MetricsReceived: reader.now, Window: 15 * time.Second})
+		}
+		r.Collector = bucketCapacityCollector{o}
+		if _, _, err := r.executeMaintenance(t.Context(), f, res, j, w); err != nil {
+			t.Fatal(err)
+		}
+	}
+	step()
+	if j.Maintenance == nil || j.Maintenance.Phase != "Capture" {
+		t.Fatalf("expected a blocked capture pass: %+v", j.Maintenance)
+	}
+	first := len(j.Maintenance.Targets)
+	step()
+	assertNoDuplicateRestartTargets(t, j, res, first)
+}
+
+// The same replay hazard on the launcher-managed path, where a blocked assessment
+// returns to Capture with the member inventory already recorded.
+func TestPersistentRestartCaptureIsIdempotentAcrossBlockedPasses(t *testing.T) {
+	p := persistentSetup(t)
+	p.j.Operation = nil
+	p.f.Spec.Replicas = 3
+	p.j.Maintenance = &maintenanceOperation{ID: "restart-pf", Kind: "Restart", Token: "one", Phase: "Capture", Deadline: p.reader.now.Add(time.Hour)}
+	// An unresolved retained generation fails assessPersistent, which runs after capture.
+	p.j.Inventory.Sessions = append(p.j.Inventory.Sessions, RuntimeSession{Node: "persistent-0", Generation: "retired-generation", Container: "container", Epoch: 1})
+	var blocked error
+	step := func() {
+		t.Helper()
+		blocked = nil
+		pods := &corev1.PodList{}
+		if err := p.r.List(t.Context(), pods); err != nil {
+			t.Fatal(err)
+		}
+		o := capacity.Observation{At: p.reader.now, Complete: true}
+		for i := range pods.Items {
+			id, _ := podIdentity(&pods.Items[i])
+			o.Samples = append(o.Samples, capacity.Sample{Identity: id, Ready: true, CPU: 10, MemoryMiB: 100, RuntimeAt: p.reader.now, RuntimeReceived: p.reader.now, MetricsAt: p.reader.now, MetricsReceived: p.reader.now, Window: 15 * time.Second})
+		}
+		p.r.Collector = bucketCapacityCollector{o}
+		// Mirrors the production block closure: the journal is persisted with the phase unchanged.
+		_, _, err := p.r.executePersistentMaintenance(t.Context(), p.f, p.res, p.j, p.w, func(err error) (ctrl.Result, bool, error) {
+			blocked = err
+			return ctrl.Result{}, true, p.r.saveJournal(t.Context(), p.res, p.j)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	step()
+	if blocked == nil || p.j.Maintenance.Phase != "Capture" {
+		t.Fatalf("expected a blocked capture pass: %+v", p.j.Maintenance)
+	}
+	first := len(p.j.Maintenance.Targets)
+	step()
+	assertNoDuplicateRestartTargets(t, p.j, p.res, first)
+}
+
+func assertNoDuplicateRestartTargets(t *testing.T, j *lifecycleJournal, res *fleet.CelldStorageReservation, want int) {
+	t.Helper()
+	if want == 0 {
+		t.Fatal("capture recorded no targets")
+	}
+	if got := len(j.Maintenance.Targets); got != want {
+		t.Fatalf("replayed capture duplicated targets: %d after %d, %+v", got, want, j.Maintenance.Targets)
+	}
+	seen := map[types.UID]bool{}
+	for _, target := range j.Maintenance.Targets {
+		if seen[target.UID] {
+			t.Fatalf("duplicate restart target %s", target.UID)
+		}
+		seen[target.UID] = true
+	}
+	if err := validateMaintenanceJournal(j); err != nil {
+		t.Fatal("replayed capture wedged the journal:", err)
+	}
+	stored, err := readJournal(res)
+	if err != nil {
+		t.Fatal("replayed capture wedged the persisted journal:", err)
+	}
+	if stored == nil || stored.Maintenance == nil || len(stored.Maintenance.Targets) != want {
+		t.Fatalf("persisted journal targets: %+v", stored)
+	}
+}
