@@ -23,7 +23,9 @@ provisioned CSI disks. All runtime/recovery members need the compatible fork.
 The operator creates application and headless Services, NetworkPolicies, a
 PodDisruptionBudget, a launcher Secret and storage reservations. It has no S3
 client or EC2 termination path. You supply buckets, runtime IAM roles, nodes,
-CSI, ingress, TLS and DNS.
+CSI, ingress, TLS and DNS. PersistentFleet advertises stable per-Pod DNS through
+its headless Service, including before readiness, so celld can reach retained
+follower logs after Pod IPs change.
 
 Capacity recommendations and manual requests enter the same
 [current-operation executor](../current-operation/). The reservation records

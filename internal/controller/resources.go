@@ -76,14 +76,20 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 	}
 	mode := "bucket"
 	nodeField := "metadata.uid"
+	advertise := "$(POD_IP):8081"
 	if s.Profile == "PersistentFleet" {
 		mode = "fleet"
 		nodeField = "metadata.name"
+		// Predecessor recovery consults the previous lease's peer address before
+		// publishing a new lease. Stable ordinal DNS reaches retained follower
+		// disks even when replacement Pods receive different IPs. The peers
+		// Service publishes addresses before readiness for this recovery path.
+		advertise = "$(CELLD_NODE)." + f.Name + "-peers." + f.Namespace + ".svc:8081"
 	}
 	env := []corev1.EnvVar{
 		{Name: "POD_IP", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "status.podIP"}}},
 		{Name: "CELLD_NODE", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: nodeField}}},
-		{Name: "CELLD_ADVERTISE", Value: "$(POD_IP):8081"},
+		{Name: "CELLD_ADVERTISE", Value: advertise},
 		{Name: "CELLD_BUCKET", Value: "s3://" + s.Storage.Bucket},
 		{Name: "AWS_REGION", Value: s.Storage.Region},
 		{Name: "CELLD_DURABILITY", Value: mode},

@@ -35,6 +35,13 @@ before terminating celld. The controller now uses the
 journal archives and old release adapters have no active reconciliation path.
 An explicitly qualified fork digest is still required for rollout.
 
+PersistentFleet advertises each stable StatefulSet Pod DNS name through the
+headless peer Service, which publishes addresses before readiness. celld consults
+the predecessor lease address while recovering retained follower logs, before it
+can publish a new lease. Advertising an ephemeral Pod IP makes those old peer
+addresses unreachable after replacement and can cause celld to declare bounded
+loss despite retained disks. Bucket uses a fresh runtime identity and Pod address.
+
 ## Strict schema alignment
 
 The adapter follows the implemented `State::snapshot` in
