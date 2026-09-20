@@ -320,17 +320,17 @@ func (r *Reconciler) executePersistentShutdown(ctx context.Context, f *fleet.Cel
 		if _, err := r.shutdownInventory(ctx, f, j, m.Persistent, true); err != nil {
 			return block(err)
 		}
-		if replicas(w) != 0 {
+		admit := func() *transition {
 			if replicas(w) != j.Applied || w.GetAnnotations()[maintenanceFenceKey] != "deleting" {
-				return block(errors.New("shutdown workload authority changed"))
+				return asTransition(block(errors.New("shutdown workload authority changed")))
 			}
-			setReplicas(w, 0)
-			w.GetAnnotations()[operationKey] = m.ID
-			if err := r.Update(ctx, w); err != nil {
-				return ctrl.Result{}, true, err
-			}
-		} else if w.GetAnnotations()[operationKey] != m.ID {
-			return block(errors.New("missing shutdown replica authority"))
+			return nil
+		}
+		unauthorized := func() *transition {
+			return asTransition(block(errors.New("missing shutdown replica authority")))
+		}
+		if t := r.scaleToZero(ctx, w, m.ID, admit, unauthorized); t != nil {
+			return t.unwrap()
 		}
 		m.Phase = "Recovering"
 		return save()

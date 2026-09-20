@@ -82,6 +82,32 @@ func awaitSettling(settledAt *time.Time, observedAt time.Time, save, wait func()
 // window: no progress is recorded, the pass is simply repeated.
 func requeueSoon() (ctrl.Result, bool, error) { return ctrl.Result{RequeueAfter: time.Second}, true, nil }
 
+// scaleToZero is the replica CAS that removes all compute for an operation and
+// stamps the workload with the exact operation that issued it. admit runs only
+// while the workload still carries replicas and states the phase's own
+// preconditions; the transition it returns denies the CAS and is handed back
+// unchanged. A workload already at zero must carry this operation's annotation,
+// or unauthorized is returned: a foreign or absent stamp means some other
+// issuer removed the replicas and this operation has no authority over them.
+// A nil return means the caller may proceed to its next phase.
+func (r *Reconciler) scaleToZero(ctx context.Context, w client.Object, id string, admit, unauthorized func() *transition) *transition {
+	if replicas(w) != 0 {
+		if denied := admit(); denied != nil {
+			return denied
+		}
+		setReplicas(w, 0)
+		w.GetAnnotations()[operationKey] = id
+		if err := r.Update(ctx, w); err != nil {
+			return asTransition(ctrl.Result{}, true, err)
+		}
+		return nil
+	}
+	if w.GetAnnotations()[operationKey] != id {
+		return unauthorized()
+	}
+	return nil
+}
+
 func (r *Reconciler) beginMaintenance(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, j *lifecycleJournal, w client.Object) (ctrl.Result, bool, error) {
 	if w.GetUID() != j.WorkloadUID {
 		return ctrl.Result{}, true, errors.New("maintenance workload changed")
@@ -328,17 +354,17 @@ func (r *Reconciler) executeBucketDeletion(ctx context.Context, f *fleet.CelldFl
 		m.Phase = "Authorized"
 		return save()
 	case "Authorized":
-		if replicas(w) != 0 {
+		admit := func() *transition {
 			if replicas(w) != j.Applied || w.GetAnnotations()[maintenanceFenceKey] != "deleting" {
-				return block(errors.New("deletion workload fence unavailable"))
+				return asTransition(block(errors.New("deletion workload fence unavailable")))
 			}
-			setReplicas(w, 0)
-			w.GetAnnotations()[operationKey] = m.ID
-			if err := r.Update(ctx, w); err != nil {
-				return ctrl.Result{}, true, err
-			}
-		} else if w.GetAnnotations()[operationKey] != m.ID {
-			return block(errors.New("zero replicas lacks deletion authority"))
+			return nil
+		}
+		unauthorized := func() *transition {
+			return asTransition(block(errors.New("zero replicas lacks deletion authority")))
+		}
+		if t := r.scaleToZero(ctx, w, m.ID, admit, unauthorized); t != nil {
+			return t.unwrap()
 		}
 		m.Phase = "Recovering"
 		return save()

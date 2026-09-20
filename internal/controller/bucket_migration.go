@@ -197,25 +197,25 @@ func (r *Reconciler) migrateBucket(ctx context.Context, f *fleet.CelldFleet, res
 		if w.Annotations[maintenanceFenceKey] != "migrating" {
 			return block(errors.New("migration workload fence missing"))
 		}
-		if replicas(w) != 0 {
+		admit := func() *transition {
 			// Re-capture immediately before removing all membership. Unknown writers
 			// created in a concurrent ReplicaSet loop remain blocked by recovery inventory.
 			sessions, _, err := r.migrationBucketAssessment(ctx, old, j)
 			if err != nil {
-				return r.migrationFailure(ctx, f, res, j, w, err)
+				return asTransition(r.migrationFailure(ctx, f, res, j, w, err))
 			}
 			if len(sessions) != len(j.BucketHistory) || !slices.EqualFunc(sessions, j.BucketHistory, func(a, b bucketSession) bool {
 				return slices.Contains(j.BucketHistory, a) && slices.Contains(sessions, b)
 			}) {
-				return block(errors.New("membership changed after migration capture"))
+				return asTransition(block(errors.New("membership changed after migration capture")))
 			}
-			setReplicas(w, 0)
-			w.Annotations[operationKey] = m.ID
-			if err := r.Update(ctx, w); err != nil {
-				return ctrl.Result{}, true, err
-			}
-		} else if w.Annotations[operationKey] != m.ID {
-			return block(errors.New("zero replicas lacks exact migration authority"))
+			return nil
+		}
+		unauthorized := func() *transition {
+			return asTransition(block(errors.New("zero replicas lacks exact migration authority")))
+		}
+		if t := r.scaleToZero(ctx, w, m.ID, admit, unauthorized); t != nil {
+			return t.unwrap()
 		}
 		m.Phase = "Recovering"
 		return save()
