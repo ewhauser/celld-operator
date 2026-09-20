@@ -62,7 +62,12 @@ func setup(t *testing.T, objects ...client.Object) *Reconciler {
 		VolumeBindingMode: ptr.To(storagev1.VolumeBindingWaitForFirstConsumer),
 	})
 	return &Reconciler{
-		Client:                fake.NewClientBuilder().WithScheme(s).WithStatusSubresource(&fleet.CelldFleet{}, &appsv1.Deployment{}, &appsv1.StatefulSet{}).WithObjects(objects...).Build(),
+		// The production client is direct, so the API server serves the
+		// spec.nodeName field selector natively; the fake client only honors
+		// selectors backed by a registered index.
+		Client: fake.NewClientBuilder().WithScheme(s).WithStatusSubresource(&fleet.CelldFleet{}, &appsv1.Deployment{}, &appsv1.StatefulSet{}).WithIndex(&corev1.Pod{}, "spec.nodeName", func(obj client.Object) []string {
+			return []string{obj.(*corev1.Pod).Spec.NodeName}
+		}).WithObjects(objects...).Build(),
 		Options:               Options{OperatorNamespace: "celld-system"},
 		NetworkPolicyEnforced: true,
 	}

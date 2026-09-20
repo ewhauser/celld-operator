@@ -31,6 +31,14 @@ rules:
   - apiGroups: ['']
     resources: [persistentvolumes]
     verbs: [get]
+  # EC2 fencing terminates a whole instance, so before it does the operator must
+  # prove the node hosts nothing but the admitted target Pod and kube-system
+  # DaemonSets. That check spans every namespace, so it cannot be granted by the
+  # per-namespace Role; list is the only verb it needs, and the request is
+  # always narrowed server-side by spec.nodeName.
+  - apiGroups: ['']
+    resources: [pods]
+    verbs: [list]
   - apiGroups: ['']
     resources: [nodes]
     verbs: [get, patch]

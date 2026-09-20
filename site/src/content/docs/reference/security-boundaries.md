@@ -16,6 +16,7 @@ The ClusterRole is deliberately small. Everything the operator does inside a fle
 | Cluster | `celldstoragereservations` | get, create, update |
 | Cluster | `persistentvolumes`, `storageclasses` | get |
 | Cluster | `nodes` | get, patch |
+| Cluster | `pods` | list |
 | Cluster | `volumeattachments` | list |
 | Operator namespace | `leases` | get, list, watch, create, update, patch |
 | Operator namespace | `events` | create, patch |
@@ -26,7 +27,9 @@ The ClusterRole is deliberately small. Everything the operator does inside a fle
 | Each fleet namespace | `replicasets`, `metrics.k8s.io` `pods` | get |
 | Each fleet namespace | `events.k8s.io` `events` | create, patch |
 
-Notable absences: no cluster-wide delete, no Secret list, watch or delete, no PVC delete, no PV write, and no permission on the runtime's ServiceAccount tokens. Runtime service accounts receive no Kubernetes API token at all. The chart and the manifests are kept in parity by `make chart-check`. Source: [operations](../../contracts/operations/), [PersistentFleet lifecycle](../../contracts/persistent-fleet-lifecycle/).
+The single cluster-wide Pod grant is read-only and exists for EC2 fencing: before terminating an instance the operator must prove the node hosts nothing but the admitted target Pod and `kube-system` DaemonSets, and that check crosses namespaces. Every Pod write remains namespaced.
+
+Notable absences: no cluster-wide delete, no cluster-wide Pod write, no Secret list, watch or delete, no PVC delete, no PV write, and no permission on the runtime's ServiceAccount tokens. Runtime service accounts receive no Kubernetes API token at all. The chart and the manifests are kept in parity by `make chart-check`. Source: [operations](../../contracts/operations/), [PersistentFleet lifecycle](../../contracts/persistent-fleet-lifecycle/).
 
 ## Network paths
 
