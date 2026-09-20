@@ -20,15 +20,14 @@ import (
 // to the observed target node. It is storage handoff evidence, never evidence
 // that an old process died. That authority must already exist in the journal.
 func (r *Reconciler) verifyVolumeAttachment(ctx context.Context, f *fleet.CelldFleet, m persistentMember) error {
-	claim := &corev1.PersistentVolumeClaim{}
-	if err := r.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: "data-" + m.Node}, claim); err != nil {
-		return err
-	}
-	uid, handle, err := r.persistentVolumeIdentity(ctx, claim)
+	retained, err := r.retainedVolumeFor(ctx, f.Namespace, m.Node)
 	if err != nil {
 		return err
 	}
-	if string(claim.UID) != m.ClaimUID || uid != m.VolumeUID || handle != m.VolumeHandle || !slices.Equal(claim.Spec.AccessModes, []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOncePod}) {
+	claim := retained.Claim
+	// Handoff additionally demands ReadWriteOncePod; it does not re-check the
+	// journal claim binding or the deletion timestamp.
+	if !retained.sameDisk(m) || !slices.Equal(claim.Spec.AccessModes, []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOncePod}) {
 		return errors.New("RWOP retained disk binding changed")
 	}
 	pv := &corev1.PersistentVolume{}

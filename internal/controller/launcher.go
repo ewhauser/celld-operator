@@ -197,15 +197,11 @@ func (r *Reconciler) schedulePersistent(ctx context.Context, f *fleet.CelldFleet
 					return errors.New("previous PersistentFleet invocation still exists")
 				}
 			}
-			claim := &corev1.PersistentVolumeClaim{}
-			if err := r.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: "data-" + previous.Node}, claim); err != nil {
-				return err
-			}
-			volumeUID, volumeHandle, err := r.persistentVolumeIdentity(ctx, claim)
+			retained, err := r.retainedVolumeFor(ctx, f.Namespace, previous.Node)
 			if err != nil {
 				return err
 			}
-			if string(claim.UID) != previous.ClaimUID || volumeUID != previous.VolumeUID || volumeHandle != previous.VolumeHandle {
+			if !retained.sameDisk(previous) {
 				return errors.New("retained volume changed before scheduling reactivation")
 			}
 

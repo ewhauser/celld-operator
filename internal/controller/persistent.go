@@ -144,15 +144,11 @@ func (r *Reconciler) persistentMembers(ctx context.Context, f *fleet.CelldFleet,
 			ix := slices.IndexFunc(j.Operation.PersistentMembers, func(m persistentMember) bool { return m.Node == pod.Name && m.PodUID == string(pod.UID) })
 			if ix >= 0 && certifiedInfrastructureFence(j, j.Operation.PersistentMembers[ix]) {
 				member := j.Operation.PersistentMembers[ix]
-				claim := &corev1.PersistentVolumeClaim{}
-				if err := r.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: "data-" + member.Node}, claim); err != nil {
-					return nil, err
-				}
-				uid, handle, err := r.persistentVolumeIdentity(ctx, claim)
+				retained, err := r.retainedVolumeFor(ctx, f.Namespace, member.Node)
 				if err != nil {
 					return nil, err
 				}
-				if string(claim.UID) != member.ClaimUID || uid != member.VolumeUID || handle != member.VolumeHandle {
+				if !retained.sameDisk(member) {
 					return nil, errors.New("fenced writer retained disk changed")
 				}
 				member.Stopped = true
@@ -801,6 +797,37 @@ func validatePersistentJournal(j *lifecycleJournal) error {
 		}
 	}
 	return nil
+}
+
+// retainedVolume is the identity triple of a node's retained data claim and the
+// bound volume behind it. It carries no policy: every caller applies its own
+// extra predicates (access mode, journal claim binding, deletion timestamp)
+// explicitly, because those requirements genuinely differ per call site.
+type retainedVolume struct {
+	Claim                             *corev1.PersistentVolumeClaim
+	ClaimUID, VolumeUID, VolumeHandle string
+}
+
+// sameDisk reports whether the live claim and volume still carry the exact
+// identity captured in m. It is the common core of the four revalidation sites;
+// it is not on its own sufficient authority for any of them.
+func (v retainedVolume) sameDisk(m persistentMember) bool {
+	return v.ClaimUID == m.ClaimUID && v.VolumeUID == m.VolumeUID && v.VolumeHandle == m.VolumeHandle
+}
+
+// retainedVolumeFor fetches the `data-<node>` claim and resolves its bound
+// volume identity. Errors from either step are returned unwrapped so callers
+// keep reporting exactly what they reported before.
+func (r *Reconciler) retainedVolumeFor(ctx context.Context, namespace, node string) (retainedVolume, error) {
+	claim := &corev1.PersistentVolumeClaim{}
+	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: "data-" + node}, claim); err != nil {
+		return retainedVolume{}, err
+	}
+	uid, handle, err := r.persistentVolumeIdentity(ctx, claim)
+	if err != nil {
+		return retainedVolume{}, err
+	}
+	return retainedVolume{Claim: claim, ClaimUID: string(claim.UID), VolumeUID: uid, VolumeHandle: handle}, nil
 }
 
 func (r *Reconciler) persistentVolumeIdentity(ctx context.Context, claim *corev1.PersistentVolumeClaim) (string, string, error) {
