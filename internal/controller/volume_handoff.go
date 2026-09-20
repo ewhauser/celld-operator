@@ -115,6 +115,18 @@ func (r *Reconciler) authorizeVolumeHandoff(ctx context.Context, f *fleet.CelldF
 	if pod.Status.PodIP == "" {
 		return nil
 	}
+	// A launcher in WaitingForHandoff has not started the celld child yet, and the
+	// readiness probe is served by that child (:8080 /.well-known/celld/health),
+	// never by the launcher's own :8083 endpoint. So a waiting pod can never be
+	// Ready, and skipping the probe for Ready pods cannot miss one: a pod that is
+	// waiting is still probed on this very reconcile, with no added delay. The
+	// reverse transition is closed too: WaitingForHandoff is only ever entered
+	// before the first child spawn of a launcher process, so reaching it again
+	// demands a new launcher process, which is a container restart, which the
+	// RestartCount check above already refuses to authorize.
+	if podReady(pod) {
+		return nil
+	}
 	state, err := r.callLauncher(ctx, f, pod, "", "")
 	if err != nil {
 		return err

@@ -1,13 +1,18 @@
 package controller
 
 import (
+	"context"
+	"fmt"
+	"strings"
 	"testing"
 
+	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	"github.com/ewhauser/celld-operator/internal/launcher"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 func TestEBSHandoffRequiresUniqueHealthyRWOPAttachment(t *testing.T) {
@@ -194,5 +199,87 @@ func TestPersistentStopRequiresAuthenticatedRestartDenial(t *testing.T) {
 		if m.Node == "persistent-2" && !m.RestartDenied {
 			t.Fatal("authenticated denial was not retained")
 		}
+	}
+}
+
+// A survivor that is Ready cannot be waiting for a handoff, so steady-state
+// reconciles must not spend a launcher round trip (and the reservation read its
+// key lookup performs) on it; a survivor that is not Ready is still probed.
+func TestHandoffProbeSkipsReadySurvivors(t *testing.T) {
+	for _, which := range []string{"ready", "not-ready-running", "not-ready-waiting"} {
+		t.Run(which, func(t *testing.T) {
+			p := persistentSetup(t)
+			for i := range 3 {
+				name := fmt.Sprintf("persistent-%d", i)
+				p.j.PersistentHistory = append(p.j.PersistentHistory, persistentMember{
+					Node: name, PodUID: "uid-" + name, Generation: p.reader.generation[name],
+					Host: fmt.Sprintf("host-%d", i), HostUID: fmt.Sprintf("host-%d", i), BootID: "boot", Zone: "us-east-1a",
+				})
+			}
+			if which != "ready" {
+				pods := &corev1.PodList{}
+				if err := p.r.List(t.Context(), pods, client.InNamespace(p.f.Namespace)); err != nil {
+					t.Fatal(err)
+				}
+				for i := range pods.Items {
+					pod := &pods.Items[i]
+					pod.Status.Conditions = nil
+					if err := p.r.Status().Update(t.Context(), pod); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if which == "not-ready-waiting" {
+				for name, s := range p.states {
+					s.Phase = "WaitingForHandoff"
+					p.states[name] = s
+				}
+			}
+			reservationReads := 0
+			p.r.Client = interceptor.NewClient(p.r.Client.(client.WithWatch), interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, o ...client.GetOption) error {
+					if _, ok := obj.(*fleet.CelldStorageReservation); ok {
+						reservationReads++
+					}
+					return c.Get(ctx, key, obj, o...)
+				},
+			})
+			calls := 0
+			inner := p.r.launcherCall
+			p.r.launcherCall = func(ctx context.Context, f *fleet.CelldFleet, pod *corev1.Pod, op, gen string) (launcher.State, error) {
+				calls++
+				// Mirror the reservation read the real launcherKey performs per call.
+				if err := p.r.Get(ctx, client.ObjectKey{Name: reservationName(f)}, &fleet.CelldStorageReservation{}); err != nil {
+					return launcher.State{}, err
+				}
+				return inner(ctx, f, pod, op, gen)
+			}
+			err := p.r.schedulePersistent(t.Context(), p.f, p.res, p.j)
+			switch which {
+			case "ready":
+				if err != nil {
+					t.Fatal(err)
+				}
+				if calls != 0 || reservationReads != 0 {
+					t.Fatalf("idle reconcile probed Ready survivors: %d launcher calls, %d reservation reads", calls, reservationReads)
+				}
+			case "not-ready-running":
+				if err != nil {
+					t.Fatal(err)
+				}
+				if calls != 3 {
+					t.Fatalf("not-Ready survivors probed %d times, want 3", calls)
+				}
+			case "not-ready-waiting":
+				// The probe reached the launcher and the waiting phase was acted on;
+				// this fixture is LocalTest, where cross-host handoff is refused.
+				if err == nil || !strings.Contains(err.Error(), "cross-host handoff requires real EBS CSI") {
+					t.Fatalf("waiting launcher was not probed and authorized: %v", err)
+				}
+				if calls == 0 {
+					t.Fatal("waiting launcher was not probed")
+				}
+			}
+		})
 	}
 }
