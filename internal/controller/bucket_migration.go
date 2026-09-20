@@ -97,47 +97,10 @@ func (r *Reconciler) migrateBucket(ctx context.Context, f *fleet.CelldFleet, res
 		return result, true, err
 	}
 	if m == nil {
-		if paused(f) || !f.DeletionTimestamp.IsZero() || !f.Spec.Maintenance.AllowCoordinatedDowntime || j.Operation != nil || j.Maintenance != nil || j.Request != nil || len(j.Claims) != 0 || (f.Spec.RuntimeImage != "" && f.Spec.RuntimeImage != Image) {
-			return block(errors.New("migration requires explicit coordinated downtime and no concurrent lifecycle request"))
-		}
-		target := &appsv1.StatefulSet{}
-		if err := r.Get(ctx, client.ObjectKeyFromObject(f), target); !apierrors.IsNotFound(err) {
-			if err != nil {
-				return ctrl.Result{}, true, err
-			}
-			return block(errors.New("migration target already exists; refusing adoption"))
-		}
-		j.BucketMigration = &bucketMigration{ID: string(uuid.NewUUID()), Token: f.Spec.Maintenance.OrderedMigrationToken, Phase: "Capture", SourceUID: j.WorkloadUID}
-		return save()
+		return r.beginBucketMigration(ctx, f, j, save, block)
 	}
 	if m.Phase == "Retained" {
-
-		if _, err := r.migrationRetirementEvidence(ctx, old, j); err != nil {
-			return r.migrationFailure(ctx, f, res, j, nil, err)
-		}
-		target := &appsv1.StatefulSet{}
-		if err := r.Get(ctx, client.ObjectKeyFromObject(f), target); err == nil {
-			expected := f.DeepCopy()
-			expected.Spec.RuntimeImage = j.RuntimeImage
-			expected.Spec.Replicas = 0
-			if target.Annotations[migrationKey] != m.ID || !matches(workload(expected, r.Options), target) {
-				return block(errors.New("non-inert target exists before retained deletion"))
-			}
-			uid, rv := target.UID, target.ResourceVersion
-			if err := r.Delete(ctx, target, client.Preconditions{UID: &uid, ResourceVersion: &rv}); err != nil && !apierrors.IsNotFound(err) {
-				return ctrl.Result{}, true, err
-			}
-			return ctrl.Result{RequeueAfter: time.Second}, true, nil
-		} else if !apierrors.IsNotFound(err) {
-			return block(err)
-		}
-		source := &appsv1.Deployment{}
-		if err := r.Get(ctx, client.ObjectKeyFromObject(f), source); !apierrors.IsNotFound(err) {
-			return block(errors.New("source exists or cannot be checked before retained deletion"))
-		}
-		copyJournal := *j
-		copyJournal.Maintenance = &maintenanceOperation{ID: m.ID, Kind: "Delete", Phase: "Cleanup"}
-		return r.completeRetainedDeletion(ctx, f, res, &copyJournal)
+		return r.retainBucketMigration(ctx, f, res, j, m, old, block)
 	}
 	if m.Phase == "Activating" {
 		return r.activateMigratedBucket(ctx, f, res, j)
@@ -164,87 +127,174 @@ func (r *Reconciler) migrateBucket(ctx context.Context, f *fleet.CelldFleet, res
 	if r.Evidence == nil {
 		return block(errors.New("migration requires production Bucket evidence"))
 	}
+	p := &migrationPass{f: f, res: res, j: j, m: m, old: old, w: w, save: save, block: block}
 	switch m.Phase {
 	case "Capture":
-		latest := &fleet.CelldFleet{}
-		if err := r.Get(ctx, client.ObjectKeyFromObject(f), latest); err != nil {
-			return ctrl.Result{}, true, err
-		}
-		if latest.UID != f.UID || latest.Generation != f.Generation || latest.Spec.BucketWorkload != "Ordered" || (latest.DeletionTimestamp.IsZero() && (paused(latest) || latest.Spec.Maintenance == nil || !latest.Spec.Maintenance.AllowCoordinatedDowntime || latest.Spec.Maintenance.OrderedMigrationToken != m.Token)) {
-			return block(errors.New("migration request changed before admission"))
-		}
-		inventory, loss := r.Evidence.Observe(ctx, old, j.Inventory)
-		j.Inventory = inventory
-		if loss != "" {
-			return r.recordLoss(ctx, f, w, res, j, loss)
-		}
-		sessions, _, err := r.migrationBucketAssessment(ctx, old, j)
-		if err != nil {
-			return r.migrationFailure(ctx, f, res, j, w, err)
-		}
-		if w.Annotations == nil {
-			w.Annotations = map[string]string{}
-		}
-		// Workload CAS invalidates all delayed replica issuers before journal admission.
-		w.Annotations[maintenanceFenceKey] = "migrating"
-		if err := r.Update(ctx, w); err != nil {
-			return ctrl.Result{}, true, err
-		}
-		j.BucketHistory = sessions
-		m.Phase = "Authorized"
-		return save()
+		return r.migrateBucketCapture(ctx, p)
 	case "Authorized":
-		if w.Annotations[maintenanceFenceKey] != "migrating" {
-			return block(errors.New("migration workload fence missing"))
-		}
-		admit := func() *transition {
-			// Re-capture immediately before removing all membership. Unknown writers
-			// created in a concurrent ReplicaSet loop remain blocked by recovery inventory.
-			sessions, _, err := r.migrationBucketAssessment(ctx, old, j)
-			if err != nil {
-				return asTransition(r.migrationFailure(ctx, f, res, j, w, err))
-			}
-			if len(sessions) != len(j.BucketHistory) || !slices.EqualFunc(sessions, j.BucketHistory, func(a, b bucketSession) bool {
-				return slices.Contains(j.BucketHistory, a) && slices.Contains(sessions, b)
-			}) {
-				return asTransition(block(errors.New("membership changed after migration capture")))
-			}
-			return nil
-		}
-		unauthorized := func() *transition {
-			return asTransition(block(errors.New("zero replicas lacks exact migration authority")))
-		}
-		if t := r.scaleToZero(ctx, w, m.ID, admit, unauthorized); t != nil {
-			return t.unwrap()
-		}
-		m.Phase = "Recovering"
-		return save()
+		return r.migrateBucketAuthorized(ctx, p)
 	case "Recovering":
-		evidence, err := r.migrationRetirementEvidence(ctx, old, j)
-		if err != nil {
-			return r.migrationFailure(ctx, f, res, j, w, err)
-		}
-		for i := range j.BucketHistory {
-			j.BucketHistory[i].Retired = true
-			j.BucketHistory[i].ExpiryObserved = true
-			j.BucketHistory[i].ExpiryInvalidated = false
-		}
-		if t := awaitSettling(&m.SettledAt, evidence.ObservedAt, save, requeueSoon); t != nil {
-			return t.unwrap()
-		}
-		m.Phase = "DeleteOld"
-		return save()
+		return r.migrateBucketRecovering(ctx, p)
 	case "DeleteOld":
-		if _, err := r.migrationRetirementEvidence(ctx, old, j); err != nil {
-			return r.migrationFailure(ctx, f, res, j, w, err)
+		return r.migrateBucketDeleteOld(ctx, p)
+	}
+	return block(errors.New("unknown migration phase"))
+}
+
+// migrationPass is one reconcile pass over an admitted Bucket migration. old is
+// the source layout the reservation was admitted against, w the source
+// Deployment the pass revalidated, and save/block the two closures a phase ends
+// in.
+type migrationPass struct {
+	f     *fleet.CelldFleet
+	res   *fleet.CelldStorageReservation
+	j     *lifecycleJournal
+	m     *bucketMigration
+	old   *fleet.CelldFleet
+	w     *appsv1.Deployment
+	save  func() (ctrl.Result, bool, error)
+	block func(error) (ctrl.Result, bool, error)
+}
+
+// beginBucketMigration admits the migration itself. Nothing has moved yet: the
+// request must still be an explicit coordinated-downtime request with no
+// concurrent lifecycle work, and no target may already exist to adopt.
+func (r *Reconciler) beginBucketMigration(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal, save func() (ctrl.Result, bool, error), block func(error) (ctrl.Result, bool, error)) (ctrl.Result, bool, error) {
+	if paused(f) || !f.DeletionTimestamp.IsZero() || !f.Spec.Maintenance.AllowCoordinatedDowntime || j.Operation != nil || j.Maintenance != nil || j.Request != nil || len(j.Claims) != 0 || (f.Spec.RuntimeImage != "" && f.Spec.RuntimeImage != Image) {
+		return block(errors.New("migration requires explicit coordinated downtime and no concurrent lifecycle request"))
+	}
+	target := &appsv1.StatefulSet{}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(f), target); !apierrors.IsNotFound(err) {
+		if err != nil {
+			return ctrl.Result{}, true, err
 		}
-		uid, rv := w.UID, w.ResourceVersion
-		if err := r.Delete(ctx, w, client.Preconditions{UID: &uid, ResourceVersion: &rv}, client.PropagationPolicy(metav1.DeletePropagationForeground)); err != nil && !apierrors.IsNotFound(err) {
+		return block(errors.New("migration target already exists; refusing adoption"))
+	}
+	j.BucketMigration = &bucketMigration{ID: string(uuid.NewUUID()), Token: f.Spec.Maintenance.OrderedMigrationToken, Phase: "Capture", SourceUID: j.WorkloadUID}
+	return save()
+}
+
+// retainBucketMigration finishes a migration whose fleet was deleted while it
+// ran. Every workload must be gone and the retirement evidence fresh before
+// the reservation, journal and data are retained without any owner.
+func (r *Reconciler) retainBucketMigration(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, j *lifecycleJournal, m *bucketMigration, old *fleet.CelldFleet, block func(error) (ctrl.Result, bool, error)) (ctrl.Result, bool, error) {
+
+	if _, err := r.migrationRetirementEvidence(ctx, old, j); err != nil {
+		return r.migrationFailure(ctx, f, res, j, nil, err)
+	}
+	target := &appsv1.StatefulSet{}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(f), target); err == nil {
+		expected := f.DeepCopy()
+		expected.Spec.RuntimeImage = j.RuntimeImage
+		expected.Spec.Replicas = 0
+		if target.Annotations[migrationKey] != m.ID || !matches(workload(expected, r.Options), target) {
+			return block(errors.New("non-inert target exists before retained deletion"))
+		}
+		uid, rv := target.UID, target.ResourceVersion
+		if err := r.Delete(ctx, target, client.Preconditions{UID: &uid, ResourceVersion: &rv}); err != nil && !apierrors.IsNotFound(err) {
 			return ctrl.Result{}, true, err
 		}
 		return ctrl.Result{RequeueAfter: time.Second}, true, nil
+	} else if !apierrors.IsNotFound(err) {
+		return block(err)
 	}
-	return block(errors.New("unknown migration phase"))
+	source := &appsv1.Deployment{}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(f), source); !apierrors.IsNotFound(err) {
+		return block(errors.New("source exists or cannot be checked before retained deletion"))
+	}
+	copyJournal := *j
+	copyJournal.Maintenance = &maintenanceOperation{ID: m.ID, Kind: "Delete", Phase: "Cleanup"}
+	return r.completeRetainedDeletion(ctx, f, res, &copyJournal)
+}
+
+func (r *Reconciler) migrateBucketCapture(ctx context.Context, p *migrationPass) (ctrl.Result, bool, error) {
+	f, res, j, m, old, w, save, block := p.f, p.res, p.j, p.m, p.old, p.w, p.save, p.block
+	latest := &fleet.CelldFleet{}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(f), latest); err != nil {
+		return ctrl.Result{}, true, err
+	}
+	if latest.UID != f.UID || latest.Generation != f.Generation || latest.Spec.BucketWorkload != "Ordered" || (latest.DeletionTimestamp.IsZero() && (paused(latest) || latest.Spec.Maintenance == nil || !latest.Spec.Maintenance.AllowCoordinatedDowntime || latest.Spec.Maintenance.OrderedMigrationToken != m.Token)) {
+		return block(errors.New("migration request changed before admission"))
+	}
+	inventory, loss := r.Evidence.Observe(ctx, old, j.Inventory)
+	j.Inventory = inventory
+	if loss != "" {
+		return r.recordLoss(ctx, f, w, res, j, loss)
+	}
+	sessions, _, err := r.migrationBucketAssessment(ctx, old, j)
+	if err != nil {
+		return r.migrationFailure(ctx, f, res, j, w, err)
+	}
+	if w.Annotations == nil {
+		w.Annotations = map[string]string{}
+	}
+	// Workload CAS invalidates all delayed replica issuers before journal admission.
+	w.Annotations[maintenanceFenceKey] = "migrating"
+	if err := r.Update(ctx, w); err != nil {
+		return ctrl.Result{}, true, err
+	}
+	j.BucketHistory = sessions
+	m.Phase = "Authorized"
+	return save()
+}
+
+func (r *Reconciler) migrateBucketAuthorized(ctx context.Context, p *migrationPass) (ctrl.Result, bool, error) {
+	f, res, j, m, old, w, save, block := p.f, p.res, p.j, p.m, p.old, p.w, p.save, p.block
+	if w.Annotations[maintenanceFenceKey] != "migrating" {
+		return block(errors.New("migration workload fence missing"))
+	}
+	admit := func() *transition {
+		// Re-capture immediately before removing all membership. Unknown writers
+		// created in a concurrent ReplicaSet loop remain blocked by recovery inventory.
+		sessions, _, err := r.migrationBucketAssessment(ctx, old, j)
+		if err != nil {
+			return asTransition(r.migrationFailure(ctx, f, res, j, w, err))
+		}
+		if len(sessions) != len(j.BucketHistory) || !slices.EqualFunc(sessions, j.BucketHistory, func(a, b bucketSession) bool {
+			return slices.Contains(j.BucketHistory, a) && slices.Contains(sessions, b)
+		}) {
+			return asTransition(block(errors.New("membership changed after migration capture")))
+		}
+		return nil
+	}
+	unauthorized := func() *transition {
+		return asTransition(block(errors.New("zero replicas lacks exact migration authority")))
+	}
+	if t := r.scaleToZero(ctx, w, m.ID, admit, unauthorized); t != nil {
+		return t.unwrap()
+	}
+	m.Phase = "Recovering"
+	return save()
+}
+
+func (r *Reconciler) migrateBucketRecovering(ctx context.Context, p *migrationPass) (ctrl.Result, bool, error) {
+	f, res, j, m, old, w, save := p.f, p.res, p.j, p.m, p.old, p.w, p.save
+	evidence, err := r.migrationRetirementEvidence(ctx, old, j)
+	if err != nil {
+		return r.migrationFailure(ctx, f, res, j, w, err)
+	}
+	for i := range j.BucketHistory {
+		j.BucketHistory[i].Retired = true
+		j.BucketHistory[i].ExpiryObserved = true
+		j.BucketHistory[i].ExpiryInvalidated = false
+	}
+	if t := awaitSettling(&m.SettledAt, evidence.ObservedAt, save, requeueSoon); t != nil {
+		return t.unwrap()
+	}
+	m.Phase = "DeleteOld"
+	return save()
+}
+
+func (r *Reconciler) migrateBucketDeleteOld(ctx context.Context, p *migrationPass) (ctrl.Result, bool, error) {
+	f, res, j, old, w := p.f, p.res, p.j, p.old, p.w
+	if _, err := r.migrationRetirementEvidence(ctx, old, j); err != nil {
+		return r.migrationFailure(ctx, f, res, j, w, err)
+	}
+	uid, rv := w.UID, w.ResourceVersion
+	if err := r.Delete(ctx, w, client.Preconditions{UID: &uid, ResourceVersion: &rv}, client.PropagationPolicy(metav1.DeletePropagationForeground)); err != nil && !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, true, err
+	}
+	return ctrl.Result{RequeueAfter: time.Second}, true, nil
 }
 
 func (r *Reconciler) createMigratedBucket(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, j *lifecycleJournal) (ctrl.Result, bool, error) {
