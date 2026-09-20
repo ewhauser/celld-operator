@@ -95,8 +95,18 @@ func TestRequestedStopWaitsForInheritedLockRelease(t *testing.T) {
 	c := config(t)
 	// A descendant keeps FD3 for three seconds after the child exits; the old
 	// fixed two-second window would have blocked forever instead of certifying.
-	c.Command = []string{"/bin/sh", "-c", "trap 'exit 0' TERM; (sleep 3) & while :; do sleep 1; done"}
+	// Real file descriptors avoid os/exec copy goroutines delaying Wait until
+	// descendants close stdout/stderr, hiding the inherited-lock branch.
+	out, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = out.Close() })
+	c.Stdout, c.Stderr = out, out
+	ready := filepath.Join(c.Root, "ready")
+	c.Command = []string{"/bin/sh", "-c", `trap 'exit 0' TERM; (sleep 3) & touch "$1"; while :; do sleep 1; done`, "child", ready}
 	startSupervisor(t, c)
+	awaitChildReady(t, ready)
 	running := awaitPhase(t, c.Address, c.Key, "Running")
 	if _, err := query(t, c.Address, c.Key, "retire", running.Generation); err != nil {
 		t.Fatal(err)
@@ -113,7 +123,7 @@ func TestRequestedStopWaitsForInheritedLockRelease(t *testing.T) {
 		}
 		if st.Phase == "Stopped" {
 			if !sawWait {
-				t.Log("lock released before the wait was observed; certification still correct")
+				t.Fatal("never exercised ReleasingInheritedLock")
 			}
 			if st.Operation != "retire" || !st.RestartDenied {
 				t.Fatalf("incomplete certificate %+v", st)
@@ -186,9 +196,11 @@ func TestStopGraceEscalatesToKillOnSchedule(t *testing.T) {
 	}
 	c := config(t)
 	// The child ignores SIGTERM; only the configured escalation ends it.
-	c.Command = []string{"/bin/sh", "-c", "trap '' TERM; while :; do sleep 1; done"}
+	ready := filepath.Join(c.Root, "ready")
+	c.Command = []string{"/bin/sh", "-c", `trap '' TERM; touch "$1"; while :; do sleep 1; done`, "child", ready}
 	c.StopGrace = 2 * time.Second
 	startSupervisor(t, c)
+	awaitChildReady(t, ready)
 	running := awaitPhase(t, c.Address, c.Key, "Running")
 	started := time.Now()
 	if _, err := query(t, c.Address, c.Key, "retire", running.Generation); err != nil {
@@ -209,4 +221,45 @@ func TestStopGraceEscalatesToKillOnSchedule(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatal("child ignoring SIGTERM was never killed")
+}
+
+func TestChildExitWithoutRequestRetainsLockAndRejectsAdoption(t *testing.T) {
+	c := config(t)
+	// File-controlled exit ensures the test observes Running before the child exits.
+	exitFile := filepath.Join(c.Root, "exit")
+	c.Command = []string{"/bin/sh", "-c", `while [ ! -f "$1" ]; do sleep 0.05; done; exit 7`, "child", exitFile}
+	cancel := startSupervisor(t, c)
+	running := awaitPhase(t, c.Address, c.Key, "Running")
+	if err := os.WriteFile(exitFile, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st := awaitPhase(t, c.Address, c.Key, "ExitedUnrequested")
+	if st.Operation != "" || st.RestartDenied || st.Generation != running.Generation || !strings.Contains(st.Error, "exit status 7") {
+		t.Fatalf("unsolicited exit certified or lost identity: %+v", st)
+	}
+	if _, err := query(t, c.Address, c.Key, "late", running.Generation); err == nil {
+		t.Fatal("late operation adopted exit")
+	}
+	replacement := c
+	replacement.Address = testAddress(t)
+	startSupervisor(t, replacement)
+	awaitPhase(t, replacement.Address, c.Key, "WaitingForExclusiveVolume")
+	// Releasing the failed supervisor is the only way its successor can launch.
+	cancel()
+	next := awaitPhase(t, replacement.Address, c.Key, "ExitedUnrequested")
+	if next.Generation == running.Generation {
+		t.Fatal("successor reused failed invocation")
+	}
+}
+
+func awaitChildReady(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("child did not install its signal handler")
 }

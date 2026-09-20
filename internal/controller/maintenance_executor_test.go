@@ -449,6 +449,9 @@ func TestBucketRetainDataShutdownIgnoresSurvivorCapacity(t *testing.T) {
 		collect func(now time.Time, pods *corev1.PodList) capacityCollector
 	}{
 		{name: "NoMetricsServer", collect: func(time.Time, *corev1.PodList) capacityCollector { return nil }},
+		{name: "NoMetricsSamples", collect: func(now time.Time, _ *corev1.PodList) capacityCollector {
+			return bucketCapacityCollector{capacity.Observation{At: now, Complete: false}}
+		}},
 		{name: "BusyFleet", collect: func(now time.Time, pods *corev1.PodList) capacityCollector {
 			o := capacity.Observation{At: now, Complete: true}
 			for i := range pods.Items {
@@ -819,6 +822,11 @@ func TestBucketRestartCaptureIsIdempotentAcrossBlockedPasses(t *testing.T) {
 		t.Fatalf("expected a blocked capture pass: %+v", j.Maintenance)
 	}
 	first := len(j.Maintenance.Targets)
+	var err error
+	j, err = readJournal(res)
+	if err != nil {
+		t.Fatal("blocked capture could not reload:", err)
+	}
 	step()
 	assertNoDuplicateRestartTargets(t, j, res, first)
 }
@@ -860,6 +868,11 @@ func TestPersistentRestartCaptureIsIdempotentAcrossBlockedPasses(t *testing.T) {
 		t.Fatalf("expected a blocked capture pass: %+v", p.j.Maintenance)
 	}
 	first := len(p.j.Maintenance.Targets)
+	var err error
+	p.j, err = readJournal(p.res)
+	if err != nil {
+		t.Fatal("blocked capture could not reload:", err)
+	}
 	step()
 	assertNoDuplicateRestartTargets(t, p.j, p.res, first)
 }

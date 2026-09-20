@@ -16,9 +16,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
@@ -158,4 +161,128 @@ func grantedByClusterRole(role *rbacv1.ClusterRole, group, resource, verb string
 
 func rbacMatches(values []string, want string) bool {
 	return slices.Contains(values, want) || slices.Contains(values, "*")
+}
+
+// Audit actual client calls, including subresources and request namespace. Keep
+// fixture mutations outside this wrapper: they model users and kubelet, whose
+// permissions are deliberately broader than the operator's.
+type manifestClient struct {
+	client.Client
+	t                  *testing.T
+	cluster, namespace []rbacv1.PolicyRule
+	seen               map[string]bool
+}
+
+func auditManifestClient(t *testing.T, c client.Client) *manifestClient {
+	t.Helper()
+	data, err := os.ReadFile("../../config/rbac/fleet-namespace.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var role rbacv1.Role
+	if err := utilyaml.NewYAMLOrJSONDecoder(bytes.NewReader(data), 4096).Decode(&role); err != nil {
+		t.Fatal(err)
+	}
+	if role.Kind != "Role" {
+		t.Fatal("namespace manifest has no Role")
+	}
+	return &manifestClient{Client: c, t: t, cluster: clusterRole(t).Rules, namespace: role.Rules, seen: map[string]bool{}}
+}
+
+func (c *manifestClient) check(obj runtime.Object, namespace, verb, subresource string) {
+	c.t.Helper()
+	gvk, err := apiutil.GVKForObject(obj, c.Scheme())
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	gvk.Kind = strings.TrimSuffix(gvk.Kind, "List")
+	resource, _ := meta.UnsafeGuessKindToResource(gvk)
+	name := resource.Resource
+	if subresource != "" {
+		name += "/" + subresource
+	}
+	c.seen[gvk.Group+"/"+name+"/"+verb+"/"+namespace] = true
+	rules := append([]rbacv1.PolicyRule{}, c.cluster...)
+	if namespace != "" {
+		rules = append(rules, c.namespace...)
+	}
+	if !grantedByClusterRole(&rbacv1.ClusterRole{Rules: rules}, gvk.Group, name, verb) {
+		c.t.Errorf("issued API call missing from shipped RBAC: %s %s/%s namespace=%q", verb, gvk.Group, name, namespace)
+	}
+}
+func (c *manifestClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	c.check(obj, key.Namespace, "get", "")
+	return c.Client.Get(ctx, key, obj, opts...)
+}
+func (c *manifestClient) List(ctx context.Context, obj client.ObjectList, opts ...client.ListOption) error {
+	o := (&client.ListOptions{}).ApplyOptions(opts)
+	c.check(obj, o.Namespace, "list", "")
+	return c.Client.List(ctx, obj, opts...)
+}
+func (c *manifestClient) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
+	c.check(obj, obj.GetNamespace(), "create", "")
+	return c.Client.Create(ctx, obj, opts...)
+}
+func (c *manifestClient) Update(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error {
+	c.check(obj, obj.GetNamespace(), "update", "")
+	return c.Client.Update(ctx, obj, opts...)
+}
+func (c *manifestClient) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+	c.check(obj, obj.GetNamespace(), "patch", "")
+	return c.Client.Patch(ctx, obj, patch, opts...)
+}
+func (c *manifestClient) Delete(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
+	c.check(obj, obj.GetNamespace(), "delete", "")
+	return c.Client.Delete(ctx, obj, opts...)
+}
+func (c *manifestClient) DeleteAllOf(ctx context.Context, obj client.Object, opts ...client.DeleteAllOfOption) error {
+	o := (&client.DeleteAllOfOptions{}).ApplyOptions(opts)
+	c.check(obj, o.Namespace, "deletecollection", "")
+	return c.Client.DeleteAllOf(ctx, obj, opts...)
+}
+func (c *manifestClient) Status() client.SubResourceWriter { return c.SubResource("status") }
+func (c *manifestClient) SubResource(name string) client.SubResourceClient {
+	return &manifestSubresource{SubResourceClient: c.Client.SubResource(name), parent: c, name: name}
+}
+
+type manifestSubresource struct {
+	client.SubResourceClient
+	parent *manifestClient
+	name   string
+}
+
+func (c *manifestSubresource) Get(ctx context.Context, obj, sub client.Object, opts ...client.SubResourceGetOption) error {
+	c.parent.check(obj, obj.GetNamespace(), "get", c.name)
+	return c.SubResourceClient.Get(ctx, obj, sub, opts...)
+}
+func (c *manifestSubresource) Create(ctx context.Context, obj, sub client.Object, opts ...client.SubResourceCreateOption) error {
+	c.parent.check(obj, obj.GetNamespace(), "create", c.name)
+	return c.SubResourceClient.Create(ctx, obj, sub, opts...)
+}
+func (c *manifestSubresource) Update(ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+	c.parent.check(obj, obj.GetNamespace(), "update", c.name)
+	return c.SubResourceClient.Update(ctx, obj, opts...)
+}
+func (c *manifestSubresource) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+	c.parent.check(obj, obj.GetNamespace(), "patch", c.name)
+	return c.SubResourceClient.Patch(ctx, obj, patch, opts...)
+}
+
+func TestManifestsAuthorizeIssuedFencingCalls(t *testing.T) {
+	p, m, api := infrastructureSetup(t)
+	audited := auditManifestClient(t, p.r.Client)
+	p.r.Client = audited
+	for range 3 {
+		if _, err := p.r.ensureInfrastructureFence(t.Context(), p.f, p.res, p.j, m, "removal"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(api.terminations) != 1 {
+		t.Fatal("fencing effect not exercised")
+	}
+	for _, key := range []string{"/pods/list/", "/nodes/patch/", "celld.eric.dev/celldstoragereservations/update/"} {
+		if !audited.seen[key] {
+			t.Errorf("required API path not exercised: %s", key)
+		}
+	}
 }
