@@ -3,7 +3,6 @@ package v050
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 )
 
@@ -21,28 +20,14 @@ func (a *Adapter) Inventory(ctx context.Context, r Reader, now func() time.Time)
 	started := now()
 	out := Inventory{}
 	budget := 1000
-	keys, err := list(ctx, r, "nodes/", &budget)
+	// Records read before a failure are kept: see readNodes.
+	nodes, err := a.readNodes(ctx, r, &budget, -1, nil)
+	out.Nodes = nodes
 	if err != nil {
 		return out, err
 	}
-	for _, key := range keys {
-		data, err := r.Get(ctx, key)
-		if err != nil {
-			return out, err
-		}
-		n, err := a.ParseNode(key, data)
-		if err != nil {
-			return out, err
-		}
-		out.Nodes = append(out.Nodes, n)
-	}
-	_, err = listEach(ctx, r, "log/", &budget, func(key string) error {
-		if strings.HasSuffix(key, ".loss.json") {
-			out.Loss = key
-			return &LossError{Key: key}
-		}
-		return nil
-	})
+	_, loss, err := scanLog(ctx, r, &budget)
+	out.Loss = loss
 	if err != nil {
 		return out, err
 	}

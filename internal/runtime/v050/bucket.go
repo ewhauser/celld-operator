@@ -3,7 +3,6 @@ package v050
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 )
 
@@ -19,7 +18,7 @@ type BucketObservation struct {
 // Unknown writers, unresolved historical sessions, and ANY peer-log object make
 // this case inapplicable, even when an object is sealed or not a loss declaration.
 func (a *Adapter) InspectBucket(ctx context.Context, r Reader, req Request, now func() time.Time) (BucketObservation, error) {
-	if req.OperationID == "" || !req.InventoryComplete || len(req.Sessions) == 0 || req.PageBudget <= 0 || !fresh(req.CapturedAt, now(), req.MaxAge) {
+	if req.incomplete(now) {
 		return BucketObservation{}, errors.New("incomplete Bucket preflight")
 	}
 	ctx, cancel := context.WithTimeout(ctx, req.MaxAge)
@@ -32,39 +31,24 @@ func (a *Adapter) InspectBucket(ctx context.Context, r Reader, req Request, now 
 		expected[s.Node] = s.Generation
 	}
 	budget := req.PageBudget
-	keys, err := list(ctx, r, "nodes/", &budget)
+	nodes, err := a.readNodes(ctx, r, &budget, len(expected), errors.New("bucket writer inventory changed or missing"))
 	if err != nil {
 		return BucketObservation{}, err
 	}
-	if len(keys) != len(expected) {
-		return BucketObservation{}, errors.New("bucket writer inventory changed or missing")
-	}
-	for _, key := range keys {
-		data, err := r.Get(ctx, key)
-		if err != nil {
-			return BucketObservation{}, err
-		}
-		n, err := a.ParseNode(key, data)
-		if err != nil {
-			return BucketObservation{}, err
-		}
+	for _, n := range nodes {
 		if expected[n.Name] != n.Generation || n.Epoch != 0 || n.LogState != "" {
 			return BucketObservation{}, errors.New("bucket generation changed or peer-log session present")
 		}
-		if now().UnixMilli() < 0 || n.ExpiresMS <= uint64(now().UnixMilli()) || !fresh(time.UnixMilli(n.SampledMS), now(), req.MaxAge) {
+		// One clock read per writer: the sign check, the lease comparison and the
+		// sample freshness test must all judge the same instant.
+		at := now()
+		if at.UnixMilli() < 0 || n.ExpiresMS <= uint64(at.UnixMilli()) || !fresh(time.UnixMilli(n.SampledMS), at, req.MaxAge) {
 			return BucketObservation{}, errors.New("bucket writer observation expired")
 		}
 	}
-	// Complete the scan even after an ordinary log name, so a later loss remains
+	// scanLog completes even after an ordinary log name, so a later loss remains
 	// distinguishable and can acquire the controller's durable loss fence.
-	hasLog := false
-	_, err = listEach(ctx, r, "log/", &budget, func(key string) error {
-		hasLog = true
-		if strings.HasSuffix(key, ".loss.json") {
-			return &LossError{Key: key}
-		}
-		return nil
-	})
+	hasLog, _, err := scanLog(ctx, r, &budget)
 	if err != nil {
 		return BucketObservation{}, err
 	}
@@ -155,20 +139,12 @@ func (a *Adapter) InspectBucketMembership(ctx context.Context, r Reader, members
 		return BucketObservation{}, errors.New("empty bucket membership")
 	}
 	budget := 1000
-	keys, err := list(ctx, r, "nodes/", &budget)
+	nodes, err := a.readNodes(ctx, r, &budget, -1, nil)
 	if err != nil {
 		return BucketObservation{}, err
 	}
 	seen := map[string]bool{}
-	for _, key := range keys {
-		body, err := r.Get(ctx, key)
-		if err != nil {
-			return BucketObservation{}, err
-		}
-		node, err := a.ParseNode(key, body)
-		if err != nil {
-			return BucketObservation{}, err
-		}
+	for _, node := range nodes {
 		seen[node.Name] = true
 		s, ok := expected[node.Name]
 		if ok && node.Generation != s.Generation {
@@ -177,14 +153,17 @@ func (a *Adapter) InspectBucketMembership(ctx context.Context, r Reader, members
 		if !ok || node.Epoch != 0 || node.LogState != "" {
 			return BucketObservation{}, errors.New("unknown bucket generation or peer recovery obligation")
 		}
-		if now().UnixMilli() < 0 {
+		// One clock read per record: liveness and sample freshness must not be
+		// judged against two different instants.
+		at := now()
+		if at.UnixMilli() < 0 {
 			return BucketObservation{}, errors.New("invalid observation clock")
 		}
-		live := node.ExpiresMS > uint64(now().UnixMilli())
+		live := node.ExpiresMS > uint64(at.UnixMilli())
 		if s.Retired && live {
 			return BucketObservation{}, &BucketExpiryInvalidatedError{Node: node.Name, Generation: node.Generation, Reason: "retired bucket process still has a live lease"}
 		}
-		if !s.Retired && (!live || !fresh(time.UnixMilli(node.SampledMS), now(), 5*time.Second)) {
+		if !s.Retired && (!live || !fresh(time.UnixMilli(node.SampledMS), at, 5*time.Second)) {
 			return BucketObservation{}, errors.New("current bucket lease or sample unavailable")
 		}
 	}
@@ -193,14 +172,7 @@ func (a *Adapter) InspectBucketMembership(ctx context.Context, r Reader, members
 			return BucketObservation{}, errors.New("unresolved bucket writer record missing")
 		}
 	}
-	hasLog := false
-	_, err = listEach(ctx, r, "log/", &budget, func(key string) error {
-		hasLog = true
-		if strings.HasSuffix(key, ".loss.json") {
-			return &LossError{Key: key}
-		}
-		return nil
-	})
+	hasLog, _, err := scanLog(ctx, r, &budget)
 	if err != nil {
 		return BucketObservation{}, err
 	}

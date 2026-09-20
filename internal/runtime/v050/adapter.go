@@ -264,6 +264,15 @@ type Request struct {
 	MaxAge            time.Duration
 	PageBudget        int
 }
+
+// incomplete fails closed on a request that cannot support any assessment: no
+// operation, unreconstructed history, no sessions, no listing budget, or a
+// capture that is already stale. now is taken as a func so the clock is read
+// only when the cheaper field checks have all passed, as before.
+func (req Request) incomplete(now func() time.Time) bool {
+	return req.OperationID == "" || !req.InventoryComplete || len(req.Sessions) == 0 || req.PageBudget <= 0 || !fresh(req.CapturedAt, now(), req.MaxAge)
+}
+
 type Evidence struct {
 	OperationID string
 	Completed   []Session
@@ -285,7 +294,7 @@ func (a *Adapter) Inspect(ctx context.Context, r Reader, req Request, now func()
 
 func (a *Adapter) assess(ctx context.Context, r Reader, req Request, now func() time.Time, requireStopped bool) (Evidence, error) {
 	var result Evidence
-	if req.OperationID == "" || !req.InventoryComplete || len(req.Sessions) == 0 || req.PageBudget <= 0 || !fresh(req.CapturedAt, now(), req.MaxAge) {
+	if req.incomplete(now) {
 		return Evidence{}, errors.New("incomplete lifecycle evidence")
 	}
 	ctx, cancel := context.WithTimeout(ctx, req.MaxAge)
@@ -301,34 +310,32 @@ func (a *Adapter) assess(ctx context.Context, r Reader, req Request, now func() 
 		expected[s.Node] = s
 	}
 	budget := req.PageBudget
-	keys, err := list(ctx, r, "nodes/", &budget)
+	nodes, err := a.readNodes(ctx, r, &budget, len(expected), errors.New("inventory changed or missing nodes"))
 	if err != nil {
 		return Evidence{}, err
 	}
-	if len(keys) != len(expected) {
-		return Evidence{}, errors.New("inventory changed or missing nodes")
-	}
-	for _, key := range keys {
-		data, err := r.Get(ctx, key)
-		if err != nil {
-			return Evidence{}, err
-		}
-		n, err := a.ParseNode(key, data)
-		if err != nil {
-			return Evidence{}, err
-		}
+	for _, n := range nodes {
 		s, ok := expected[n.Name]
 		if !ok || s.Generation != n.Generation {
 			return Evidence{}, errors.New("unknown node or generation replacement")
 		}
+		// Deliberately ahead of the Stopped split: a rewound or missing epoch
+		// disqualifies a live session too, so this must not move inside the
+		// stopped branch below. That branch therefore needs no epoch check of
+		// its own; n.Epoch >= s.Epoch already holds for every node past here.
 		if n.Epoch < s.Epoch {
 			return Evidence{}, errors.New("recovery epoch rewound or log missing")
 		}
-		if !s.Stopped && (now().UnixMilli() < 0 || n.ExpiresMS <= uint64(now().UnixMilli())) {
-			return Evidence{}, errors.New("unresolved unavailable session")
+		// One clock read decides both halves of the lease test: two reads let the
+		// sign check and the expiry comparison disagree about "now".
+		if !s.Stopped {
+			at := now().UnixMilli()
+			if at < 0 || n.ExpiresMS <= uint64(at) {
+				return Evidence{}, errors.New("unresolved unavailable session")
+			}
 		}
 		if s.Stopped {
-			if n.LogState != "sealed" || n.Epoch < s.Epoch {
+			if n.LogState != "sealed" {
 				return Evidence{}, errors.New("session recovery unresolved")
 			}
 			result.Completed = append(result.Completed, s)
@@ -338,13 +345,7 @@ func (a *Adapter) assess(ctx context.Context, r Reader, req Request, now func() 
 		return Evidence{}, errors.New("no stopped session")
 	}
 	// Ordering is intentional: completion reads precede the full historical scan.
-	_, err = listEach(ctx, r, "log/", &budget, func(key string) error {
-		if strings.HasSuffix(key, ".loss.json") {
-			return &LossError{Key: key}
-		}
-		return nil
-	})
-	if err != nil {
+	if _, _, err := scanLog(ctx, r, &budget); err != nil {
 		return Evidence{}, err
 	}
 	result.ObservedAt = now()
@@ -407,6 +408,57 @@ func listEach(ctx context.Context, r Reader, prefix string, budget *int, visit f
 		seenTokens[page.Next] = true
 		token = page.Next
 	}
+}
+
+// readNodes lists nodes/ and parses every record it names. The listing spends
+// the caller's shared page budget. When want is non-negative the listing size is
+// compared against it and mismatch is returned before any body is read, so an
+// inventory that changed under us costs no object reads; pass -1 and a nil
+// mismatch to accept whatever the fleet currently publishes.
+//
+// On failure the records parsed before the error are still returned: they are
+// negative observations that Inventory callers retain. They are NEVER positive
+// evidence, so every caller that assesses completion discards them.
+func (a *Adapter) readNodes(ctx context.Context, r Reader, budget *int, want int, mismatch error) ([]Node, error) {
+	var nodes []Node
+	keys, err := list(ctx, r, "nodes/", budget)
+	if err != nil {
+		return nodes, err
+	}
+	if want >= 0 && len(keys) != want {
+		return nodes, mismatch
+	}
+	for _, key := range keys {
+		data, err := r.Get(ctx, key)
+		if err != nil {
+			return nodes, err
+		}
+		n, err := a.ParseNode(key, data)
+		if err != nil {
+			return nodes, err
+		}
+		nodes = append(nodes, n)
+	}
+	return nodes, nil
+}
+
+// scanLog walks the complete log/ listing. It reports whether ANY peer-log
+// object exists and fails closed on the first loss declaration; the loss key is
+// returned alongside the error so partial results can retain the observation.
+// The scan is deliberately not short-circuited on an ordinary log name, so a
+// later loss stays distinguishable from a bucket with no peer-log history.
+func scanLog(ctx context.Context, r Reader, budget *int) (bool, string, error) {
+	var hasLog bool
+	var loss string
+	_, err := listEach(ctx, r, "log/", budget, func(key string) error {
+		hasLog = true
+		if strings.HasSuffix(key, ".loss.json") {
+			loss = key
+			return &LossError{Key: key}
+		}
+		return nil
+	})
+	return hasLog, loss, err
 }
 
 // LossError is sticky lifecycle evidence, even if the object later disappears.
