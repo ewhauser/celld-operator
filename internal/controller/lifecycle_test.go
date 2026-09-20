@@ -525,3 +525,103 @@ func TestLifecycleSlowMembershipCheckExpiresPreflight(t *testing.T) {
 		t.Fatal("expired evidence authorized removal")
 	}
 }
+
+// reservationWrites counts reservation Updates, which is the etcd write rate a
+// steady-state reconcile costs: saveJournal is the only writer of that object
+// once provisioning has recorded its creation attempt.
+func reservationWrites(t *testing.T, r *Reconciler) *int {
+	t.Helper()
+	writes := 0
+	base, ok := r.Client.(client.WithWatch)
+	if !ok {
+		t.Fatal("test client cannot be intercepted")
+	}
+	r.Client = interceptor.NewClient(base, interceptor.Funcs{Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+		if _, ok := obj.(*fleet.CelldStorageReservation); ok {
+			writes++
+		}
+		return c.Update(ctx, obj, opts...)
+	}})
+	return &writes
+}
+
+func TestSteadyEvidenceObservationSkipsUnchangedJournalWrites(t *testing.T) {
+	r, f := lifecycleSetup(t, "PersistentFleet")
+	now := time.Unix(1_700_000_000, 0).UTC()
+	r.now = func() time.Time { return now }
+	source := &inventoryReader{node: "alpha-0", gen: "generation", epoch: 1, now: now}
+	r.Evidence = &ProductionEvidence{client: r.Client, now: r.now, reader: func(context.Context, *fleet.CelldFleet) (v050.Reader, error) { return source, nil }}
+	advance := func(d time.Duration) {
+		now = now.Add(d)
+		source.now = now
+	}
+	writes := reservationWrites(t, r)
+	// The first observation records a new session and must be durable.
+	reconcile(t, r, f)
+	if *writes != 1 {
+		t.Fatalf("first observation wrote %d times", *writes)
+	}
+	checked := getJournal(t, r, f).Inventory.CheckedAt
+	if checked.IsZero() {
+		t.Fatal("inventory not journaled")
+	}
+	// An idle pass moves only LastSeen and CheckedAt: nothing decided, no write.
+	advance(6 * time.Second)
+	reconcile(t, r, f)
+	advance(6 * time.Second)
+	reconcile(t, r, f)
+	if *writes != 1 {
+		t.Fatalf("idle reconciles wrote the reservation %d times", *writes)
+	}
+	if !getJournal(t, r, f).Inventory.CheckedAt.Equal(checked) {
+		t.Fatal("a skipped observation still changed the durable journal")
+	}
+	// A new session is evidence, not a timestamp: it must survive a crash.
+	advance(6 * time.Second)
+	source.gen = "successor"
+	reconcile(t, r, f)
+	if *writes != 2 {
+		t.Fatalf("new session wrote %d times", *writes)
+	}
+	if len(getJournal(t, r, f).Inventory.Sessions) != 2 {
+		t.Fatal("new session not journaled")
+	}
+	advance(6 * time.Second)
+	reconcile(t, r, f)
+	if *writes != 2 {
+		t.Fatalf("idle reconcile after a new session wrote %d times", *writes)
+	}
+	// status.lifecycle.evidenceCheckedAt is projected from the durable journal,
+	// so the heartbeat keeps the reported observation age honest.
+	advance(evidenceHeartbeat)
+	reconcile(t, r, f)
+	if *writes != 3 {
+		t.Fatalf("heartbeat wrote %d times", *writes)
+	}
+	if !getJournal(t, r, f).Inventory.CheckedAt.Equal(now) {
+		t.Fatal("heartbeat did not refresh the durable observation")
+	}
+}
+
+func TestPendingOperationPersistsEveryObservation(t *testing.T) {
+	r, f := lifecycleSetup(t, "PersistentFleet")
+	now := time.Unix(1_700_000_000, 0).UTC()
+	r.now = func() time.Time { return now }
+	source := &inventoryReader{node: "alpha-0", gen: "generation", epoch: 1, now: now}
+	r.Evidence = &ProductionEvidence{client: r.Client, now: r.now, reader: func(context.Context, *fleet.CelldFleet) (v050.Reader, error) { return source, nil }}
+	reconcile(t, r, f)
+	f = desiredCount(t, r, f, 2)
+	reconcile(t, r, f)
+	if op := getJournal(t, r, f).Operation; op == nil || op.Phase != "Blocked" {
+		t.Fatalf("no operation in flight: %+v", getJournal(t, r, f).Operation)
+	}
+	writes := reservationWrites(t, r)
+	for pass := range 2 {
+		now = now.Add(6 * time.Second)
+		source.now = now
+		reconcile(t, r, f)
+		if *writes <= pass {
+			t.Fatalf("observation under a recorded operation was not persisted on pass %d", pass)
+		}
+	}
+}

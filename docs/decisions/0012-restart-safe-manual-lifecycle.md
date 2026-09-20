@@ -104,6 +104,24 @@ regardless of the new desired count. Uncertain recovery blocks all further
 contraction. Additive requests during recovery are conservatively queued rather
 than reusing a removed persistent identity before its recovery is established.
 
+Amendment (20 September 2026): steady-state evidence observation persists on
+change or on a one-minute heartbeat, not on every poll. The observer runs on
+every reconcile of every fleet, and an idle healthy fleet moves only the
+per-session `FirstSeen`/`LastSeen` stamps and the inventory `CheckedAt`, so the
+unconditional write was roughly ten reservation writes per minute per fleet that
+decided nothing. A write is skipped only when the whole journal, with those
+timestamps normalized away, is unchanged, no operation, maintenance, migration
+or disruption request is recorded, the fleet is not deleting, and the durable
+observation is younger than the heartbeat. Evidence still precedes effect: every
+transition writes the whole journal including the inventory, and the five-second
+freshness bounds on `Inventory.CheckedAt` compare the in-memory observation with
+the clock inside the same reconcile, so a skipped write is one no decision
+followed. After a crash the loaded journal carries the older `CheckedAt`, which
+fails those bounds and forces a fresh observation before any action, which is the
+order this ADR already requires. The heartbeat keeps the
+`status.lifecycle.evidenceCheckedAt` projection, which is read back from the
+reservation, honest about the age of the last durable observation.
+
 ## Limits
 
 The serialization claim covers cooperating controllers and the Kubernetes API's
