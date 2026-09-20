@@ -64,6 +64,24 @@ class CollectorTest(unittest.TestCase):
             self.assertIn(('rm', '-f', 'test-container'), calls)
             self.assertIn(('network', 'rm', run.name), calls)
 
+    def capture_node(self, response):
+        with tempfile.TemporaryDirectory() as directory:
+            run = Run(pathlib.Path(directory))
+            run.s3 = Mock()
+            run.s3.get_paginator.return_value.paginate.side_effect = [
+                [{'IsTruncated': False, 'Contents': [{'Key': 'nodes/a.json'}]}], [{'IsTruncated': False}]]
+            run.s3.get_object.return_value = response
+            return run.metadata('test')
+
+    def test_records_the_etag_of_the_captured_body(self):
+        result = self.capture_node({'Body': io.BytesIO(b'{"node":"a"}'), 'ETag': '"abc"'})
+        self.assertEqual(result['node_etags'], {'nodes/a.json': '"abc"'})
+
+    def test_absent_etag_is_not_invented(self):
+        # Replay must re-read a record it cannot prove unchanged.
+        result = self.capture_node({'Body': io.BytesIO(b'{"node":"a"}')})
+        self.assertEqual(result['node_etags'], {})
+
     def test_oversize_node(self):
         with self.assertRaises(RuntimeError):
             self.collect([{'IsTruncated': False, 'Contents': [{'Key': 'nodes/a.json'}]}], [], b' ' * 1048577)

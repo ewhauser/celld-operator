@@ -1,6 +1,7 @@
 package recovery
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -109,6 +110,57 @@ func TestS3ReadOnlyWireAndFaults(t *testing.T) {
 		})
 	}
 }
+
+// The listing must carry each key's ETag and size, and a read must report the
+// ETag of the body it returned: that pair is what lets the adapter skip the
+// GetObject for a record the listing proves is unchanged. Metadata S3 omits
+// stays empty rather than being invented, which re-reads the key.
+func TestListingCarriesETagAndSize(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("list-type") == "2" {
+			_, _ = fmt.Fprint(w, `<ListBucketResult><IsTruncated>false</IsTruncated>`+
+				`<Contents><Key>nodes/a.json</Key><ETag>&quot;d41d8cd98f00b204e9800998ecf8427e&quot;</ETag><Size>41</Size></Contents>`+
+				`<Contents><Key>nodes/b.json</Key></Contents></ListBucketResult>`)
+			return
+		}
+		w.Header().Set("ETag", `"d41d8cd98f00b204e9800998ecf8427e"`)
+		_, _ = fmt.Fprint(w, `{"node":"a","peer_protocol":5}`)
+	}))
+	defer server.Close()
+	api := s3.New(s3.Options{Region: "us-east-1", BaseEndpoint: aws.String(server.URL), UsePathStyle: true, Credentials: credentials.NewStaticCredentialsProvider("test", "test", ""), RetryMaxAttempts: 1})
+	reader := &S3Reader{API: api, Bucket: "bucket"}
+	page, err := reader.List(t.Context(), "nodes/", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Keys) != 2 || len(page.ETags) != 2 || len(page.Sizes) != 2 {
+		t.Fatalf("metadata is not parallel to the keys: %+v", page)
+	}
+	if page.ETags[0] != `"d41d8cd98f00b204e9800998ecf8427e"` || page.Sizes[0] != 41 {
+		t.Fatalf("listed metadata lost: %+v", page)
+	}
+	if page.ETags[1] != "" || page.Sizes[1] != 0 {
+		t.Fatalf("absent metadata invented: %+v", page)
+	}
+	body, etag, err := reader.GetETag(t.Context(), "nodes/a.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if etag != page.ETags[0] {
+		t.Fatalf("read reported ETag %q, listing reported %q", etag, page.ETags[0])
+	}
+	plain, err := reader.Get(t.Context(), "nodes/a.json")
+	if err != nil || !bytes.Equal(plain, body) {
+		t.Fatalf("Get disagrees with GetETag: %q %q %v", plain, body, err)
+	}
+	// The ETag never widens the read scope.
+	if _, _, err := reader.GetETag(t.Context(), "log/a/bundle"); err == nil {
+		t.Fatal("bundle read allowed")
+	}
+}
+
+// The adapter must be able to gate its reads on this reader's listings.
+var _ v050.ETagReader = (*S3Reader)(nil)
 
 // Configuration inspection uses dummy environment credentials and never sends
 // a request. Endpoint environment overrides must not redirect primary evidence.
