@@ -44,8 +44,16 @@ type ProductionEvidence struct {
 }
 
 func NewProductionEvidence(c client.Client) *ProductionEvidence {
-	return &ProductionEvidence{client: c, now: time.Now, reader: func(ctx context.Context, f *fleet.CelldFleet) (v050.Reader, error) {
-		return recovery.AWSReader(ctx, f.Spec.Storage.Bucket, f.Spec.Storage.Region)
+	// The factory runs on every reconcile of every fleet, so building a fresh
+	// client here would re-resolve the operator's IRSA/Pod Identity credentials
+	// and open new TLS connections every few seconds. The cache keeps one
+	// hardened client per region and wraps it per bucket.
+	clients := recovery.NewClientCache()
+	return &ProductionEvidence{client: c, now: time.Now, reader: func(_ context.Context, f *fleet.CelldFleet) (v050.Reader, error) {
+		// The reconcile context is deliberately not passed: a canceled reconcile
+		// must not fail the client that every later reconcile shares. Per-request
+		// timeouts still apply inside S3Reader.Get/List.
+		return clients.Reader(f.Spec.Storage.Bucket, f.Spec.Storage.Region) //nolint:contextcheck // detached on purpose
 	}}
 }
 func (p *ProductionEvidence) pods(ctx context.Context, f *fleet.CelldFleet) ([]corev1.Pod, error) {
