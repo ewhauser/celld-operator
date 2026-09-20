@@ -27,8 +27,8 @@ binary, pass `--operator-image ghcr.io/ewhauser/celld-operator@sha256:...`.
 The lifecycle suite tests both Ordered Bucket and PersistentFleet: namespace and
 network isolation, exact-ordinal removal, pause before issue, repeated growth and
 contraction including 2 to 1, controller restart, fresh PVC/PV/CSI identities,
-automatic contraction using Metrics Server and twelve acknowledged writes per
-fleet. Persistent volumes use ReadWriteOncePod, a Delete/WFFC StorageClass and the
+automatic contraction using Metrics Server and twelve fresh acknowledged writes
+per fleet in each phase. The read oracle retains every prior acknowledged ID. Persistent volumes use ReadWriteOncePod, a Delete/WFFC StorageClass and the
 CSI provisioner's deletion finalizer. The StatefulSet retains claims until the
 operator explicitly deletes them after strict celld completion and process
 exclusion. The harness requires old PV and VolumeAttachment disappearance before

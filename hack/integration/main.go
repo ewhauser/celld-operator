@@ -173,15 +173,16 @@ func (h *harness) diagnostics(recovered any) {
 			{"get", "pv", "-o", "yaml"},
 			{"-n", "fleets", "get", "pvc", "-o", "wide"},
 			{"get", "volumeattachments", "-o", "yaml"},
-			{"-n", "fleets", "logs", "alpha-0", "--all-containers=true", "--tail=80"},
-			{"-n", "fleets", "logs", "beta-0", "--all-containers=true", "--tail=80"},
+			// A coordinated stop can fail on any ordinal. Keep each source in
+			// the output, including previous containers after a launcher crash.
+			{"-n", "fleets", "logs", "-l", "celld.eric.dev/fleet-uid", "--all-containers=true", "--prefix=true", "--ignore-errors=true", "--max-log-requests=10", "--tail=200"},
+			{"-n", "fleets", "logs", "-l", "celld.eric.dev/fleet-uid", "--all-containers=true", "--prefix=true", "--ignore-errors=true", "--max-log-requests=10", "--previous", "--tail=200"},
 		} {
 			out, err := h.try(command{args: h.kubectl(args...), timeout: 5 * time.Minute, background: true})
+			fmt.Println(out)
 			if err != nil {
 				fmt.Println(err)
-				continue
 			}
-			fmt.Println(out)
 		}
 	}
 	if out, err := h.try(command{args: h.kubectl("-n", "celld-system", "logs", "deployment/celld-operator"), timeout: 5 * time.Minute, background: true}); err == nil {
