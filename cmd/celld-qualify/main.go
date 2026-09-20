@@ -34,6 +34,14 @@ func read(path string) (capture, error) {
 	if !c.Complete || c.ObservedMS <= 0 || c.Nodes == nil || c.Keys == nil {
 		return c, errors.New("incomplete capture")
 	}
+	// Listing replays a sorted, duplicate-free key space: the continuation token
+	// is the last key of a page, so ordering is part of the capture's contract.
+	sort.Strings(c.Keys)
+	for i := 1; i < len(c.Keys); i++ {
+		if c.Keys[i] == c.Keys[i-1] {
+			return c, errors.New("duplicate log key in capture")
+		}
+	}
 	return c, nil
 }
 func (c capture) Get(_ context.Context, key string) ([]byte, error) {
@@ -43,9 +51,9 @@ func (c capture) Get(_ context.Context, key string) ([]byte, error) {
 	}
 	return data, nil
 }
-func (c capture) List(_ context.Context, prefix, _ string) (v050.Page, error) {
+func (c capture) List(_ context.Context, prefix, continuation string) (v050.Page, error) {
 	if prefix == "log/" {
-		return v050.Page{Keys: c.Keys, Complete: c.Complete}, nil
+		return page(c.Keys, continuation)
 	}
 	if prefix != "nodes/" {
 		return v050.Page{}, errors.New("unapproved prefix")
@@ -55,8 +63,35 @@ func (c capture) List(_ context.Context, prefix, _ string) (v050.Page, error) {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	return v050.Page{Keys: keys, Complete: c.Complete}, nil
+	return page(keys, continuation)
 }
+
+// pageSize matches the real S3 reader's MaxKeys and the adapter's per-page key
+// budget: a single-page capture of a real fleet is rejected outright.
+const pageSize = 1000
+
+// page slices a sorted, duplicate-free key space the way the S3 reader pages a
+// bucket: at most pageSize keys, a continuation token naming the last key
+// returned (so it never repeats the token just consumed), and a final page that
+// is explicitly complete and carries no token.
+func page(keys []string, continuation string) (v050.Page, error) {
+	start := 0
+	if continuation != "" {
+		start = sort.SearchStrings(keys, continuation)
+		if start == len(keys) || keys[start] != continuation {
+			return v050.Page{}, errors.New("unknown continuation token")
+		}
+		start++
+	}
+	if end := start + pageSize; end < len(keys) {
+		return v050.Page{Keys: keys[start:end:end], Next: keys[end-1]}, nil
+	}
+	return v050.Page{Keys: keys[start:len(keys):len(keys)], Complete: true}, nil
+}
+
+// budget counts the pages a key space of n keys needs, so a large capture is not
+// rejected as an exhausted listing budget.
+func budget(n int) int { return n/pageSize + 1 }
 func run() error {
 	beforePath := flag.String("before", "", "pre-disruption metadata capture")
 	afterPath := flag.String("after", "", "post-stop metadata capture")
@@ -78,9 +113,14 @@ func run() error {
 	}
 	stoppedSet := map[string]bool{}
 	for node := range strings.SplitSeq(*stopped, ",") {
-		stoppedSet[node] = true
+		if node = strings.TrimSpace(node); node != "" {
+			stoppedSet[node] = true
+		}
 	}
-	req := v050.Request{OperationID: "offline-replay", InventoryComplete: before.Complete, CapturedAt: time.UnixMilli(before.ObservedMS), MaxAge: *age, PageBudget: 10}
+	if len(stoppedSet) == 0 {
+		return errors.New("-stopped requires at least one confirmed stopped node ID")
+	}
+	req := v050.Request{OperationID: "offline-replay", InventoryComplete: before.Complete, CapturedAt: time.UnixMilli(before.ObservedMS), MaxAge: *age, PageBudget: budget(len(after.Keys)) + budget(len(after.Nodes))}
 	for key, data := range before.Nodes {
 		node, err := adapter.ParseNode(key, data)
 		if err != nil {
