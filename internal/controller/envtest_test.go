@@ -32,7 +32,7 @@ import (
 // The envtest suite runs the reconciler against a real kube-apiserver and etcd
 // (no kubelet, scheduler or workload controllers). It exists to exercise what the
 // fake client cannot: CRD CEL admission and defaulting, real resourceVersion
-// conflicts on the journal and workload CAS, and merge patches with optimistic
+// conflicts on the reservation and workload CAS, and merge patches with optimistic
 // locking. Tests skip unless KUBEBUILDER_ASSETS points at envtest binaries; use
 // `make test-envtest`.
 var (
@@ -443,7 +443,7 @@ func TestEnvtestBoundedOperationCASAndLostResponse(t *testing.T) {
 	}
 	r = &Reconciler{Client: base, Options: r.Options, NetworkPolicyEnforced: true}
 	reconcile(t, r, f)
-	state := getJournal(t, r, f)
+	state := getCurrentState(t, r, f)
 	if state.Operation == nil || state.Operation.Phase != "Observing" {
 		t.Fatalf("lost response not reconstructed: %+v", state.Operation)
 	}

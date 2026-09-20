@@ -47,7 +47,7 @@ func TestRuntimeLifecycleProfileSeams(t *testing.T) {
 				t.Fatal(status, err)
 			}
 			// Neither profile feeds this observation into existing removal machinery.
-			// The old journal, launcher and recovery proofs remain separate requirements.
+			// Runtime observations do not replace bound launcher and current-operation proof.
 			for _, change := range []string{"foreign fleet", "foreign namespace", "unknown image", "deleted", "not running", "no UID", "service name"} {
 				t.Run(change, func(t *testing.T) {
 					bad := pod.DeepCopy()

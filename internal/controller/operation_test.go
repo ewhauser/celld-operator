@@ -89,7 +89,7 @@ func (x *operationFixture) launcher(ctx context.Context, _ *fleet.CelldFleet, p 
 	}
 	return s, nil
 }
-func (x *operationFixture) state() *fleetState { return getJournal(x.t, x.r, x.f) }
+func (x *operationFixture) state() *fleetState { return getCurrentState(x.t, x.r, x.f) }
 func (x *operationFixture) workload() client.Object {
 	w := emptyObject(workload(x.f, x.r.Options))
 	if err := x.r.Get(x.t.Context(), client.ObjectKeyFromObject(x.f), w); err != nil {

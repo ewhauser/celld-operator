@@ -14,6 +14,14 @@ contraction; Deployment victim selection cannot establish an exact target, so
 Deployment contraction is blocked. Deployment restart/deletion can stop its
 entire bounded current working set before changing replicas.
 
+Shutdown proofs describe the captured invocations. A concurrent ordinary
+Kubernetes replacement can create a new ephemeral Bucket invocation that later
+receives ordinary termination. Bucket mode requires object-store durability
+before acknowledging writes; this is the same crash boundary as an unexpected
+Pod loss. Persistent replacements use the existing PVC and cannot reopen a disk
+with the launcher's permanent retirement marker. Neither case turns a new
+invocation into one covered by an old proof.
+
 ## Durable state
 
 The storage reservation's immutable spec still owns the bucket and fleet UID.

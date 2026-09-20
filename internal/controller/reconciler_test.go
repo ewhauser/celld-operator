@@ -324,10 +324,10 @@ func TestReservationCannotBeReclaimedByNewUID(t *testing.T) {
 	reason(t, reconcile(t, other, replacement), "StorageScopeConflict")
 }
 
-// A journal that cannot be read is reported as unreadable, with the load error,
+// Current operation state that cannot be read is reported as unreadable, with the load error,
 // not as a storage scope conflict: the reservation still binds exactly this
 // fleet, and the reason an operator sees has to name the actual failure.
-func TestUnreadableJournalReportsJournalInvalid(t *testing.T) {
+func TestUnreadableOperationReportsInvalidState(t *testing.T) {
 	r, f := lifecycleSetup(t, "Bucket")
 	res := &fleet.CelldStorageReservation{}
 	if err := r.Get(t.Context(), types.NamespacedName{Name: reservationName(f)}, res); err != nil {
@@ -339,7 +339,7 @@ func TestUnreadableJournalReportsJournalInvalid(t *testing.T) {
 	}
 	_, want := readState(res)
 	if want == nil {
-		t.Fatal("fixture journal is still readable")
+		t.Fatal("fixture operation state is still readable")
 	}
 	got := reconcile(t, r, f)
 	reason(t, got, "OperationInvalid")
@@ -351,7 +351,7 @@ func TestUnreadableJournalReportsJournalInvalid(t *testing.T) {
 		t.Fatal(err)
 	}
 	if after.Annotations[stateKey] != res.Annotations[stateKey] || after.ResourceVersion != res.ResourceVersion {
-		t.Fatal("unreadable journal was rewritten; evidence must be retained for review")
+		t.Fatal("unreadable operation state was rewritten; evidence must be retained for review")
 	}
 }
 

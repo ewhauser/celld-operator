@@ -2,7 +2,6 @@ package controller
 
 import (
 	"testing"
-	"time"
 
 	"github.com/ewhauser/celld-operator/internal/launcher"
 
@@ -11,7 +10,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func getJournal(t *testing.T, r *Reconciler, f *fleet.CelldFleet) *fleetState {
+func getCurrentState(t *testing.T, r *Reconciler, f *fleet.CelldFleet) *fleetState {
 	t.Helper()
 	res := &fleet.CelldStorageReservation{}
 	if err := r.Get(t.Context(), types.NamespacedName{Name: reservationName(f)}, res); err != nil {
@@ -24,9 +23,6 @@ func getJournal(t *testing.T, r *Reconciler, f *fleet.CelldFleet) *fleetState {
 	return j
 }
 
-// recordedEvents drains everything a fake recorder has collected so far. The
-// audit trail that History no longer keeps is emitted as events instead, so
-// tests assert on this rather than on a growing journal field.
 func desiredCount(t *testing.T, r *Reconciler, f *fleet.CelldFleet, n int32) *fleet.CelldFleet {
 	t.Helper()
 	got := &fleet.CelldFleet{}
@@ -50,9 +46,6 @@ func lifecycleSetup(t *testing.T, profile string) (*Reconciler, *fleet.CelldFlee
 	return r, f
 }
 
-// TestCompletionHistoryKeepsOnlyTheLastEntry pins the ADR 0021 phase 1 boundary
-// for History: the journal retains exactly the entry the status projection
-// reads, and the trail that used to grow beside it is emitted as events.
 func TestBootstrapConsumesCreationClaimInventory(t *testing.T) {
 	r, f := lifecycleSetup(t, "PersistentFleet") // create, then bootstrap
 	res := &fleet.CelldStorageReservation{}
@@ -64,15 +57,15 @@ func TestBootstrapConsumesCreationClaimInventory(t *testing.T) {
 	}
 	j, err := readState(res)
 	if err != nil || j == nil || len(j.Claims) != 3 {
-		t.Fatalf("bootstrap did not carry the claim identities into the journal: %v %+v", err, j)
+		t.Fatalf("bootstrap did not carry the claim identities into current state: %v %+v", err, j)
 	}
 	reason(t, reconcile(t, r, f), "Provisioning") // waiting on readiness, not blocked
-	if after := getJournal(t, r, f); after == nil || len(after.Claims) != 3 {
-		t.Fatalf("journal no longer loads without the annotation: %+v", after)
+	if after := getCurrentState(t, r, f); after == nil || len(after.Claims) != 3 {
+		t.Fatalf("current state no longer loads without the annotation: %+v", after)
 	}
 
 	// A crash between PVC creation and bootstrap leaves a workload with neither
-	// a journal nor an inventory to verify it against; that still blocks.
+	// current state nor an inventory to verify it against; that still blocks.
 	other := fixture("beta", "bucket-beta", "PersistentFleet")
 	other.Spec.Placement.AZCount = 1
 	other.Spec.Placement.Zones = []string{"us-east-1a"}
@@ -87,12 +80,10 @@ func TestBootstrapConsumesCreationClaimInventory(t *testing.T) {
 		t.Fatal(err)
 	}
 	reason(t, reconcile(t, x, other), "StorageIdentityConflict")
-	if j := getJournal(t, x, other); j != nil {
+	if j := getCurrentState(t, x, other); j != nil {
 		t.Fatalf("unverified workload was adopted: %+v", j)
 	}
 }
-
-var _ = time.Second
 
 const fixtureRuntime = "ghcr.io/ewhauser/celld@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 const fixtureLauncher = "ghcr.io/ewhauser/celld-operator@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"

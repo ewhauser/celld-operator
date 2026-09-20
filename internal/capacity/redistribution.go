@@ -6,7 +6,7 @@ import (
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 )
 
-// Maps are immutable snapshots replaced on each accepted observation. The journal
+// Maps are immutable snapshots replaced on each accepted observation. The current operation
 // retains both sides of an addition across process/leader restarts.
 type Load struct {
 	CPU, MemoryMiB int64
