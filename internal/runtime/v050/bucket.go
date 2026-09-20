@@ -39,7 +39,10 @@ func (a *Adapter) InspectBucket(ctx context.Context, r Reader, req Request, now 
 		if expected[n.Name] != n.Generation || n.Epoch != 0 || n.LogState != "" {
 			return BucketObservation{}, errors.New("bucket generation changed or peer-log session present")
 		}
-		if now().UnixMilli() < 0 || n.ExpiresMS <= uint64(now().UnixMilli()) || !fresh(time.UnixMilli(n.SampledMS), now(), req.MaxAge) {
+		// One clock read per writer: the sign check, the lease comparison and the
+		// sample freshness test must all judge the same instant.
+		at := now()
+		if at.UnixMilli() < 0 || n.ExpiresMS <= uint64(at.UnixMilli()) || !fresh(time.UnixMilli(n.SampledMS), at, req.MaxAge) {
 			return BucketObservation{}, errors.New("bucket writer observation expired")
 		}
 	}
@@ -150,14 +153,17 @@ func (a *Adapter) InspectBucketMembership(ctx context.Context, r Reader, members
 		if !ok || node.Epoch != 0 || node.LogState != "" {
 			return BucketObservation{}, errors.New("unknown bucket generation or peer recovery obligation")
 		}
-		if now().UnixMilli() < 0 {
+		// One clock read per record: liveness and sample freshness must not be
+		// judged against two different instants.
+		at := now()
+		if at.UnixMilli() < 0 {
 			return BucketObservation{}, errors.New("invalid observation clock")
 		}
-		live := node.ExpiresMS > uint64(now().UnixMilli())
+		live := node.ExpiresMS > uint64(at.UnixMilli())
 		if s.Retired && live {
 			return BucketObservation{}, &BucketExpiryInvalidatedError{Node: node.Name, Generation: node.Generation, Reason: "retired bucket process still has a live lease"}
 		}
-		if !s.Retired && (!live || !fresh(time.UnixMilli(node.SampledMS), now(), 5*time.Second)) {
+		if !s.Retired && (!live || !fresh(time.UnixMilli(node.SampledMS), at, 5*time.Second)) {
 			return BucketObservation{}, errors.New("current bucket lease or sample unavailable")
 		}
 	}

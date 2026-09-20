@@ -326,8 +326,13 @@ func (a *Adapter) assess(ctx context.Context, r Reader, req Request, now func() 
 		if n.Epoch < s.Epoch {
 			return Evidence{}, errors.New("recovery epoch rewound or log missing")
 		}
-		if !s.Stopped && (now().UnixMilli() < 0 || n.ExpiresMS <= uint64(now().UnixMilli())) {
-			return Evidence{}, errors.New("unresolved unavailable session")
+		// One clock read decides both halves of the lease test: two reads let the
+		// sign check and the expiry comparison disagree about "now".
+		if !s.Stopped {
+			at := now().UnixMilli()
+			if at < 0 || n.ExpiresMS <= uint64(at) {
+				return Evidence{}, errors.New("unresolved unavailable session")
+			}
 		}
 		if s.Stopped {
 			if n.LogState != "sealed" {
