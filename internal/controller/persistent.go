@@ -252,15 +252,7 @@ func (r *Reconciler) assessPersistent(ctx context.Context, f *fleet.CelldFleet, 
 			}
 		}
 	}
-	reader, err := r.Evidence.reader(ctx, f)
-	if err != nil {
-		return nil, time.Time{}, err
-	}
-	adapter, err := catalog.New(runtimeImage(evidenceRuntime(f, j)))
-	if err != nil {
-		return nil, time.Time{}, err
-	}
-	inventory, err := adapter.Inventory(ctx, reader, r.capacityNow)
+	inventory, err := r.readInventory(ctx, f, runtimeImage(evidenceRuntime(f, j)))
 	if err != nil {
 		return nil, time.Time{}, err
 	}
@@ -410,7 +402,8 @@ func (r *Reconciler) assessPersistent(ctx context.Context, f *fleet.CelldFleet, 
 			return nil, time.Time{}, errors.New("persistent membership changed during assessment")
 		}
 	}
-	if inventory.ObservedAt.After(r.capacityNow()) || r.capacityNow().Sub(inventory.ObservedAt) > 5*time.Second || observation.At.After(r.capacityNow()) || r.capacityNow().Sub(observation.At) > capacity.Seconds(policy.Spec.Capacity.MaxAgeSeconds) {
+	staleObservation := observation.At.After(r.capacityNow()) || r.capacityNow().Sub(observation.At) > capacity.Seconds(policy.Spec.Capacity.MaxAgeSeconds)
+	if r.staleInventory(inventory) || staleObservation {
 		return nil, time.Time{}, errors.New("persistent assessment expired")
 	}
 	return members, inventory.ObservedAt, nil
@@ -701,15 +694,7 @@ func (r *Reconciler) finishReactivation(ctx context.Context, f *fleet.CelldFleet
 	if err != nil {
 		return fail(err)
 	}
-	reader, err := r.Evidence.reader(ctx, f)
-	if err != nil {
-		return fail(err)
-	}
-	adapter, err := catalog.New(runtimeImage(evidenceRuntime(f, j)))
-	if err != nil {
-		return fail(err)
-	}
-	inventory, err := adapter.Inventory(ctx, reader, r.capacityNow)
+	inventory, err := r.readInventory(ctx, f, runtimeImage(evidenceRuntime(f, j)))
 	if err != nil {
 		return fail(err)
 	}
@@ -754,7 +739,7 @@ func (r *Reconciler) finishReactivation(ctx context.Context, f *fleet.CelldFleet
 			return fail(errors.New("runtime changed while observing reactivation evidence"))
 		}
 	}
-	if inventory.ObservedAt.After(r.capacityNow()) || r.capacityNow().Sub(inventory.ObservedAt) > 5*time.Second {
+	if r.staleInventory(inventory) {
 		return fail(errors.New("reactivation evidence expired"))
 	}
 	for _, m := range members {
@@ -797,6 +782,33 @@ func validatePersistentJournal(j *lifecycleJournal) error {
 		}
 	}
 	return nil
+}
+
+// inventoryFreshness bounds how stale a storage inventory read may be before it
+// stops being positive evidence about the live fleet.
+const inventoryFreshness = 5 * time.Second
+
+// readInventory reads the live storage inventory through the evidence reader
+// using the catalog adapter for image. Callers pass the image explicitly
+// because the runtime they qualify against differs: most sites read through
+// the journal's evidence runtime, coordinated recovery reads through the
+// fleet's own runtime image.
+func (r *Reconciler) readInventory(ctx context.Context, f *fleet.CelldFleet, image string) (v050.Inventory, error) {
+	reader, err := r.Evidence.reader(ctx, f)
+	if err != nil {
+		return v050.Inventory{}, err
+	}
+	adapter, err := catalog.New(image)
+	if err != nil {
+		return v050.Inventory{}, err
+	}
+	return adapter.Inventory(ctx, reader, r.capacityNow)
+}
+
+// staleInventory reports whether an inventory read is from the future or older
+// than inventoryFreshness, either of which disqualifies it as evidence.
+func (r *Reconciler) staleInventory(inventory v050.Inventory) bool {
+	return inventory.ObservedAt.After(r.capacityNow()) || r.capacityNow().Sub(inventory.ObservedAt) > inventoryFreshness
 }
 
 // retainedVolume is the identity triple of a node's retained data claim and the

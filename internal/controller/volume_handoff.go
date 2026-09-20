@@ -5,8 +5,6 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/ewhauser/celld-operator/internal/runtime/catalog"
-
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	"github.com/ewhauser/celld-operator/internal/launcher"
 	v050 "github.com/ewhauser/celld-operator/internal/runtime/v050"
@@ -142,15 +140,7 @@ func (r *Reconciler) authorizeVolumeHandoff(ctx context.Context, f *fleet.CelldF
 	if j.Loss != "" || r.Evidence == nil {
 		return errors.New("loss fence or missing live storage evidence blocks handoff")
 	}
-	reader, err := r.Evidence.reader(ctx, f)
-	if err != nil {
-		return err
-	}
-	adapter, err := catalog.New(runtimeImage(evidenceRuntime(f, j)))
-	if err != nil {
-		return err
-	}
-	inventory, err := adapter.Inventory(ctx, reader, r.capacityNow)
+	inventory, err := r.readInventory(ctx, f, runtimeImage(evidenceRuntime(f, j)))
 	if err != nil {
 		return err
 	}

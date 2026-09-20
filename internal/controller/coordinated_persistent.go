@@ -7,7 +7,6 @@ import (
 	"time"
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
-	"github.com/ewhauser/celld-operator/internal/runtime/catalog"
 	v050 "github.com/ewhauser/celld-operator/internal/runtime/v050"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -138,15 +137,9 @@ func (r *Reconciler) executeCoordinatedPersistent(ctx context.Context, f *fleet.
 		if err != nil {
 			return block(err)
 		}
-		reader, err := r.Evidence.reader(ctx, f)
-		if err != nil {
-			return block(err)
-		}
-		adapter, err := catalog.New(runtimeImage(f))
-		if err != nil {
-			return block(err)
-		}
-		inventory, err := adapter.Inventory(ctx, reader, r.capacityNow)
+		// Coordinated recovery qualifies against the fleet's own runtime image,
+		// not the journal's evidence runtime as the other inventory reads do.
+		inventory, err := r.readInventory(ctx, f, runtimeImage(f))
 		if err != nil {
 			return block(err)
 		}
@@ -195,7 +188,7 @@ func (r *Reconciler) executeCoordinatedPersistent(ctx context.Context, f *fleet.
 				return block(errors.New("coordinated successor changed while collecting evidence"))
 			}
 		}
-		if inventory.ObservedAt.After(r.capacityNow()) || r.capacityNow().Sub(inventory.ObservedAt) > 5*time.Second {
+		if r.staleInventory(inventory) {
 			return block(errors.New("coordinated evidence expired"))
 		}
 		if m.SettledAt.IsZero() {
