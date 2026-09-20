@@ -19,6 +19,13 @@ const HostTag = "celld.eric.dev/node-uid"
 const BootTag = "celld.eric.dev/boot-id"
 const FenceTag = "celld.eric.dev/fencing"
 
+var (
+	regionPattern   = regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-\d+$`)
+	accountPattern  = regexp.MustCompile(`^\d{12}$`)
+	instancePattern = regexp.MustCompile(`^i-[0-9a-f]{17}$`)
+	volumePattern   = regexp.MustCompile(`^vol-[0-9a-f]{17}$`)
+)
+
 // Binding is captured from an authenticated admitted runtime and retained disk.
 // Ownership tags are installed by trusted infrastructure provisioning, not this operator.
 type Binding struct {
@@ -41,7 +48,7 @@ type API interface {
 type Client struct{ api *ec2.Client }
 
 func New(ctx context.Context, region string) (*Client, error) {
-	if !regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-\d+$`).MatchString(region) {
+	if !regionPattern.MatchString(region) {
 		return nil, errors.New("invalid fencing region")
 	}
 	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
@@ -93,7 +100,7 @@ func (c *Client) Terminate(ctx context.Context, id string) error {
 }
 
 func (b Binding) Validate() error {
-	if !regexp.MustCompile(`^\d{12}$`).MatchString(b.Account) || !regexp.MustCompile(`^i-[0-9a-f]{17}$`).MatchString(b.Instance) || !regexp.MustCompile(`^vol-[0-9a-f]{17}$`).MatchString(b.Volume) || b.Region == "" || b.Zone == "" || b.FleetUID == "" || b.HostUID == "" || b.BootID == "" {
+	if !accountPattern.MatchString(b.Account) || !instancePattern.MatchString(b.Instance) || !volumePattern.MatchString(b.Volume) || b.Region == "" || b.Zone == "" || b.FleetUID == "" || b.HostUID == "" || b.BootID == "" {
 		return errors.New("incomplete exact infrastructure fence binding")
 	}
 	return nil
