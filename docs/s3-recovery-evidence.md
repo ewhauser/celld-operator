@@ -62,6 +62,21 @@ Perform metadata assessment around disruptions and recovery, not as a replacemen
 
 AWS references: [consistency](https://aws.amazon.com/s3/consistency/), [data consistency model](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html#ConsistencyModel), [prefix-restricted policies](https://docs.aws.amazon.com/AmazonS3/latest/userguide/amazon-s3-policy-keys.html), [GetObject permissions](https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html).
 
+## ETag-gated inventory reads
+
+20 September 2026, ADR 0021 (lifecycle state tiers) phase 1. Because folded records are retained as sealed tombstones, the `nodes/` listing names every invocation the fleet has ever had, and reading each body cost one `GetObject` per record on every pass, a few seconds apart, forever. `ListObjectsV2` already returns each key's ETag and size, and S3 listing is strongly consistent, so the adapter now reads a body only when the listing cannot prove the content is unchanged since this process last parsed it. A fleet with N live and M historical records costs N+M `GetObject` calls on the first pass after a restart and, in the steady state, only as many as have actually changed. The listing itself costs what it always did. The gate is an optimization; it is never evidence, and it obeys these rules:
+
+- The listing is always read fresh from the primary bucket. A cached listing is never used, and an incomplete, over-budget or internally inconsistent listing fails the pass before any record is reused, so a reused record can never let a partial listing pass as complete. Listing pages still spend the caller's page budget exactly as before.
+- A record is reused only on exact equality of the listed ETag with the ETag of the body this process last parsed for that key, together with the listed size. Any key the listing reports no ETag for is re-read, always.
+- `GetObject` also returns the object's ETag. A body whose ETag differs from the listed one means the object changed between the list and the read: the pass fails closed and the next reconcile starts from a new listing. A body whose length contradicts the size listed against a matching ETag fails the same way.
+- Nothing is remembered unless the read itself confirmed the listed ETag, so a store or replay fixture that cannot report one simply re-reads forever.
+- Parse failures are never remembered. A malformed record must fail again from S3, not from memory.
+- Keys the fresh listing no longer names are evicted, so a record that is collected and later reappears is read again rather than resurrected from memory.
+- The cache is process memory only and bounded; a restart performs one full read, and a fleet whose history exceeds the bound re-reads the overflow. Reconciles are concurrent, so it is mutex-guarded, and each fleet has its own: two fleets read different buckets and must never share one.
+- Loss-declaration detection is unaffected. It works on key names from its own fresh `log/` listing and reads no bodies at all.
+
+SSE-KMS objects carry a non-MD5 ETag, so an ETag is not a content digest for them. It is still a version token that S3 changes on every rewrite of the object, which is the only property equality is relied on for here. No new IAM is required: the ETag and size arrive on the already-granted prefix-restricted `s3:ListBucket`.
+
 ## Required qualification before production
 
 - Normal sequential removal of multiple nodes, proving each matching stopped session completes and the client acknowledged-operation ledger survives.

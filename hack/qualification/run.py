@@ -154,7 +154,7 @@ class Run:
 
     def metadata(self, label):
         # GET only nodes; list log names, never loss bodies or application objects.
-        records, keys = {}, []
+        records, etags, keys = {}, {}, []
         seen = set()
         pages = 0
         for prefix in ('nodes/', 'log/'):
@@ -182,7 +182,8 @@ class Run:
                     seen.add(key)
                     keys.append(key)
                     if prefix == 'nodes/':
-                        body = self.s3.get_object(Bucket='qualification', Key=key)['Body']
+                        response = self.s3.get_object(Bucket='qualification', Key=key)
+                        body = response['Body']
                         try:
                             raw = body.read(1048577)
                             if len(raw) > 1048576:
@@ -190,10 +191,17 @@ class Run:
                             records[key] = json.loads(raw)
                         finally:
                             body.close()
+                        # The ETag of the body actually captured, never the one
+                        # the listing reported: replay must be able to tell that
+                        # the two agree. A store that reports none is omitted and
+                        # the record is re-read on every replayed pass.
+                        if response.get('ETag'):
+                            etags[key] = response['ETag']
             if not complete:
                 raise RuntimeError('listing ended without a final page')
         value = {'observed_unix_ms': int(time.time()*1000), 'complete': True,
-                 'nodes': records, 'log_keys': [k for k in keys if k.startswith('log/')]}
+                 'nodes': records, 'node_etags': etags,
+                 'log_keys': [k for k in keys if k.startswith('log/')]}
         self.save(label + '-metadata', value)
         return value
 

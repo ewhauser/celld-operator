@@ -45,6 +45,79 @@ func (r *inventoryReader) List(_ context.Context, prefix, token string) (v050.Pa
 	}
 	return p, nil
 }
+
+// countingReader reports an ETag with every listing entry and every body, and
+// counts the bodies it served.
+type countingReader struct {
+	inner *inventoryReader
+	etag  string
+	gets  int
+}
+
+func (c *countingReader) Get(ctx context.Context, key string) ([]byte, error) {
+	data, _, err := c.GetETag(ctx, key)
+	return data, err
+}
+func (c *countingReader) GetETag(ctx context.Context, key string) ([]byte, string, error) {
+	c.gets++
+	data, err := c.inner.Get(ctx, key)
+	return data, c.etag, err
+}
+func (c *countingReader) List(ctx context.Context, prefix, token string) (v050.Page, error) {
+	page, err := c.inner.List(ctx, prefix, token)
+	if err != nil || prefix != "nodes/" {
+		return page, err
+	}
+	for range page.Keys {
+		page.ETags = append(page.ETags, c.etag)
+	}
+	return page, nil
+}
+
+// Observe runs every few seconds for every fleet, and the runtime retains folded
+// records forever, so the scan must not read a body whose listed ETag is
+// unchanged. The cache lives on the fleet's adapter, so it has to survive from
+// one reconcile to the next, and two fleets must never share one.
+func TestObserveSkipsUnchangedRecordsAcrossReconciles(t *testing.T) {
+	now := time.Now()
+	f := fixture("alpha", "bucket-alpha", "PersistentFleet")
+	pod := &corev1.Pod{Name: "alpha-0", Namespace: f.Namespace, UID: "pod-uid", Labels: labels(f), Spec: corev1.PodSpec{NodeName: "host", Containers: []corev1.Container{{Name: "celld", Image: Image}}}, Status: corev1.PodStatus{PodIP: "127.0.0.1", ContainerStatuses: []corev1.ContainerStatus{{Name: "celld", ContainerID: "container-1", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: metav1.NewTime(now.Add(-time.Minute))}}}}}}
+	r := setup(t, f, pod)
+	source := &countingReader{inner: &inventoryReader{node: runtimeNode(f, pod), gen: "generation-1", epoch: 1, now: now}, etag: `"record-v1"`}
+	p := &ProductionEvidence{client: r.Client, now: func() time.Time { return now }, reader: func(context.Context, *fleet.CelldFleet) (v050.Reader, error) { return source, nil }}
+	inv, _ := p.Observe(t.Context(), f, recoveryInventory{})
+	if source.gets != 1 || len(inv.Sessions) != 1 {
+		t.Fatalf("first pass read %d bodies: %+v", source.gets, inv)
+	}
+	for range 3 {
+		if inv, _ = p.Observe(t.Context(), f, inv); source.gets != 1 || len(inv.Sessions) != 1 {
+			t.Fatalf("unchanged record re-read: %d bodies, %+v", source.gets, inv)
+		}
+	}
+	// A rewritten record is read again, and only then.
+	source.etag = `"record-v2"`
+	source.inner.epoch = 2
+	if inv, _ = p.Observe(t.Context(), f, inv); source.gets != 2 || len(inv.Sessions) != 2 {
+		t.Fatalf("rewritten record not re-read: %d bodies, %+v", source.gets, inv)
+	}
+	// Each fleet reads its own bucket, so each keeps its own cache, and a fleet's
+	// adapter survives from one reconcile to the next.
+	other := fixture("beta", "bucket-beta", "PersistentFleet")
+	first, err := p.adapter(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := p.adapter(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatal("two fleets shared one record cache")
+	}
+	if again, err := p.adapter(f); err != nil || again != first {
+		t.Fatalf("fleet adapter rebuilt between reconciles: %v", err)
+	}
+}
 func TestProductionInventoryRetainsAmbiguousHistory(t *testing.T) {
 	for _, profile := range []string{"Bucket", "PersistentFleet"} {
 		t.Run(profile, func(t *testing.T) {

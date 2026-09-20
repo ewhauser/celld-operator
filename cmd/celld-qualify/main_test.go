@@ -182,5 +182,74 @@ func TestUnknownStoppedIdentity(t *testing.T) {
 	}
 }
 
-// The capture is a Reader the adapter can drive; keep that contract explicit.
-var _ v050.Reader = capture{}
+// retag rewrites a capture file's node_etags, so a test can replay the same
+// evidence as an old capture and as one that records ETags.
+func retag(t *testing.T, path string, etags map[string]string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(etags)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw["node_etags"] = encoded
+	out, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, out, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Captures written before the field existed carry no ETags and must still
+// replay: a record without one is simply read on every pass. A capture that
+// records them replays identically, and its listing hands the adapter the ETag
+// its own read reports, so the two agree.
+func TestReplayAcceptsCapturesWithAndWithoutETags(t *testing.T) {
+	args := captures(t, 4)
+	if err := qualify(t, append(append([]string{}, args...), "-stopped", "a")...); err != nil {
+		t.Fatalf("capture without ETags: %v", err)
+	}
+	retag(t, args[1], map[string]string{"nodes/a.json": `"before-etag"`})
+	retag(t, args[3], map[string]string{"nodes/a.json": `"after-etag"`})
+	if err := qualify(t, append(append([]string{}, args...), "-stopped", "a")...); err != nil {
+		t.Fatalf("capture with ETags: %v", err)
+	}
+	after, err := read(args[3])
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := after.List(t.Context(), "nodes/", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, etag, err := after.GetETag(t.Context(), "nodes/a.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Keys) != 1 || len(page.ETags) != 1 || page.ETags[0] != `"after-etag"` || etag != page.ETags[0] {
+		t.Fatalf("listing did not carry the captured ETag: %+v %q", page, etag)
+	}
+	if len(page.Sizes) != 1 || page.Sizes[0] != int64(len(body)) {
+		t.Fatalf("listed size %v does not describe the captured body of %d bytes", page.Sizes, len(body))
+	}
+	// An ETag for a body the capture does not hold describes nothing.
+	retag(t, args[3], map[string]string{"nodes/absent.json": `"x"`})
+	if _, err := read(args[3]); err == nil || !strings.Contains(err.Error(), "capture ETag names an absent record") {
+		t.Fatalf("got %v, want a rejected capture", err)
+	}
+}
+
+// The capture is a Reader the adapter can drive, and it reports the ETag of
+// every body it serves; keep both contracts explicit.
+var (
+	_ v050.Reader     = capture{}
+	_ v050.ETagReader = capture{}
+)

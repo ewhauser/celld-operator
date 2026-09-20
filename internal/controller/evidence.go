@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/ewhauser/celld-operator/internal/runtime/catalog"
@@ -15,6 +16,7 @@ import (
 	"github.com/ewhauser/celld-operator/internal/recovery"
 	v050 "github.com/ewhauser/celld-operator/internal/runtime/v050"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -41,6 +43,63 @@ type ProductionEvidence struct {
 	client client.Client
 	reader readerFactory
 	now    func() time.Time
+	// adapters keeps one adapter per fleet so its ETag-gated record cache spans
+	// reconciles. Everything the cache holds is re-derived from a fresh listing
+	// on every pass; losing it costs one full read, never correctness.
+	mu       sync.Mutex
+	adapters map[types.UID]*fleetAdapter
+}
+type fleetAdapter struct {
+	// scope is the runtime image and the storage this cache was filled from. A
+	// change to any of it is a different evidence schema or a different bucket,
+	// and its records must never be read out of the previous one's cache.
+	scope   string
+	adapter *v050.Adapter
+	used    time.Time
+}
+
+// adapterIdle and maxAdapters bound the map: a deleted fleet's adapter is
+// dropped once it stops being used, and a controller watching an implausible
+// number of fleets keeps the newest entries rather than growing forever.
+const (
+	adapterIdle = 10 * time.Minute
+	maxAdapters = 512
+)
+
+// adapter returns this fleet's adapter, rebuilding it whenever the pinned
+// runtime image or the fleet's storage changes.
+func (p *ProductionEvidence) adapter(f *fleet.CelldFleet) (*v050.Adapter, error) {
+	image := runtimeImage(f)
+	// An unset UID cannot identify a fleet, and two fleets must never share a
+	// cache: they read different buckets. Serve those uncached.
+	if f.UID == "" {
+		return catalog.New(image)
+	}
+	scope := image + "\x00" + f.Spec.Storage.Bucket + "\x00" + f.Spec.Storage.Region
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	now := p.now()
+	for uid, entry := range p.adapters {
+		if now.Sub(entry.used) > adapterIdle || now.Before(entry.used) {
+			delete(p.adapters, uid)
+		}
+	}
+	if entry, ok := p.adapters[f.UID]; ok && entry.scope == scope {
+		entry.used = now
+		return entry.adapter, nil
+	}
+	fresh, err := catalog.New(image)
+	if err != nil {
+		return nil, err
+	}
+	if p.adapters == nil {
+		p.adapters = map[types.UID]*fleetAdapter{}
+	}
+	if _, replacing := p.adapters[f.UID]; !replacing && len(p.adapters) >= maxAdapters {
+		return fresh, nil
+	}
+	p.adapters[f.UID] = &fleetAdapter{scope: scope, adapter: fresh, used: now}
+	return fresh, nil
 }
 
 func NewProductionEvidence(c client.Client) *ProductionEvidence {
@@ -88,7 +147,7 @@ func (p *ProductionEvidence) Observe(ctx context.Context, f *fleet.CelldFleet, p
 	if err != nil {
 		return out, ""
 	}
-	adapter, err := catalog.New(runtimeImage(f))
+	adapter, err := p.adapter(f)
 	if err != nil {
 		return out, ""
 	}

@@ -115,33 +115,42 @@ func (c *ClientCache) client(region string) (*s3.Client, error) {
 	return api, nil
 }
 func (r *S3Reader) Get(ctx context.Context, key string) ([]byte, error) {
+	data, _, err := r.GetETag(ctx, key)
+	return data, err
+}
+
+// GetETag returns the body together with the ETag S3 reported for this exact
+// body, so the adapter can confirm that the object it read is the one the
+// listing named. An S3-compatible store that reports no ETag yields the empty
+// string, which the adapter refuses to treat as a match.
+func (r *S3Reader) GetETag(ctx context.Context, key string) ([]byte, string, error) {
 	if !nodeKey.MatchString(key) || key == "nodes/..json" || key == "nodes/...json" {
-		return nil, errors.New("read outside node metadata scope")
+		return nil, "", errors.New("read outside node metadata scope")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	out, err := r.API.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(r.Bucket), Key: aws.String(key)})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if out == nil || out.Body == nil {
-		return nil, errors.New("missing object body")
+		return nil, "", errors.New("missing object body")
 	}
 	data, readErr := io.ReadAll(io.LimitReader(out.Body, (1<<20)+1))
 	closeErr := out.Body.Close()
 	if readErr != nil {
-		return nil, readErr
+		return nil, "", readErr
 	}
 	if closeErr != nil {
-		return nil, closeErr
+		return nil, "", closeErr
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if len(data) > 1<<20 || (out.ContentLength != nil && *out.ContentLength != int64(len(data))) {
-		return nil, errors.New("partial or oversized metadata")
+		return nil, "", errors.New("partial or oversized metadata")
 	}
-	return data, nil
+	return data, aws.ToString(out.ETag), nil
 }
 func (r *S3Reader) List(ctx context.Context, prefix, continuation string) (v050.Page, error) {
 	if prefix != "nodes/" && prefix != "log/" {
@@ -167,12 +176,18 @@ func (r *S3Reader) List(ctx context.Context, prefix, continuation string) (v050.
 	if (page.Complete && page.Next != "") || (!page.Complete && (page.Next == "" || page.Next == continuation)) {
 		return v050.Page{}, errors.New("invalid pagination")
 	}
+	// ListObjectsV2 reports each key's ETag and size, and S3 listing is strongly
+	// consistent, so the adapter can tell an unchanged record from a rewritten
+	// one without a GetObject. Missing metadata stays empty and is never
+	// substituted from an earlier listing: the adapter re-reads such a key.
 	for _, obj := range out.Contents {
 		key := aws.ToString(obj.Key)
 		if !strings.HasPrefix(key, prefix) {
 			return v050.Page{}, errors.New("invalid listing key")
 		}
 		page.Keys = append(page.Keys, key)
+		page.ETags = append(page.ETags, aws.ToString(obj.ETag))
+		page.Sizes = append(page.Sizes, max(aws.ToInt64(obj.Size), 0))
 	}
 	return page, nil
 }
