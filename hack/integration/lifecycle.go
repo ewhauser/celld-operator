@@ -45,7 +45,7 @@ func (h *harness) writeLedger(probe, fleetName string) {
 	}
 	batch := fmt.Sprintf("ack-%d", time.Now().UnixNano())
 	for i := range 12 {
-		path := fmt.Sprintf("/?cell=integration&id=%s-%d", batch, i)
+		path := fmt.Sprintf("/?cell=integration-%d&id=%s-%d", i, batch, i)
 		assert(stored(h.app(probe, fleetName, "PUT", path)), "write %s not acknowledged", path)
 		h.ledgers[fleetName] = append(h.ledgers[fleetName], path)
 	}
