@@ -1,145 +1,17 @@
-# Reproduce local qualification
+# Control-plane wire fixture
 
-Requires Docker, Python 3 with venv, network access to the pinned images/npm
-binary, and the repository's Go 1.27.1 toolchain for replay. This harness supports
-linux/arm64 and linux/amd64 images; only arm64 has been exercised here.
-
-```sh
-python3 -m venv .qualification-venv
-.qualification-venv/bin/pip install -r hack/qualification/requirements.txt
-make check
-make qualification-replay
-make qualification-test
-make qualification-local SCENARIO=fleet OUTPUT=.qualification-runs/fleet-new
-make qualification-local SCENARIO=bucket OUTPUT=.qualification-runs/bucket-new
-make qualification-local SCENARIO=contraction OUTPUT=.qualification-runs/contraction-new
-make qualification-local SCENARIO=pressure OUTPUT=.qualification-runs/pressure-new
-make qualification-local SCENARIO=partition OUTPUT=.qualification-runs/partition-new
-```
-
-Every output directory must be new. Each scenario has a 420-second overall
-budget, bounded HTTP/S3/Docker calls, one dedicated randomly named Docker
-network and MinIO container, and unique retained volumes per runtime node.
-Ports bind only to host loopback. It does not read AWS credentials, kubeconfig,
-or a default cloud endpoint. Static credentials are public local test values;
-boto3 is explicitly pointed to the new loopback MinIO endpoint. Docker runtime
-containers receive only the local store settings, not host cloud credentials.
-Do not change the harness to use a production endpoint.
-
-The synthetic application's stable operation IDs make retries idempotent. Every
-successful PUT acknowledgement is entered in `acknowledged-ledger.json`; after
-faults, the client reads every acknowledged ID through a survivor. Requests are
-sequential and tiny; this is a recovery experiment, not a capacity benchmark.
-The pressure workload's concurrent cold reads add no untracked application
-writes. Client-process crash durability and ambiguous non-idempotent retries
-are not tested.
-
-The released celld image has no esbuild. The harness downloads esbuild 0.25.12
-for the Docker image architecture, verifies its pinned SHA-512, and mounts the
-binary for deployment of the checked-in test app. This does not alter celld.
-MinIO is pinned to a digest as well. It remains an unqualified local S3 substitute.
-
-Outputs include full local logs, status/metadata captures, image identity,
-readiness samples (latest harness), and measured results. Metadata collection
-GETs only `nodes/` and lists `nodes/`/`log/`, fully paginating; it never downloads
-application objects or loss/bundle bodies. The harness uses local administrative
-credentials to provision/deploy; it does **not** qualify restricted IAM.
-
-Containers and named volumes are removed in `finally`, including on ordinary
-failure or the overall timeout. Volumes are retained across the restart within
-each scenario. A hard kill of Python/host may bypass cleanup: locate the exact
-`celld-q-<run-id>` names in that run's logs or `docker ps -a`, inspect them, and
-remove only those containers, volumes and network. Never use Docker prune.
-Existing kind/other containers are unrelated and must remain untouched.
-
-To export reviewable evidence after a completed run:
+`controlplane-fixtures.py` compiles the fork's actual strict-shutdown serializer
+and control state into a small offline harness:
 
 ```sh
-python3 hack/qualification/export.py .qualification-runs/fleet-new docs/qualification/fleet-new
+python3 hack/qualification/controlplane-fixtures.py /absolute/path/to/celld
 ```
 
-This exports synthetic operation IDs and recovery metadata; it omits binaries,
-raw logs and application identifiers in `/state`, and records hashes/redactions.
-Raw output is ignored by Git. Never promote a synthetic mutation to an observed
-fixture. See `internal/runtime/v050/testdata/README.md` for fixture provenance.
+It requires Cargo and cached serde_json dependencies and updates
+`internal/runtime/controlplane/testdata/shutdown-v1.json`. It never runs celld or
+qualifies recovery. Source hashes and the wire contract are recorded in
+[the typed client documentation](../../docs/runtime-control-plane.md).
 
-`celld-qualify` is an offline replay tool. It takes a pre-disruption inventory,
-a later completed capture, and **explicit** confirmed-stopped identities. The
-clock is the capture time; success is historical candidate evidence, not current
-authorization. Complete JSON files are trusted harness artifacts, not a live S3
-transport. Example:
-
-```sh
-go run ./cmd/celld-qualify \
-  -before docs/qualification/contraction/before-abrupt-metadata.json \
-  -after docs/qualification/contraction/after-abrupt-metadata.json -stopped a,b
-```
-
-Known gate outcomes such as absent Bucket logs or pressured startup are recorded
-without making the experiment itself fail. Setup/transport/ledger-read failures
-fail the command; inspect `results.json` rather than treating exit 0 as runtime
-qualification. The final client `missing` list must be empty, and positive
-recovery observations require exact generation matches and no listed loss keys.
-
-## Bucket logical ownership fencing
-
-```sh
-.qualification-venv/bin/python hack/qualification/bucket_fencing.py --output .qualification-runs/bucket-fencing-new
-make integration-bucket
-```
-
-The first command uses a synthetic idempotent sequence counter to distinguish
-conflicting successful writes from ambiguous responses. It pauses the actual
-owner during a delayed response, takes over through a survivor while the old
-process still exists, resumes the old process, and verifies all acknowledged
-sequence assignments. A separate peer partition preserves a dedicated S3 network;
-the still-running owner must renew its lease and may acknowledge writes. That
-lease prevents operator completion. Both Docker networks and owned containers
-are cleaned on exit. A failed/absent response is never treated as a nonexistent
-write. No peer secret or object-store mutation is used to force ownership.
-
-The second command runs the real operator in its disposable kind cluster with
-fixed local evidence and Metrics Server v0.8.0 (SHA-checked manifest). Kubelet TLS
-verification is disabled only for this local Metrics Server fixture. It exercises
-manual and automatic Bucket removals, repeated growth, pause/resume, manager
-restart and acknowledged-write readback. It uses an explicit generated kubeconfig
-and never touches an existing cluster or AWS account.
-
-## Persistent retained-volume exclusion counterexample
-
-```sh
-.qualification-venv/bin/python hack/qualification/persistent_reuse.py --output .qualification-runs/persistent-reuse-new
-```
-
-This starts a replacement on a paused invocation's exact named volume and checks
-that the replacement gets a new S3 generation and becomes Ready while the old
-invocation still holds the same mounted filesystem. It does not resume concurrent
-writers or claim peer-only durability/data-loss qualification. See
-[the remaining implementation contract](../../docs/persistent-fleet-implementation-gap.md).
-
-## Launcher and peer-only PersistentFleet checks
-
-Build the Linux launcher for the architecture of the local pinned image, then:
-
-```sh
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o bin/celld-launcher-linux ./cmd/celld-launcher
-.qualification-venv/bin/python hack/qualification/launcher_reuse.py --launcher-binary bin/celld-launcher-linux --output .qualification-runs/launcher-lock-new
-.qualification-venv/bin/python hack/qualification/persistent_peer_only.py --launcher-binary bin/celld-launcher-linux --output .qualification-runs/peer-only-new
-make integration-persistent
-```
-
-Use `GOARCH=amd64` on an amd64 Docker host. The lock experiment verifies the
-actual celld FD3 and generation, pauses the original container, and proves the
-replacement cannot start its child while that invocation retains its mount.
-The peer-only experiment acknowledges a new operation while MinIO is paused,
-kills its owner before the store is restarted, stops a selected donor via the
-authenticated launcher, and reads the operation through a surviving peer after
-matching seal/no-loss evidence. The paused store is killed before restart to
-discard buffered old-owner requests. The warm store's container layer is retained.
-These are local experiments, not production qualification or throughput results.
-
-`integration-persistent` uses the real manager, private launcher transport,
-Metrics Server and local hostPath provisioning for repeated manual shrink/grow
-and automatic 3-to-2 contraction. Its local RWO exception is explicit and does
-not qualify production RWOP/EBS attachment fencing. All tests own and clean only
-their disposable infrastructure; never point these harnesses at cloud resources.
+Live integration belongs in `hack/integration` and the opt-in runtime tests under
+`internal/launcher` and `internal/controller`. The old private-S3 snapshot/replay,
+stock-version and disk-reuse harnesses have been removed.

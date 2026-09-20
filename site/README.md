@@ -15,13 +15,12 @@ The homepage is `src/content/docs/index.md`. Concepts and contributor guidance
 live under `concepts` and `contribute`; the sidebar is in `astro.config.mjs`.
 
 `pnpm sync` runs before dev/build. It copies engineering records from `docs/` into
-ignored `contracts`, `decisions`, `qualification`, and `history` directories.
-Those pages remain accessible through Contribute and existing URLs, carry audience
+ignored `contracts`, `decisions` and `qualification` directories.
+Those pages remain accessible through Contribute, carry audience
 labels, and are excluded from user search. Edit their repository sources.
 
 The current capability matrix has one source: `docs/critical-features.md`, published
-as `reference/limitations`. Its former `contracts/critical-features` URL remains
-as a pointer. Keep implementation status and validation boundaries separate.
+as `reference/limitations`. Keep implementation status and validation boundaries separate.
 
 API, Helm, sample and flag references under `api` are generated from Go-generated
 CRDs, chart values, sample manifests and the binary flags. Add field descriptions

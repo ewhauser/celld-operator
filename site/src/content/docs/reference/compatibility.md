@@ -1,59 +1,36 @@
 ---
 title: Compatibility
-description: Kubernetes requirements, accepted celld runtime images, and upgrade restrictions.
+description: Required platform, strict runtime fork and immutable artifact pins.
 ---
 
-Use this page to check your cluster and choose an accepted runtime image. All
-paths remain experimental; see [capabilities and limitations](../limitations/).
+All paths remain experimental. Use an explicit compatible fork image; the
+operator supplies no default runtime digest.
 
-## Platform
-
-| Component | Requirement | Setup |
-| --- | --- | --- |
-| Kubernetes | 1.31 or newer, IPv4 Pod networking | The chart enforces the same 1.31 minimum. |
-| Cloud | AWS EKS with S3 and EBS | [AWS permissions](../../configure/aws/) |
-| CNI | Any that enforces NetworkPolicy, verified by you | [Networking](../../configure/networking/) |
-| Storage (PersistentFleet) | EBS CSI, gp2 or gp3, `ReadWriteOncePod`, `Retain`, `WaitForFirstConsumer` | [Storage](../../configure/storage/) |
-| EC2 fencing | Standard commercial regional endpoints only; dedicated instances with the documented tags | [EC2 fencing](../../contracts/infrastructure-fencing/) |
-| Metrics Server | Required only for capacity policy | [Capacity policy](../../operate/capacity/) |
-| Prometheus Operator | Optional, for ServiceMonitor and PrometheusRule | [Monitoring](../../operate/monitoring/) |
-
-Other Kubernetes distributions and S3-compatible stores are outside qualification. The disposable kind harness uses MinIO for development tests; real AWS behavior still requires separate testing.
-
-## celld runtime
-
-The operator recognises exactly two multi-platform release index digests. Mutable tags, per-architecture digests and other releases are rejected.
-
-| Release | Commit | Image |
-| --- | --- | --- |
-| v0.4.1 | `10cb1303dac710dcb3b557e318e08c855261f68b` | `ghcr.io/denoland/celld@sha256:ce8bbc3c26a16c9ee00e3ce0501f36bfea2663b5af8285a08fc16a54568060a5` |
-| v0.5.0 (default) | `12d5b6333fe52717325addcfe1e99e9fd4f77bcd` | `ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8` |
-
-| Transition | Status |
+| Component | Requirement |
 | --- | --- |
-| v0.4.1 to v0.5.0, PersistentFleet | Implemented with whole-fleet coordinated downtime, sealed logs and retained disks |
-| v0.5.0 to v0.4.1 | Rejected; no reverse storage-format contract exists |
-| Any transition, Bucket | Not implemented |
-| Any other digest | `UnsupportedTransition`, retained as a blocked request |
-| Creating a v0.4.1 fleet | PersistentFleet with the launcher only |
+| Kubernetes | 1.31 or newer, IPv4 Pod networking and enforced NetworkPolicy. |
+| Runtime | `ghcr.io/ewhauser/celld@sha256:...`, strict shutdown schema 1. |
+| Recovery fleet | Homogeneous compatible fork including native `bucket_complete` readers. |
+| Launcher | Digest-pinned image built from the matching operator source; required for both profiles. |
+| Persistent storage | Supported dynamic CSI, RWOP, `Delete`, `WaitForFirstConsumer` and external-provisioner deletion finalizer. |
+| Capacity policy | Metrics Server for built-in observations; Prometheus is optional. |
 
-Follow [Upgrade the runtime](../../operate/upgrade-runtime/) for the supported procedure. An accepted image is not permission to perform a rolling update.
+The [fork release](https://github.com/ewhauser/celld/releases/tag/v0.5.1-ewhauser.1)
+is based on upstream v0.5.1. Its published Linux amd64/arm64 index is:
 
-## Journal
+```text
+ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af
+```
 
-| Version | Status |
-| --- | --- |
-| 8 | Current. Written on every durable update. |
-| 1 to 7 | Read conservatively and rewritten as 8 on the next write. |
-| Newer than the binary knows | The affected fleet is blocked; the controller does not interpret the newer journal. |
+The source revision is `f3b7e8c07e6fee53f1752bfb7a30fffbf1d514c8`.
+Verify source, platform and digest for the artifact you deploy. Stock upstream releases do not expose this strict contract. A
+syntactically valid pin does not establish runtime/storage-format qualification.
 
-Downgrading the operator after the journal advanced is not a rollback procedure. See [journal archives](../../contracts/journal-archives/).
+Runtime image changes use [coordinated maintenance](../../operate/upgrade-runtime/).
+They are not rolling updates and do not provide automatic format migration or
+rollback compatibility. The caller must qualify the source/target pair.
 
-## Unsupported migrations
-
-- Converting an unwrapped or `ReadWriteOnce` PersistentFleet to the launcher and `ReadWriteOncePod`.
-- Rolling out the stronger Pod template with hostname anti-affinity to fleets provisioned before it. Those report drift instead.
-- Freeing a bucket reservation or reattaching a retained disk to a different fleet identity.
-- Recovering an all-stopped PersistentFleet whose logs did not seal.
-
-See [capabilities and limitations](../limitations/) and [blocked operations](../../troubleshoot/lifecycle/) before attempting recovery.
+There is no migration from the former lifecycle journal, no stock-version
+adapter fallback, no layout conversion and no reuse of historical retained
+disks. Create fresh evaluation fleets with the current API and dedicated buckets.
+See [capabilities and limits](../limitations/) for actual validation boundaries.

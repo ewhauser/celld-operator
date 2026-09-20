@@ -1,2 +1,0 @@
-python3 hack/check-generated.py
-Generated CRDs and deepcopy code match.

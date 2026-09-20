@@ -14,8 +14,8 @@ make test-linux  # Launcher and controller tests cross-compiled and run on Linux
 make lint-linux  # golangci-lint analyzing GOOS=linux (catches Linux-only files)
 make build       # Build packages and bin/celld-operator
 make test        # go test -race ./...
-make test-envtest # Reconciler and journal tests against a real kube-apiserver/etcd (envtest)
-make integration-faults # Disposable kind: manager crash points, node loss, toxiproxy S3 latency/partition
+make test-envtest # Current-operation tests against a real kube-apiserver/etcd (envtest)
+make integration-faults # Disposable Kind: faults against an explicitly supplied compatible fork image
 make vet         # Standalone go vet
 make fmt         # Apply goimports through the pinned lint tool
 make lint        # Full lint suite
@@ -42,7 +42,7 @@ Docker Desktop must share the repository path; the default `/Users` share works,
 `make test-envtest` downloads pinned kube-apiserver and etcd binaries through
 `setup-envtest` on first use and runs the `TestEnvtest*` cases in
 `internal/controller`. Those tests cover what the fake client cannot: CRD CEL
-admission and defaulting, real resourceVersion conflicts on the journal and
+admission and defaulting, real resourceVersion conflicts on the reservation and
 workload CAS, and optimistic-lock merge patches. They skip silently when
 `KUBEBUILDER_ASSETS` is unset, so `make test` needs no network.
 
@@ -96,8 +96,9 @@ The module pins controller-runtime and Kubernetes dependencies in `go.mod` and
 `go.sum`. CI module caching is enabled. Run `make manifests-check` for generated
 CRD/deepcopy reproducibility and `make integration` for a disposable kind cluster
 with real runtime startup and enforced isolation; see [fleet API](docs/fleet-api.md).
-Helm checks, local and kind integration suites, and gated image/release
-publication should be added alongside the corresponding deployable operator.
+Helm checks, local and Kind integration suites, and gated image/release publication
+remain separate validation layers. Supply `CELLD_RUNTIME_IMAGE` with an actual
+fork digest for integration; no stock-runtime fallback is permitted.
 Describe exactly which local, cluster, and AWS checks ran; a passing baseline
 does not qualify celld durability or scaling behavior.
 

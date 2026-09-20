@@ -21,26 +21,16 @@ const generatedSections = ['contracts', 'decisions', 'qualification', 'history',
 // Manifest: which repository documents become which site pages.
 // ---------------------------------------------------------------------------
 const contracts = [
-	['fleet-api', 'Fleet API and installation'],
+	['fleet-api', 'Fleet API'],
 	['operations', 'Installation and operations'],
 	['capacity-policy', 'Capacity policy'],
-	['maintenance-execution', 'Maintenance execution'],
-	['bucket-scale-in', 'Bucket scale-in'],
 	['ordered-bucket', 'Ordered Bucket fleets'],
-	['bucket-migration', 'Bucket migration'],
-	['persistent-fleet-lifecycle', 'PersistentFleet lifecycle'],
-	['infrastructure-fencing', 'EC2 fencing'],
-	['runtime-versions', 'Runtime versions'],
-	['journal-archives', 'Journal archives'],
-	['runtime-dependencies', 'Runtime dependencies'],
-];
-const history = [
-	['runtime-qualification', 'Runtime qualification'],
-	['shutdown-evidence', 'Shutdown evidence'],
-	['s3-recovery-evidence', 'S3 recovery evidence'],
-	['shared-lifecycle-safety', 'Shared lifecycle safety'],
-	['persistent-fleet-implementation-gap', 'PersistentFleet implementation gap'],
-	['pre-release-review', 'Pre-release review'],
+	['runtime-versions', 'Runtime requirements'],
+	['runtime-dependencies', 'Runtime responsibilities'],
+	['runtime-control-plane', 'Typed runtime control plane'],
+	['launcher-supervision', 'Strict launcher supervision'],
+	['current-operation', 'Bounded current operation'],
+	['disposable-disks', 'Disposable disks'],
 ];
 
 /** @type {{source: string, section: string, slug: string, label?: string}[]} */
@@ -48,7 +38,6 @@ const pages = [];
 for (const [name, label] of contracts) pages.push({ source: `docs/${name}.md`, section: 'contracts', slug: name, label });
 // This current user reference has one source; it is not an engineering report.
 pages.push({ source: 'docs/critical-features.md', section: 'reference', slug: 'limitations', label: 'Capabilities and limitations' });
-for (const [name, label] of history) pages.push({ source: `docs/${name}.md`, section: 'history', slug: name, label });
 
 pages.push({ source: 'docs/decisions/README.md', section: 'decisions', slug: 'index', label: 'Decision index' });
 for (const file of readdirSync(path.join(repoDir, 'docs/decisions')).sort()) {
@@ -172,8 +161,8 @@ const transform = (page, warnings) => {
 	if (sentence && sentence[0].length >= 40) description = sentence[0].trim();
 	if (description.length > 200) description = `${description.slice(0, 197).replace(/\s+\S*$/, '')}…`;
 	const label = page.label ?? title.replace(/^ADR \d{4} /, '');
-	const internal = ['contracts', 'qualification', 'decisions', 'history'].includes(page.section);
-	const category = { contracts: 'Implementation detail', qualification: 'Test report', decisions: 'Design record', history: 'Historical investigation' }[page.section];
+	const internal = ['contracts', 'qualification', 'decisions'].includes(page.section);
+	const category = { contracts: 'Implementation detail', qualification: 'Test report', decisions: 'Design record' }[page.section];
 	const frontmatter = [
 		'---',
 		`title: ${yamlString(category ? `${category}: ${title}` : title)}`,
@@ -351,7 +340,7 @@ const helmValuesPage = () => {
 		`| Kubernetes | ${code(chart.kubeVersion)} |`,
 		`| Description | ${cell(chart.description)} |`,
 		'',
-		'Install CRDs explicitly before the first install and on every upgrade; Helm never upgrades or deletes them. Read the [operations contract](../../contracts/operations/) before changing `networkPolicyEnforced`, `launcherImage` or `ec2Fencing`.',
+		'Install CRDs explicitly before the first install and on every upgrade; Helm never upgrades or deletes them. Read the [operations contract](../../contracts/operations/) before changing `networkPolicyEnforced`, `launcherImage`.',
 		'',
 		'## Values',
 		'',
@@ -378,7 +367,7 @@ const templatePurpose = {
 	'pdb.yaml': 'PodDisruptionBudget keeping one controller replica available.',
 	'rbac.yaml': 'ClusterRole limited to the fleet API and cluster-scoped storage and node objects, plus the leader-election Role.',
 	'rbac-fleet-namespaces.yaml': 'The namespaced fleet Role and RoleBinding rendered into every entry of `fleetNamespaces`.',
-	'serviceaccount.yaml': 'Controller ServiceAccount; annotate it for EKS Pod Identity or IRSA through `serviceAccount.annotations`.',
+	'serviceaccount.yaml': 'Controller ServiceAccount for Kubernetes access; it needs no AWS IAM role.',
 };
 
 // ---------------------------------------------------------------------------
@@ -387,10 +376,10 @@ const templatePurpose = {
 const sampleNotes = {
 	'bucket.yaml': 'Three-replica Bucket fleet spread strictly across three zones. The minimal starting point.',
 	'bucket-ordered.yaml': 'Bucket fleet using the Ordered StatefulSet layout with deterministic highest-ordinal retirement, across two zones.',
-	'capacity-shadow.yaml': 'A Bucket fleet with a `capacity` block in `Shadow` mode: recommendations are journaled and reported, nothing scales.',
+	'capacity-shadow.yaml': 'A Bucket fleet with a `capacity` block in `Shadow` mode: recommendations are recorded and reported, nothing scales.',
 	'maintenance-paused.yaml': 'PersistentFleet with maintenance paused and a commented restart token, showing the request fields.',
 	'persistent-fleet.yaml': '',
-	'persistent.yaml': 'Three-replica PersistentFleet on a retained EBS StorageClass with strict placement.',
+	'persistent.yaml': 'Three-replica PersistentFleet on a Delete-policy CSI StorageClass with strict placement.',
 };
 
 const samplesPage = () => {
@@ -402,7 +391,7 @@ const samplesPage = () => {
 		`editUrl: ${yamlString(tree('config/samples'))}`,
 		'---',
 		'',
-		'Samples are not deployable as written. Replace the bucket name with a dedicated bucket, create the referenced ServiceAccount with a runtime IAM identity, and use zone names in the storage region. Every sample carries `qualification: Experimental`, which the API requires.',
+		'Samples are not deployable as written. Set an explicit verified compatible fork runtime digest, replace the bucket name with a dedicated bucket, create the referenced ServiceAccount with a runtime IAM identity, and use zone names in the storage region. Every sample carries `qualification: Experimental`, which the API requires.',
 		'',
 	];
 	for (const file of files) {
@@ -437,9 +426,7 @@ const flagsPage = () => {
 		'',
 		'## Combinations the binary rejects',
 		'',
-		'- `--local-evidence`, `--local-rwop` or `--local-fault-point` without `--local-test`.',
-		'- `--ec2-fencing-account` without `--ec2-fencing-region`, or the reverse.',
-		'- EC2 fencing flags together with `--local-test`.',
+		'- `--local-rwop` or `--local-fault-point` without `--local-test`.',
 		'',
 		'## Listeners',
 		'',
@@ -460,7 +447,7 @@ const flagsPage = () => {
 for (const section of generatedSections) rmSync(path.join(contentDir, section), { recursive: true, force: true });
 
 const warnings = [];
-const sidebar = { contracts: [], qualification: [], decisions: [], history: [] };
+const sidebar = { contracts: [], qualification: [], decisions: [] };
 let count = 0;
 for (const page of pages) {
 	const { label, markdown } = transform(page, warnings);
@@ -471,15 +458,12 @@ for (const page of pages) {
 	count += 1;
 }
 
-// Preserve bookmarks to the former implementation-status route.
-writeFileSync(path.join(contentDir, 'contracts/critical-features.md'), `---\ntitle: Capabilities and limitations\npagefind: false\nprev: false\nnext: false\n---\n\nThe current feature matrix is now at [Capabilities and limitations](../../reference/limitations/).\n`);
-
 const generated = [
 	crdPage('config/crd/celld.eric.dev_celldfleets.yaml', 'celldfleet', [
-		'A `CelldFleet` describes one celld fleet in a namespace: its profile, replica target, storage bucket, placement, optional capacity policy and maintenance requests. Only `replicas`, `capacity`, `runtimeImage`, `maintenance` and an authorized layout migration are mutable after creation. See the [fleet API contract](../../contracts/fleet-api/) for semantics and the [conditions reference](../../reference/conditions/) for what status reports.',
+		'A `CelldFleet` describes one celld fleet in a namespace: its profile, replica target, storage bucket, placement, optional capacity policy and maintenance requests. Only `replicas`, `capacity`, `runtimeImage` and `maintenance` are mutable after creation. See the [fleet API contract](../../contracts/fleet-api/) for semantics and the [conditions reference](../../reference/conditions/) for what status reports.',
 	]),
 	crdPage('config/crd/celld.eric.dev_celldstoragereservations.yaml', 'celldstoragereservation', [
-		'A `CelldStorageReservation` is the cluster-scoped, never garbage-collected tombstone that binds a bucket to exactly one fleet identity and carries the retained lifecycle journal. The operator creates it; administrators read it. Never delete one to reuse a bucket or a retained disk. See the [lifecycle journal concept](../../concepts/lifecycle-journal/) and [journal archives](../../contracts/journal-archives/).',
+		'A `CelldStorageReservation` is the cluster-scoped, never garbage-collected tombstone that binds a bucket to exactly one fleet identity and carries bounded current-operation authority. The operator creates it; administrators read it. Never delete one to reuse a bucket or a retained disk. See [current operations](../../concepts/current-operation/) and [the exact disk contract](../../contracts/disposable-disks/).',
 	]),
 	samplesPage(),
 	helmValuesPage(),

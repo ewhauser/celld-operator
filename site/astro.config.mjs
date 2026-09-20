@@ -66,7 +66,7 @@ export default defineConfig({
                     { label: 'Upgrade the operator', slug: 'operate/upgrade-operator' },
                     { label: 'Upgrade the runtime', slug: 'operate/upgrade-runtime' },
                     { label: 'Monitor a fleet', slug: 'operate/monitoring' },
-                    { label: 'Delete a fleet and retain data', slug: 'operate/deletion' },
+                    { label: 'Delete a fleet', slug: 'operate/deletion' },
                 ] },
                 { label: 'Troubleshoot', collapsed: true, items: [
                     { label: 'Find your symptom', slug: 'troubleshoot' },
@@ -88,7 +88,7 @@ export default defineConfig({
                 { label: 'Contribute', collapsed: true, items: [
                     { label: 'Development and documentation', slug: 'contribute' },
                     { label: 'Architecture', slug: 'concepts/architecture' },
-                    { label: 'How operations resume', slug: 'concepts/lifecycle-journal' },
+                    { label: 'How operations resume', slug: 'concepts/current-operation' },
                     { label: 'How removal is checked', slug: 'concepts/safety-model' },
                 ] },
             ],

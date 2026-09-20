@@ -1,115 +1,34 @@
 # Installation and operations
 
-The chart is experimental. There must be one operator installation per cluster,
-with access to all fleet namespaces. The API group is `celld.eric.dev`,
-a domain the maintainer owns; it needs no DNS record. CRDs and storage reservations are
-retained on uninstall; Helm does not upgrade CRDs automatically.
+Use the task-oriented [installation guide](../site/src/content/docs/start/install.mdx),
+[scaling guide](../site/src/content/docs/operate/scaling.md),
+[maintenance guide](../site/src/content/docs/operate/restart.md) and
+[deletion guide](../site/src/content/docs/operate/deletion.md).
 
-## Install
+Both Bucket and PersistentFleet need a compatible digest-pinned fork runtime and
+launcher. The operator has Kubernetes credentials only; celld receives the runtime
+bucket identity. The manager does not read S3 recovery metadata or terminate EC2
+instances. The fleet namespace Role includes guarded PVC deletion; storage
+finalizers remain under Kubernetes and CSI control.
 
-Build and load/publish the operator image, then install the local chart:
+For implementation details use [current operations](current-operation.md),
+[launcher supervision](launcher-supervision.md) and [typed control plane](runtime-control-plane.md).
+A blocked operation must preserve current authority and storage. Removing an
+annotation, claim finalizer or fleet finalizer is not a recovery procedure.
 
-```sh
-helm upgrade --install celld charts/celld-operator \
-  --namespace celld-system --create-namespace \
-  --set image.tag=YOUR_BUILT_TAG
-```
+## Build and validate
 
-The cluster role covers only the fleet API and cluster-scoped storage and node
-objects. Every namespace that will hold fleets needs the namespaced Role and
-RoleBinding from `config/rbac/fleet-namespace.yaml`; list them in
-`fleetNamespaces` so the chart renders them, or apply the file into each
-namespace by hand. A fleet in a namespace without that Role reports
-`NamespaceAccessDenied` and nothing in the namespace is created. Workload and
-pod deletion privileges exist only inside those namespaces, for the maintenance
-executors; there is no cluster-wide delete.
-
-Use an immutable `image.digest` and matching `launcherImage` for PersistentFleet.
-Published release charts embed both as the same immutable image digest. The
-launcher binary is injected without modifying the celld image. Before enabling
-`networkPolicyEnforced`, independently establish that the cluster CNI enforces
-the generated policy. This flag is an operator assertion, not a CNI installer.
-Runtime identity, storage credentials, StorageClass, and Metrics Server are
-external prerequisites; refer to the profile and qualification documents.
-
-Before upgrading the controller, back up fleet specifications, retained reservations, immutable journal archive
-ConfigMaps, and launcher credential Secrets together (see [journal archives](journal-archives.md)), inspect CRD changes, and explicitly apply `config/crd/`. Never
-roll back to an operator that cannot read the persisted journal version. A
-controller release is distinct from a celld runtime upgrade; only registered,
-qualified runtime adapters may authorize transitions.
-
-## Monitoring
-
-`metrics.enabled=true` exposes port 8084 through a ClusterIP service.
-`metrics.serviceMonitor.enabled` and `metrics.prometheusRule.enabled` require
-Prometheus Operator CRDs already installed. The chart optionally alerts on
-stalled operations, possible loss, and fleets with zero ready replicas.
-Restrict metrics access using cluster network policy as appropriate.
-
-Fleet status distinguishes desired, applied, observed, ready, joining, and
-terminating replicas. `replicaObservationValid` indicates a complete Pod list;
-incomplete inventory must not be interpreted as zero running processes.
-`blockedSince` and lifecycle start/completion timestamps expose wait duration.
-The operator emits Events only when the blocker status or reason changes.
-Prometheus series are labeled by namespace/fleet and removed when deletion is
-observed. These operational observations never substitute for fencing evidence.
-
-The retained journal's own size is published as `celld_fleet_journal_bytes` —
-the encoded journal as written, meaning the reservation annotation while it is
-inline and the hydrated size once it is paged — and
-`celld_fleet_journal_archive_pages`, the immutable ConfigMap pages behind it.
-Both carry the same namespace/fleet labels as the other fleet series. The
-`JournalSizeWarning` condition turns true once the journal passes half of either
-budget that fails closed, 16 MiB hydrated or the 200 KiB archive index, and its
-message states the measured bytes and the cap. It warns only; nothing blocks on
-it. Act on it well before the cap, because a journal that reaches the cap can no
-longer be written at all and the fleet then fails closed (see
-[journal archives](journal-archives.md)).
-
-Inspect `kubectl describe celldfleet NAME -n NAMESPACE`, its durable reservation,
-and Events before intervening. A sticky `possibleLoss` condition requires
-investigation and recovery; do not clear the journal to force progress. Retained
-PVCs, object storage, reservations, and archived journal pages are recovery
-assets, not temporary operator state. Force deletion or force detach cannot
-establish that an old process stopped.
+`make check` builds the Go packages, runs race tests and checks native/Linux lint.
+`make test-envtest` exercises the real API server's admission and resource-version
+conflicts. `make test-linux` executes Linux process-lock tests with Docker.
+`make chart-check` and `make manifests-check` verify shipped configuration.
+The [qualification guide](qualification/README.md) distinguishes these checks
+from strict-runtime integration and cloud qualification.
 
 ## Releases
 
-Tag pushes run Go race tests, lint, generated-manifest checks, qualification
-replays, collector tests, chart validation, and the launcher and controller
-suites under both Linux architectures before publishing a multiarch
-controller/launcher image. Each platform of the pushed digest is then executed
-(version banner and launcher install), and the PersistentFleet kind suite runs
-against that exact digest with `--operator-image`. Only after it passes are the
-OCI chart and GitHub release published, both pointing at the digest. The image,
-the chart and the checksum file are signed keyless with cosign under this
-workflow's OIDC identity. Release notes carry the lifecycle journal version;
-an older operator cannot read fleets touched by a newer journal, so downgrades
-are unsupported.
-
-Verify before installing:
-
-```sh
-cosign verify --certificate-identity-regexp 'https://github.com/ewhauser/celld-operator/' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/ewhauser/celld-operator@sha256:DIGEST
-```
-
-Cadence: tag from `main` only when the nightly Integration matrix is green for
-that commit. Every release stays a GitHub prerelease marked experimental until
-the [EKS smoke suite](qualification/eks-smoke-plan.md) has run against a
-release digest; that is the criterion for the first non-prerelease.
-All releases are marked experimental until cloud qualification is independently
-completed. Workflow implementation and local packaging do not mean an image or
-chart has been published. `make chart-check` validates rendering and RBAC parity;
-`hack/package-release.py` embeds immutable image references for release packaging.
-
-Release publication refuses a version if its image, chart or GitHub release already exists. A partial publish requires investigation and a new version; rerunning cannot silently overwrite that version. The preflight fails closed on authentication or network errors.
-
-The workflow uses the repository `GITHUB_TOKEN` with package write permission.
-The `celld-operator` image and `charts/celld-operator` chart packages on GHCR are
-public (set on 19 September 2026 after the first publication, which GHCR
-creates private): pulls and the `cosign verify` commands need no credentials.
-The first release, `v0.1.0-rc.3`, was verified anonymously this way: both
-platforms listed in the index, image and chart signatures valid, chart pulled
-and its values pinned to the image digest.
+Publish an immutable operator image and use its digest for both the manager and
+launcher. Qualify the exact compatible celld fork image separately; native binary
+artifacts do not identify a container digest. Chart packaging and registry
+verification are release workflow responsibilities. A local build is not a
+published or cloud-qualified release.

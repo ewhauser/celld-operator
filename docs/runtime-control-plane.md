@@ -2,8 +2,7 @@
 
 `internal/runtime/controlplane` owns celld HTTP transport and wire decoding. The
 capacity collector uses its `/state` response and the load decoder in this
-package. The superseded v050 state decoder and v041 state-compatibility test and
-fixture are removed. Metrics Server observations and the closing Pod-incarnation check remain
+package. Metrics Server observations and the closing Pod-incarnation check remain
 in place. `Lifecycle` is the shared interface for Bucket and PersistentFleet;
 `runtimeTarget` derives their respective node names (Pod UID and Pod name) and
 requires a current, owned Pod with an exact IP. No Service address is used.
@@ -40,9 +39,8 @@ An explicitly qualified fork digest is still required for rollout.
 
 The adapter follows the implemented `State::snapshot` in
 `crates/celld/disk_removal.rs` and `handle_internal` in `crates/celld/main.rs` on
-`ewhauser/celld`, branch `codex/strict-disk-removal` (upstream v0.5.1 base).
-Stock v0.5.1 does not implement this extension. The old prototype's
-`/lifecycle/retirement` and S3 archive are not used.
+`ewhauser/celld`, strict-shutdown release `v0.5.1-ewhauser.1` (upstream v0.5.1 base).
+Stock v0.5.1 does not implement this extension.
 
 `GET /state` adds a `shutdown` object containing:
 
@@ -108,6 +106,6 @@ The fixture-generation source SHA256 values were:
 - `crates/logic/disk_removal.rs`: `4ae763abcf9e2657880970ed0d0ea82d6e90341c11c13999cfade9c591df4b89`
 
 This validates the implemented wire serializer against the Go client, not real
-celld shutdown, S3 recovery or EBS removal. The sibling branch remains under
-validation; a deployed runtime and the later lifecycle integration still need
-independent qualification.
+celld shutdown, S3 recovery or EBS removal. The opt-in real-binary tests described in [qualification](qualification/README.md)
+exercise the launcher/controller handshake separately; replicated recovery and
+real CSI/EBS deletion require their own exact-artifact qualification.

@@ -1,32 +1,35 @@
 ---
 title: Architecture
-description: How a CelldFleet connects Kubernetes workloads, storage, evidence and lifecycle decisions.
-sidebar:
-  order: 1
+description: celld owns data safety; the launcher and controller prove process and infrastructure effects.
 ---
 
-A CelldFleet is the desired state for one independent celld cluster. The operator watches that resource, creates the supporting Kubernetes objects, and reports what it can actually prove about the fleet. One operator installation can manage fleets in multiple namespaces; each fleet owns a dedicated bucket and a permanent cluster-scoped storage reservation.
+A CelldFleet describes one independent celld cluster. The operator creates its
+Kubernetes resources and coordinates lifecycle requests. Each fleet has a
+dedicated bucket and a permanent storage reservation bound to its UID.
 
-![Clients send requests through the application Service to celld pods. The operator manages pods and records operations in Kubernetes. celld writes to S3 and optional retained EBS disks; the operator only reads S3 recovery metadata.](../../../assets/architecture.svg)
+![The operator obtains celld safety through the launcher and records one current operation in Kubernetes. celld owns all S3 data access.](../../../assets/architecture.svg)
 
-The runtime handles application requests and durable data. The operator handles placement, observed health, scaling and planned lifecycle actions. S3 evidence tells it whether older sessions and peer logs are still relevant; for PersistentFleet, launcher receipts and volume identity add another stop-and-attachment proof. The operator never writes S3 data.
-
-## What the operator creates
-
-| Resource | Purpose |
+| Component | Responsibility |
 | --- | --- |
-| Deployment or StatefulSet | Runs the chosen [profile](../profiles/) |
-| Application ClusterIP Service on 8080 | Stable address for labelled client Pods |
-| Headless peer Service on 8081 | Peer discovery |
-| NetworkPolicy | Restricts client, peer, launcher and egress paths |
-| PodDisruptionBudget | Prevents voluntary disruptions while the operator coordinates lifecycle |
-| CelldStorageReservation | Permanently binds the bucket to one fleet UID and holds lifecycle authority |
-| Retained PVCs and launcher credential | PersistentFleet only |
+| celld | Application execution, replication, tiering, recovery and strict shutdown data safety. |
+| Launcher | Capture the exact runtime result, terminate its child, release the inherited lock and deny restart. |
+| Operator | Placement, capacity observation, bounded current operation and guarded workload/storage effects. |
+| Kubernetes and CSI | Scheduling, resource versions, storage protection, attachment and volume deletion. |
 
-The operator does not create AWS buckets, IAM roles, node groups, ingress, TLS or DNS. Prepare those through [AWS identities](../../configure/aws/), [storage](../../configure/storage/), [networking](../../configure/networking/) and [placement](../../configure/placement/).
+Both profiles use the launcher. Bucket uses a Deployment or Ordered StatefulSet
+with temporary disk. PersistentFleet uses a StatefulSet with dynamically
+provisioned CSI disks. All runtime/recovery members need the compatible fork.
 
-## One reconciliation loop, two decisions
+The operator creates application and headless Services, NetworkPolicies, a
+PodDisruptionBudget, a launcher Secret and storage reservations. It has no S3
+client or EC2 termination path. You supply buckets, runtime IAM roles, nodes,
+CSI, ingress, TLS and DNS.
 
-Observation gathers Pod inventory, runtime /state, S3 recovery evidence and Metrics Server samples. Incomplete observation is invalid, not zero. Capacity policy may recommend a replica count, but the lifecycle executor decides whether the required evidence permits each action. It writes intent to the [journal](../lifecycle-journal/) before changing a workload or sending a stop request. Conditions and status show the result; [safety model](../safety-model/) explains why an action may remain blocked.
+Capacity recommendations and manual requests enter the same
+[current-operation executor](../current-operation/). The reservation records
+intent before issuance and proof before effects. Status is reconstructed from
+current authority; clearing it cannot authorize deletion.
 
-The image contains the celld-operator controller and a celld-launcher used by PersistentFleet. The launcher holds the volume lock, seeds the runtime lease generation and serves authenticated stop requests. Read the [PersistentFleet lifecycle](../../contracts/persistent-fleet-lifecycle/) for its exact contract. The [architecture decision](../../decisions/0001-controller-architecture/) records design history.
+Read the [strict protocol](../../contracts/runtime-control-plane/),
+[launcher contract](../../contracts/launcher-supervision/) and
+[architecture decision](../../decisions/0022-celld-control-plane/) for details.

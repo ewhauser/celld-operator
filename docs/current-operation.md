@@ -37,7 +37,7 @@ There is no append-only completion or session history. A normal completed
 three-member PersistentFleet retains roughly 518 bytes in the fixture; the
 100-member regression uses realistic UUIDs, 64-hex container/runtime identities,
 PVC/PV UIDs and CSI handles and exercises all captured proofs plus the retained
-capacity baseline (158,429 of 184,320 bytes). Maintenance clears pre-disruption
+capacity baseline (163,128 of 184,320 bytes). Maintenance clears pre-disruption
 load samples while preserving the ineffective-addition hold. Encoded state has
 a hard 180 KiB cap and rejects unknown fields and invalid operation shapes.
 Oversized authority fails closed instead of creating an archive.
@@ -70,10 +70,12 @@ cannot create a proof, change an operation or authorize an effect.
    full revalidation and another reservation CAS; no blind fresh-version retry
    is allowed. The exact marker and resulting count reconstruct a lost response.
 6. Observe the specified replica and Pod effects. Only then enter PVC cleanup.
-   Each PVC deletion uses its recorded UID and resource version. A replacement
-   claim, changed PV/handle, existing Pod reference, or pending PVC-protection
-   finalizer blocks progress. The controller never removes storage finalizers.
-7. For restart/upgrade, wait at zero replicas until old PVCs are gone, then use
+   Each PVC deletion uses its recorded UID and resource version, with current
+   claim/PV/driver/handle and deletion-finalizer checks. Persist cleanup intent
+   before deletion, then wait for PVC/PV absence and no matching attachment. A
+   replacement claim, changed identity, existing Pod reference or pending CSI
+   deletion blocks progress. The controller never removes storage finalizers.
+7. For restart/upgrade, wait at zero replicas until captured disk cleanup completes, then use
    the same guarded effect protocol with `/resume`, the recorded image and fresh
    claim names. Admit new claim UIDs before releasing their scheduling gates.
    Complete only after the specified Pod count and workload readiness are
@@ -90,28 +92,31 @@ claim that reuses its name.
 
 ## Storage and rollout boundaries
 
-The StorageClass and PV contract remains **Retain**. Successful PVC cleanup is
-successful compute removal and claim-name release, not EBS deletion. PVs and
-physical disks remain retained. The `DiskCleanupPending` condition and last
-completion make that distinction visible. Growth uses new PVCs; it never adopts
-an accumulated retained-member record. Cross-host/boot reuse remains blocked by
-the launcher, with no operator handoff grant or fencing override.
+PersistentFleet uses fresh dynamically provisioned RWOP disks under a supported
+CSI class with `Delete` reclaim policy and `WaitForFirstConsumer`. StatefulSet
+PVC retention stays `Retain` so only the controller initiates claim deletion.
+Strict proof and observed compute removal precede UID/resource-version guarded
+PVC deletion. Current cleanup binds the exact claim, PV, CSI driver and handle
+and captures the external-provisioner deletion finalizer. Completion waits for
+PVC/PV absence and no matching VolumeAttachment.
 
-**After completion, the positive removal proof has been discarded.** The
-remaining `DiskCleanupPending` boolean, a released Retain PV, its claimRef, and
-the last completion are not authority for automatic historical PV/EBS deletion.
-Item #6 must establish its own current exact-resource deletion contract and
-real CSI/EBS qualification; it must not infer safety from these remnants or
-rebuild a history archive. This implementation never deletes a PV, changes a
-reclaim policy, force-removes an attachment or terminates an EC2 instance.
+CSI's deletion finalizer supplies the backend-deletion guarantee; the operator
+never removes finalizers, force-detaches disks or calls cloud APIs. It keeps
+current proof while cleanup is pending and discards it only after completion.
+There is no historical cleanup flag or deletion authority. Historical retained
+PVs cannot be adopted or retroactively disposed. See
+[disposable disks](disposable-disks.md) for the exact contract and validation.
 
-There is no default compatible image. Provisioning requires an explicit
-`ghcr.io/ewhauser/celld@sha256:...` pin and a digest-pinned launcher image.
-Syntactic pin validation is not artifact qualification. A homogeneous compatible
-fork, including recovery readers for native `bucket_complete`, must be qualified
-before rollout. Stock upstream v0.5.1 cannot provide this contract. No image
-digest is invented from a native-binary artifact. Tests label synthetic pins as
-fixtures.
+Growth and coordinated maintenance use fresh claims. A disk-scoped launcher
+marker permanently denies any later launch on a strictly stopped disk. A host or
+boot change is refused before startup because local locks cannot prove exclusion
+across kernels. There is no handoff grant or fencing override.
+
+Provisioning requires an explicit `ghcr.io/ewhauser/celld@sha256:...` pin and a
+digest-pinned launcher image. Pin syntax is not artifact qualification. All
+recovery participants need the compatible fork's native `bucket_complete`
+reader. Stock upstream v0.5.1 cannot satisfy the protocol. Native binary hashes
+are not container digests; test pins are explicitly fixtures.
 
 ## Regression and qualification coverage
 
@@ -129,7 +134,7 @@ replaced at their active behavior boundaries:
 | PVC/PV/workload/runtime replacement | `TestIdentityDriftBlocksProofAndEffect`, `TestStateRejectsUnboundOrOversizedAuthority` |
 | Retained-disk reactivation | `TestCurrentAuthorityBoundedAndStatusRebuildable` (fresh claims), strict launcher cross-host/boot tests |
 | Capacity/manual/external entry points | `TestCapacityEntriesUseStrictCurrentOperation`, `TestCapacityCollectionEditAndRevalidation` |
-| Multi-member restart/upgrade/delete | `TestMaintenanceUsesCurrentWorkingSet`, `TestDeleteUsesStrictWorkingSetAndRetainsDisks`, `TestDeploymentBucketMaintenanceAndContractionBoundary` |
+| Multi-member restart/upgrade/delete | `TestMaintenanceUsesCurrentWorkingSet`, `TestDeleteUsesStrictWorkingSetAndDisposesDisks`, `TestDeploymentBucketMaintenanceAndContractionBoundary` |
 | Archive growth and editable status | `TestCurrentAuthorityBoundedAndStatusRebuildable`, `TestHundredMemberMaintenanceFitsBound` |
 | Storage cleanup and stale deletion | `TestStrictRemovalBothProfiles`, `TestEnvtestCleanupPreconditionsRejectReplacement`, manifest RBAC audit |
 | No private recovery reads | `TestNoRecoveryMetadataDependencies`; production manager no longer constructs S3 evidence or fencing clients |
@@ -137,7 +142,7 @@ replaced at their active behavior boundaries:
 The opt-in local integration runs the real fork binary, typed control-plane
 client and launcher HTTP protocol against isolated MinIO. It persists proof in
 the controller, stops the launcher, recreates the controller, then verifies the
-guarded workload/PVC effect and retained PV:
+guarded workload effect and simulated Kubernetes storage cleanup:
 
 ```sh
 CELLD_STRICT_TEST_BINARY=/absolute/path/to/strict/celld \
@@ -150,8 +155,3 @@ binary, SHA256 `a295e40f971e9800164b33e1e8e6e13f5d96ead32a210481f348bba35223c785
 It uses an empty runtime disk and simulated Kubernetes/CSI resources. Envtest
 separately exercises a real API server and etcd. Neither qualifies replicated
 workload recovery, Kind's full workload controllers, EKS/EBS or real disk cleanup.
-
-Item #5 still owns repository-wide historical documentation, old offline v050
-qualification adapters/tools and old Kind scenario expectations. The active
-controller and manager have no references to them. Item #6 owns the disposable
-disk policy and real CSI/EBS qualification described above.

@@ -9,12 +9,12 @@ Start with the workload and fleet status. All commands name the kubeconfig conte
 
 ```bash
 kubectl --context YOUR_CONTEXT -n celld-system rollout status deployment/celld-celld-operator --timeout=180s
-kubectl --context YOUR_CONTEXT -n fleets get deployment/my-fleet,service/my-fleet
+kubectl --context YOUR_CONTEXT -n fleets get statefulset/my-fleet,service/my-fleet
 kubectl --context YOUR_CONTEXT -n fleets describe celldfleet my-fleet
 kubectl --context YOUR_CONTEXT -n fleets get pods -o wide
 ```
 
-A healthy first run has the operator Deployment available, three ready runtime Pods, a `my-fleet` Service on port 8080, and `Ready=True` on the fleet. `Ready` follows the current workload's applied replicas and generation; compare it with `status.desiredReplicas` and `status.appliedReplicas` when a change is in progress. `ProductionQualified=False` remains expected. Conditions and Events are operational observations, not proof that a previous writer was fenced or an acknowledged write survived a failure.
+A healthy first run has the operator Deployment available, three ready runtime Pods, a `my-fleet` Service on port 8080, and `Ready=True` on the fleet. `Ready` follows the current workload's applied replicas and generation; compare it with `status.desiredReplicas` and `status.appliedReplicas` when a change is in progress. `ProductionQualified=False` remains expected. Conditions and Events are operational observations, not proof that a previous writer was safely stopped or an acknowledged write survived a failure.
 
 | Symptom | Check next |
 | --- | --- |
@@ -29,10 +29,10 @@ For a focused status view:
 
 ```bash
 kubectl --context YOUR_CONTEXT -n fleets get celldfleet my-fleet -o json | jq '.status.conditions'
-kubectl --context YOUR_CONTEXT -n fleets logs deployment/my-fleet --tail=100
+kubectl --context YOUR_CONTEXT -n fleets logs statefulset/my-fleet --tail=100
 kubectl --context YOUR_CONTEXT -n celld-system logs deployment/celld-celld-operator --tail=100
 ```
 
 Events appear when blocker state changes, so a quiet fleet may have no new Events. The [conditions reference](../../reference/conditions/) defines the current types and reasons. Optional Prometheus metrics are configured through [chart values](../../api/helm-values/); Metrics Server is needed for capacity recommendations, not for this first fleet.
 
-The repository's disposable `make integration` harness runs with kind and MinIO. It is useful to test the implementation locally, but it does not establish cloud qualification. Do not use `--local-test` against EKS. If a lifecycle operation reports possible loss or stays blocked, preserve the storage reservation and evidence and follow the [safety model](../../concepts/safety-model/).
+The repository's disposable `make integration` harness runs with kind and MinIO. It is useful to test the implementation locally, but it does not establish cloud qualification. Do not use `--local-test` against EKS. If a lifecycle operation stays blocked, preserve the storage reservation and affected disks and follow the [safety model](../../concepts/safety-model/).

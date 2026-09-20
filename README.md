@@ -5,7 +5,7 @@ Kubernetes fleet operator for celld, targeting AWS EKS with S3 and EBS.
 Define a fleet with a `CelldFleet` manifest. The operator creates its workloads,
 Services and network policies, then coordinates scaling and maintenance. You
 supply the cluster, S3 bucket and AWS identities; PersistentFleet also uses
-retained EBS volumes.
+disposable CSI disks after verified shutdown.
 
 **Experimental: for evaluation.** Cloud deployment and failure testing are still
 incomplete. See [capabilities and limitations](docs/critical-features.md).
@@ -35,7 +35,7 @@ harnesses are available; they do not enable production scaling.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for formatting, linting, hooks, and container
 builds, and [docs/](docs/README.md) for the architecture and qualification work.
-Runtime qualification: [measured findings and release gates](docs/qualification/README.md), [local harness](hack/qualification/README.md).
+Runtime qualification: [test boundaries and remaining gates](docs/qualification/README.md). Both profiles require an explicit compatible fork runtime digest and a digest-pinned launcher. The controller uses celld control-plane proof and has no S3 or EC2 client.
 
 ## Contributor references
 
