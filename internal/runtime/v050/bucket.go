@@ -18,7 +18,7 @@ type BucketObservation struct {
 // Unknown writers, unresolved historical sessions, and ANY peer-log object make
 // this case inapplicable, even when an object is sealed or not a loss declaration.
 func (a *Adapter) InspectBucket(ctx context.Context, r Reader, req Request, now func() time.Time) (BucketObservation, error) {
-	if req.OperationID == "" || !req.InventoryComplete || len(req.Sessions) == 0 || req.PageBudget <= 0 || !fresh(req.CapturedAt, now(), req.MaxAge) {
+	if req.incomplete(now) {
 		return BucketObservation{}, errors.New("incomplete Bucket preflight")
 	}
 	ctx, cancel := context.WithTimeout(ctx, req.MaxAge)

@@ -264,6 +264,15 @@ type Request struct {
 	MaxAge            time.Duration
 	PageBudget        int
 }
+
+// incomplete fails closed on a request that cannot support any assessment: no
+// operation, unreconstructed history, no sessions, no listing budget, or a
+// capture that is already stale. now is taken as a func so the clock is read
+// only when the cheaper field checks have all passed, as before.
+func (req Request) incomplete(now func() time.Time) bool {
+	return req.OperationID == "" || !req.InventoryComplete || len(req.Sessions) == 0 || req.PageBudget <= 0 || !fresh(req.CapturedAt, now(), req.MaxAge)
+}
+
 type Evidence struct {
 	OperationID string
 	Completed   []Session
@@ -285,7 +294,7 @@ func (a *Adapter) Inspect(ctx context.Context, r Reader, req Request, now func()
 
 func (a *Adapter) assess(ctx context.Context, r Reader, req Request, now func() time.Time, requireStopped bool) (Evidence, error) {
 	var result Evidence
-	if req.OperationID == "" || !req.InventoryComplete || len(req.Sessions) == 0 || req.PageBudget <= 0 || !fresh(req.CapturedAt, now(), req.MaxAge) {
+	if req.incomplete(now) {
 		return Evidence{}, errors.New("incomplete lifecycle evidence")
 	}
 	ctx, cancel := context.WithTimeout(ctx, req.MaxAge)
