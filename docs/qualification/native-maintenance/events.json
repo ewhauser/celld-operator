@@ -1,0 +1,265 @@
+[
+  {
+    "event": "Three native v0.5.1 nodes ready"
+  },
+  {
+    "event": "Acknowledged writes",
+    "total": 12,
+    "through": "c"
+  },
+  {
+    "event": "Peer-disk write acknowledged with MinIO paused",
+    "elapsed_ms": 22
+  },
+  {
+    "event": "Strict shutdown accepted, not complete",
+    "node": "c",
+    "operation": "maintenance-three-to-two"
+  },
+  {
+    "event": "Strict shutdown progress",
+    "node": "c",
+    "status": {
+      "capabilities": {
+        "strict_disk_removal": true
+      },
+      "control_only": false,
+      "operation": {
+        "blocker": "draining application activity",
+        "expected_generation": "71d2059120999a296ea0ffb33de80467bc429ca97744848476386e50953abdd3",
+        "mode": "remove-disk",
+        "operation_id": "maintenance-three-to-two",
+        "phase": "draining"
+      },
+      "runtime_generation": "71d2059120999a296ea0ffb33de80467bc429ca97744848476386e50953abdd3",
+      "schema_version": 1
+    }
+  },
+  {
+    "event": "Strict shutdown progress",
+    "node": "c",
+    "status": {
+      "capabilities": {
+        "strict_disk_removal": true
+      },
+      "control_only": true,
+      "operation": {
+        "blocker": "own_covered=false, follower_obligations_pending=0",
+        "expected_generation": "71d2059120999a296ea0ffb33de80467bc429ca97744848476386e50953abdd3",
+        "mode": "remove-disk",
+        "operation_id": "maintenance-three-to-two",
+        "phase": "draining"
+      },
+      "runtime_generation": "71d2059120999a296ea0ffb33de80467bc429ca97744848476386e50953abdd3",
+      "schema_version": 1
+    }
+  },
+  {
+    "event": "Strict shutdown progress",
+    "node": "c",
+    "status": {
+      "capabilities": {
+        "strict_disk_removal": true
+      },
+      "control_only": true,
+      "operation": {
+        "blocker": null,
+        "expected_generation": "71d2059120999a296ea0ffb33de80467bc429ca97744848476386e50953abdd3",
+        "mode": "remove-disk",
+        "operation_id": "maintenance-three-to-two",
+        "phase": "data_safe"
+      },
+      "runtime_generation": "71d2059120999a296ea0ffb33de80467bc429ca97744848476386e50953abdd3",
+      "schema_version": 1
+    }
+  },
+  {
+    "event": "Exact-generation data-safe result observed; process stopped and disk deleted",
+    "node": "c"
+  },
+  {
+    "event": "Verified acknowledged ledger",
+    "total": 13,
+    "through": "a"
+  },
+  {
+    "event": "Acknowledged writes",
+    "total": 21,
+    "through": "a"
+  },
+  {
+    "event": "Strict shutdown accepted, not complete",
+    "node": "b",
+    "operation": "maintenance-two-to-one"
+  },
+  {
+    "event": "Strict shutdown progress",
+    "node": "b",
+    "status": {
+      "capabilities": {
+        "strict_disk_removal": true
+      },
+      "control_only": false,
+      "operation": {
+        "blocker": "draining application activity",
+        "expected_generation": "1e41ff178b8e9d67d98131adbb1ce628a69dfb0cf103b2fd190709d1caa4bcde",
+        "mode": "remove-disk",
+        "operation_id": "maintenance-two-to-one",
+        "phase": "draining"
+      },
+      "runtime_generation": "1e41ff178b8e9d67d98131adbb1ce628a69dfb0cf103b2fd190709d1caa4bcde",
+      "schema_version": 1
+    }
+  },
+  {
+    "event": "Strict shutdown progress",
+    "node": "b",
+    "status": {
+      "capabilities": {
+        "strict_disk_removal": true
+      },
+      "control_only": true,
+      "operation": {
+        "blocker": "own_covered=true, follower_obligations_pending=1",
+        "expected_generation": "1e41ff178b8e9d67d98131adbb1ce628a69dfb0cf103b2fd190709d1caa4bcde",
+        "mode": "remove-disk",
+        "operation_id": "maintenance-two-to-one",
+        "phase": "draining"
+      },
+      "runtime_generation": "1e41ff178b8e9d67d98131adbb1ce628a69dfb0cf103b2fd190709d1caa4bcde",
+      "schema_version": 1
+    }
+  },
+  {
+    "event": "Strict shutdown progress",
+    "node": "b",
+    "status": {
+      "capabilities": {
+        "strict_disk_removal": true
+      },
+      "control_only": true,
+      "operation": {
+        "blocker": null,
+        "expected_generation": "1e41ff178b8e9d67d98131adbb1ce628a69dfb0cf103b2fd190709d1caa4bcde",
+        "mode": "remove-disk",
+        "operation_id": "maintenance-two-to-one",
+        "phase": "data_safe"
+      },
+      "runtime_generation": "1e41ff178b8e9d67d98131adbb1ce628a69dfb0cf103b2fd190709d1caa4bcde",
+      "schema_version": 1
+    }
+  },
+  {
+    "event": "Exact-generation data-safe result observed; process stopped and disk deleted",
+    "node": "b"
+  },
+  {
+    "event": "Verified acknowledged ledger",
+    "total": 21,
+    "through": "a"
+  },
+  {
+    "event": "Acknowledged writes",
+    "total": 29,
+    "through": "a"
+  },
+  {
+    "event": "Verified acknowledged ledger",
+    "total": 29,
+    "through": "a"
+  },
+  {
+    "event": "Starting final one-to-zero strict shutdown",
+    "acknowledgements": 29
+  },
+  {
+    "event": "Strict shutdown accepted, not complete",
+    "node": "a",
+    "operation": "maintenance-one-to-zero"
+  },
+  {
+    "event": "Strict shutdown progress",
+    "node": "a",
+    "status": {
+      "capabilities": {
+        "strict_disk_removal": true
+      },
+      "control_only": false,
+      "operation": {
+        "blocker": "draining application activity",
+        "expected_generation": "d2b8b4af56704d796538e0e5095a2d1127740e40fd806e51b7d62f241be300fa",
+        "mode": "remove-disk",
+        "operation_id": "maintenance-one-to-zero",
+        "phase": "draining"
+      },
+      "runtime_generation": "d2b8b4af56704d796538e0e5095a2d1127740e40fd806e51b7d62f241be300fa",
+      "schema_version": 1
+    }
+  },
+  {
+    "event": "Strict shutdown progress",
+    "node": "a",
+    "status": {
+      "capabilities": {
+        "strict_disk_removal": true
+      },
+      "control_only": true,
+      "operation": {
+        "blocker": null,
+        "expected_generation": "d2b8b4af56704d796538e0e5095a2d1127740e40fd806e51b7d62f241be300fa",
+        "mode": "remove-disk",
+        "operation_id": "maintenance-one-to-zero",
+        "phase": "data_safe"
+      },
+      "runtime_generation": "d2b8b4af56704d796538e0e5095a2d1127740e40fd806e51b7d62f241be300fa",
+      "schema_version": 1
+    }
+  },
+  {
+    "event": "Exact-generation data-safe result observed; process stopped and disk deleted",
+    "node": "a"
+  },
+  {
+    "event": "All three stopped and all three disks deleted"
+  },
+  {
+    "event": "Verified acknowledged ledger",
+    "total": 29,
+    "through": "a"
+  },
+  {
+    "event": "Verified acknowledged ledger",
+    "total": 29,
+    "through": "b"
+  },
+  {
+    "event": "Verified acknowledged ledger",
+    "total": 29,
+    "through": "c"
+  },
+  {
+    "event": "Acknowledged writes",
+    "total": 37,
+    "through": "c"
+  },
+  {
+    "event": "Verified acknowledged ledger",
+    "total": 37,
+    "through": "a"
+  },
+  {
+    "event": "Verified acknowledged ledger",
+    "total": 37,
+    "through": "b"
+  },
+  {
+    "event": "Verified acknowledged ledger",
+    "total": 37,
+    "through": "c"
+  },
+  {
+    "event": "PASS coordinated maintenance",
+    "acknowledgements": 37,
+    "output": "/private/tmp/celld-coordinated-maintenance-released-1"
+  }
+]

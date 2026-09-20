@@ -1,0 +1,91 @@
+{
+  "binary": "/Users/ewhauser/.codex/artifacts/celld/0.5.1-ewhauser.1/celld-aarch64-apple-darwin/celld",
+  "binary_sha256": "a295e40f971e9800164b33e1e8e6e13f5d96ead32a210481f348bba35223c785",
+  "version": "0.5.1-ewhauser.1",
+  "source_commit": "f3b7e8c07e6fee53f1752bfb7a30fffbf1d514c8",
+  "harness": "/tmp/celld-coordinated-maintenance-harness/demo.py",
+  "worker": "/tmp/celld-coordinated-maintenance-harness/index.js",
+  "command": "uv run /tmp/celld-coordinated-maintenance-harness/demo.py --binary /Users/ewhauser/.codex/artifacts/celld/0.5.1-ewhauser.1/celld-aarch64-apple-darwin/celld --esbuild /tmp/celld-strict-tools/node_modules/@esbuild/darwin-arm64/bin/esbuild --output /tmp/celld-coordinated-maintenance-released-1",
+  "result": "PASS",
+  "sequence": "3->2->1->0; all disks removed after data_safe and exit 0; all 3 fresh disks restarted",
+  "storage_checks": "Each acknowledged write writes DO KV and SQL; each GET requires SQL and KV equality and the expected identity.",
+  "acknowledged_before_zero": 29,
+  "acknowledged_after_restart": 37,
+  "verified_through_nodes": [
+    "a",
+    "b",
+    "c"
+  ],
+  "includes_peer_only_ack_with_minio_paused": true,
+  "loss_markers": 0,
+  "strict_results": {
+    "maintenance-one-to-zero": {
+      "capabilities": {
+        "strict_disk_removal": true
+      },
+      "control_only": true,
+      "operation": {
+        "blocker": null,
+        "expected_generation": "d2b8b4af56704d796538e0e5095a2d1127740e40fd806e51b7d62f241be300fa",
+        "mode": "remove-disk",
+        "operation_id": "maintenance-one-to-zero",
+        "phase": "data_safe"
+      },
+      "runtime_generation": "d2b8b4af56704d796538e0e5095a2d1127740e40fd806e51b7d62f241be300fa",
+      "schema_version": 1
+    },
+    "maintenance-three-to-two": {
+      "capabilities": {
+        "strict_disk_removal": true
+      },
+      "control_only": true,
+      "operation": {
+        "blocker": null,
+        "expected_generation": "71d2059120999a296ea0ffb33de80467bc429ca97744848476386e50953abdd3",
+        "mode": "remove-disk",
+        "operation_id": "maintenance-three-to-two",
+        "phase": "data_safe"
+      },
+      "runtime_generation": "71d2059120999a296ea0ffb33de80467bc429ca97744848476386e50953abdd3",
+      "schema_version": 1
+    },
+    "maintenance-two-to-one": {
+      "capabilities": {
+        "strict_disk_removal": true
+      },
+      "control_only": true,
+      "operation": {
+        "blocker": null,
+        "expected_generation": "1e41ff178b8e9d67d98131adbb1ce628a69dfb0cf103b2fd190709d1caa4bcde",
+        "mode": "remove-disk",
+        "operation_id": "maintenance-two-to-one",
+        "phase": "data_safe"
+      },
+      "runtime_generation": "1e41ff178b8e9d67d98131adbb1ce628a69dfb0cf103b2fd190709d1caa4bcde",
+      "schema_version": 1
+    }
+  },
+  "failure_regression": {
+    "path": "/tmp/celld-coordinated-maintenance-released-deadline-1",
+    "deadline_ms": 1,
+    "result": "failed terminal result immutable on duplicate; disk retained",
+    "retained_disk_exists": true
+  },
+  "limitations": [
+    "native macOS processes + local Docker MinIO only",
+    "does not itself qualify Kubernetes/operator sequencing, launcher restart exclusion, image digest or cloud",
+    "one bounded workload run, not sustained stress or full conformance"
+  ],
+  "build_manifest": {
+    "repository": "ewhauser/celld",
+    "commit": "f3b7e8c07e6fee53f1752bfb7a30fffbf1d514c8",
+    "version": "0.5.1-ewhauser.1",
+    "target": "aarch64-apple-darwin",
+    "asset": "celld-aarch64-apple-darwin.gz",
+    "sha256": "4f625f9bdc92b6e485e4e276bef69b4efee4884fc1e0ef77f90ed620c7946c4e"
+  },
+  "build_manifest_asset_hash_and_decompressed_binary_verified": true,
+  "harness_sha256": "b579f719d14f241021a21cbf0ae4b79c0dda315bf9249ce9ebafb360142b99ef",
+  "worker_sha256": "20e5923fbecd0ed1431cdc3dca2069f817d90bb2fda73c7d79f0b2507a473892",
+  "artifact_directory": "/Users/ewhauser/.codex/artifacts/celld/0.5.1-ewhauser.1/coordinated-maintenance"
+}

@@ -20,6 +20,11 @@ records include opt-in test commands and the September 20 binary evidence.
 Do not treat serialized fixtures as live server observations or the empty-disk
 handshake as replicated recovery qualification.
 
+The [released native maintenance run](native-maintenance/README.md) separately
+verified strict 3→2→1→0, deletion of every disk, fresh-disk recovery of all 29
+acknowledged KV/SQL writes, and 37/37 entries after new writes. Its failed-deadline
+case retained storage. This is native/MinIO evidence, separate from Kind and EBS.
+
 Use [the EKS test plan](eks-smoke-plan.md) for cloud validation. Keep unsupported
 or blocked outcomes visible; never clear authority or force storage finalizers
 to make a test pass.
