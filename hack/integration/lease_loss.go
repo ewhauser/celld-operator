@@ -96,7 +96,17 @@ func (h *harness) exerciseLeaseLoss() {
 		h.waitFor("S3 lease expiry stops every runtime without removal authority", time.Minute, failed)
 	}()
 	for _, target := range targets {
-		logs := h.k("-n", "fleets", "logs", nameOf(target.pod), "-c", "celld", "--tail=100")
+		// Preserve predecessor recovery and acknowledged-tail evidence before
+		// ordinary Pod replacement makes these container logs unavailable.
+		const limit = 8 << 20
+		fmt.Printf("BEGIN PRE-REPLACEMENT RUNTIME LOG pod=%s uid=%s limit_bytes=%d\n", nameOf(target.pod), uidOf(target.pod), limit)
+		logs, err := h.try(command{args: h.kubectl("-n", "fleets", "logs", nameOf(target.pod), "-c", "celld", "--tail=-1", "--timestamps=true", "--limit-bytes=8388608", "--request-timeout=15s"), timeout: 20 * time.Second})
+		fmt.Printf("%s\n", logs)
+		if len(logs) >= limit {
+			fmt.Println("PRE-REPLACEMENT RUNTIME LOG BYTE LIMIT REACHED; capture may be truncated")
+		}
+		fmt.Printf("END PRE-REPLACEMENT RUNTIME LOG pod=%s uid=%s\n", nameOf(target.pod), uidOf(target.pod))
+		must(err)
 		assert(strings.Contains(logs, "node_lease_watchdog_fence"), "%s did not stop because its S3 lease expired", nameOf(target.pod))
 	}
 	h.hold(12*time.Second, "restoring S3 does not restart failed children or delete disks", failed)
