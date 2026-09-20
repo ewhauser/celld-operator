@@ -14,7 +14,7 @@ import (
 //  1. The /scale subresource reports the fleet's pods and selector, and a write
 //     through it lands in spec.replicas without the operator ever writing it back.
 //  2. An HPA targeting the CelldFleet raises the fleet to its maximum through the
-//     operator's journaled addition path.
+//     operator's bounded addition path.
 //  3. A lowered HPA maximum contracts the fleet through the same gated executor
 //     the disposable fixture uses for automatic contraction; the acknowledged
 //     write stays readable.
@@ -24,7 +24,7 @@ func (h *harness) exerciseExternal() {
 		return decode(h.k("get", "--raw", "/apis/celld.eric.dev/v1alpha1/namespaces/fleets/celldfleets/alpha/scale"))
 	}
 	settled := func(count int64) bool {
-		return specReplicas(h.get("deployment", "alpha")) == count && h.ready("alpha") && len(sub(h.journal("alpha"), "Operation")) == 0
+		return specReplicas(h.get("statefulset", "alpha")) == count && h.ready("alpha") && len(sub(h.currentState("alpha"), "Operation")) == 0
 	}
 	h.merge("alpha", `{"spec":{"capacity":{"mode":"External"}}}`)
 	h.wait("External mode names the /scale writer as owner", func() bool {
@@ -81,7 +81,7 @@ func (h *harness) exerciseExternal() {
 	h.waitFor("HPA raises spec.replicas to its maximum", 300*time.Second, func() bool {
 		return specReplicas(h.get("celldfleet", "alpha")) == 3
 	})
-	h.waitFor("operator applies the HPA addition through the journal", 300*time.Second, func() bool { return settled(3) })
+	h.waitFor("operator applies the HPA addition through current-operation state", 300*time.Second, func() bool { return settled(3) })
 	gen := generation(h.get("celldfleet", "alpha"))
 	h.sleep(20 * time.Second)
 	assert(generation(h.get("celldfleet", "alpha")) == gen, "operator or HPA kept rewriting spec.replicas")
@@ -104,7 +104,7 @@ func (h *harness) exerciseExternal() {
 	// kubectl scale is an ordinary /scale writer once the HPA is gone.
 	h.k("-n", "fleets", "delete", "hpa", "alpha", "--wait=true")
 	h.k("-n", "fleets", "scale", "celldfleet/alpha", "--replicas=3")
-	h.waitFor("kubectl scale through /scale adds a replica via the journal", 300*time.Second, func() bool { return settled(3) })
+	h.waitFor("kubectl scale through /scale adds a replica via current-operation state", 300*time.Second, func() bool { return settled(3) })
 
 	// Return ownership: drop the policy; spec.replicas is a manual field again.
 	h.merge("alpha", `{"spec":{"capacity":null,"replicas":2}}`)

@@ -8,7 +8,8 @@ GOLANGCI_LINT := GOTOOLCHAIN=go1.27.1 CGO_ENABLED=0 go run github.com/golangci/g
 # A native lint binary that can analyze another GOOS; `go run` under GOOS=linux
 # would build a Linux executable that cannot run on a macOS host.
 GOLANGCI_LINT_BIN := bin/tools/golangci-lint
-RUNTIME_IMAGE := ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8
+RUNTIME_IMAGE ?= $(shell cat hack/runtime-image.txt)
+export CELLD_RUNTIME_IMAGE ?= $(RUNTIME_IMAGE)
 HOST_GOARCH := $(shell go env GOARCH)
 
 .PHONY: check check-full build test vet fmt lint lint-linux lint-new test-linux image clean
@@ -70,18 +71,6 @@ image:
 clean:
 	rm -rf bin
 
-.PHONY: qualification-replay qualification-local
-qualification-replay:
-	sh hack/qualification/replay.sh
-
-# Explicit opt-in. Each run uses isolated local Docker resources and a new output directory.
-qualification-local:
-	.qualification-venv/bin/python hack/qualification/run.py --scenario $(SCENARIO) --output $(OUTPUT)
-
-.PHONY: qualification-test
-qualification-test:
-	.qualification-venv/bin/python -m unittest discover -s hack/qualification -p 'test_*.py'
-
 CONTROLLER_GEN := go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.20.1
 .PHONY: generate manifests-check integration
 generate:
@@ -90,16 +79,18 @@ generate:
 manifests-check:
 	python3 hack/check-generated.py
 
-integration: build
-	go run ./hack/integration
-
-.PHONY: integration-bucket
-integration-bucket:
-	go run ./hack/integration --bucket-lifecycle
-
-.PHONY: integration-persistent
-integration-persistent:
-	go run ./hack/integration --persistent-lifecycle
+# Actual Kind workloads, strict fork runtime and hostpath CSI RWOP/Delete storage.
+.PHONY: integration integration-lifecycle integration-maintenance integration-faults integration-external
+integration:
+	go run ./hack/integration --suite all
+integration-lifecycle:
+	go run ./hack/integration --suite lifecycle
+integration-maintenance:
+	go run ./hack/integration --suite maintenance
+integration-faults:
+	go run ./hack/integration --suite faults
+integration-external:
+	go run ./hack/integration --suite external
 
 .PHONY: chart-sync chart-check chart-package
 chart-sync:
@@ -113,34 +104,6 @@ chart-check:
 
 chart-package: chart-check
 	helm package charts/celld-operator --destination dist
-
-.PHONY: integration-ordered-bucket
-integration-ordered-bucket:
-	go run ./hack/integration --ordered-bucket
-
-.PHONY: integration-maintenance
-integration-maintenance:
-	go run ./hack/integration --maintenance
-
-# Fault injection: manager crash points, cordon + pod deletion, toxiproxy S3 latency/partition.
-.PHONY: integration-faults
-integration-faults:
-	go run ./hack/integration --faults
-
-# Two manager replicas; the leader is deleted while a contraction is issued.
-.PHONY: integration-leader
-integration-leader:
-	go run ./hack/integration --leader-failover
-
-# PersistentFleet lifecycle with ReadWriteOncePod claims on the per-node hostpath CSI driver.
-.PHONY: integration-persistent-rwop
-integration-persistent-rwop:
-	go run ./hack/integration --persistent-lifecycle --rwop-csi
-
-# External capacity mode: a real HPA drives spec.replicas through /scale.
-.PHONY: integration-external
-integration-external:
-	go run ./hack/integration --external
 
 # Documentation site (Astro + Starlight in site/). Pages are synced from docs/,
 # config/, charts/ and cmd/ on every build; nothing under site/src/content is

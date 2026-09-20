@@ -1,6 +1,6 @@
 # Disposable kind integration suites. They need Docker, a three-node kind
 # cluster, registry access and 15-25 minutes each. Every pull request runs the
-# base suite; the full matrix runs nightly, on demand, and on a pull request
+# lifecycle suite; the full matrix runs nightly, on demand, and on a pull request
 # carrying the `integration` label.
 name: Integration
 
@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       suite:
-        description: Suite to run (all, base, bucket, persistent, persistent-rwop, ordered-bucket, maintenance, faults, external, leader)
+        description: Suite to run (all, lifecycle, maintenance, faults, external)
         default: all
         type: string
   pull_request:
@@ -26,11 +26,11 @@ concurrency:
 jobs:
   kind:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        suite: [base, bucket, persistent, persistent-rwop, ordered-bucket, maintenance, faults, external, leader]
+        suite: [lifecycle, maintenance, faults, external]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - name: Select suite
@@ -40,10 +40,10 @@ jobs:
           LABELLED: ${{ contains(github.event.pull_request.labels.*.name, 'integration') }}
           INPUT: ${{ github.event.inputs.suite || 'all' }}
         run: |
-          # A pull request runs base unless it carries the integration label;
+          # A pull request runs lifecycle unless it carries the integration label;
           # schedule and dispatch honour the requested suite.
           if [ "$EVENT" = pull_request ] && [ "$LABELLED" != true ]; then
-            REQUESTED=base
+            REQUESTED=lifecycle
           else
             REQUESTED="$INPUT"
           fi
@@ -70,7 +70,4 @@ jobs:
       - name: Run suite
         if: steps.select.outputs.run == 'true'
         run: |
-          case "${{ matrix.suite }}" in
-            base) make integration ;;
-            *) make "integration-${{ matrix.suite }}" ;;
-          esac
+          make "integration-${{ matrix.suite }}"

@@ -8,12 +8,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"os/exec"
 	"reflect"
 	"runtime/debug"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -162,8 +160,8 @@ func (h *harness) cluster(kind, name string) object {
 	return decode(h.k("get", kind, name, "-o", "json"))
 }
 
-func (h *harness) listIn(ns, kind string, extra ...string) []object {
-	args := append([]string{"-n", ns, "get", kind}, extra...)
+func (h *harness) listIn(kind string, extra ...string) []object {
+	args := append([]string{"-n", "fleets", "get", kind}, extra...)
 	return items(decode(h.k(append(args, "-o", "json")...)))
 }
 
@@ -172,17 +170,12 @@ func (h *harness) reservations() []object {
 }
 
 func (h *harness) fleetPods(fleetName string) []object {
-	return h.listIn("fleets", "pods", "-l", "celld.eric.dev/fleet-uid="+uidOf(h.get("celldfleet", fleetName)))
+	return h.listIn("pods", "-l", "celld.eric.dev/fleet-uid="+uidOf(h.get("celldfleet", fleetName)))
 }
 
 // merge applies a JSON merge patch to a fleet in the fleets namespace.
 func (h *harness) merge(name, patch string) {
 	h.k("-n", "fleets", "patch", "celldfleet", name, "--type=merge", "-p", patch)
-}
-
-func (h *harness) tryMerge(kind, name, patch string) error {
-	_, err := h.tryK("-n", "fleets", "patch", kind, name, "--type=merge", "-p", patch)
-	return err
 }
 
 func (h *harness) setReplicas(fleetName string, replicas int) {
@@ -251,60 +244,6 @@ func (h *harness) fetch(url string, timeout time.Duration) []byte {
 	return body
 }
 
-// process is the native manager binary used outside the in-cluster suites.
-type process struct {
-	cmd  *exec.Cmd
-	done chan struct{}
-}
-
-func (h *harness) startNativeOperator() {
-	cmd := exec.CommandContext(h.ctx, h.root+"/bin/celld-operator", "--network-policy-enforced", "--local-test")
-	cmd.Env = append(append([]string{}, os.Environ()...), "KUBECONFIG="+h.operatorKubeconfig)
-	cmd.Stdout = h.operatorLog
-	cmd.Stderr = h.operatorLog
-	must(cmd.Start())
-	p := &process{cmd: cmd, done: make(chan struct{})}
-	go func() {
-		_ = cmd.Wait()
-		close(p.done)
-	}()
-	h.process = p
-}
-
-func (p *process) running() bool {
-	select {
-	case <-p.done:
-		return false
-	default:
-		return true
-	}
-}
-
-func (p *process) waitFor(timeout time.Duration) bool {
-	select {
-	case <-p.done:
-		return true
-	case <-time.After(timeout):
-		return false
-	}
-}
-
-// stop terminates the manager and waits 20 s; kill escalates instead of failing.
-func (p *process) stop(kill bool) {
-	if !p.running() {
-		return
-	}
-	_ = p.cmd.Process.Signal(syscall.SIGTERM)
-	if p.waitFor(20 * time.Second) {
-		return
-	}
-	if !kill {
-		fail("native operator did not exit within 20 s of SIGTERM")
-	}
-	_ = p.cmd.Process.Kill()
-	p.waitFor(10 * time.Second)
-}
-
 // JSON accessors. A missing or mistyped path yields the zero value, matching the
 // permissive .get() chains of the original harness.
 func field(o object, path ...string) any {
@@ -340,11 +279,6 @@ func num(o object, path ...string) int64 {
 	}
 }
 
-func boolean(o object, path ...string) bool {
-	value, _ := field(o, path...).(bool)
-	return value
-}
-
 func sub(o object, path ...string) object {
 	value, _ := field(o, path...).(object)
 	return value
@@ -378,8 +312,6 @@ func nameOf(o object) string       { return str(o, "metadata", "name") }
 func conditions(o object) []object { return list(o, "status", "conditions") }
 func generation(o object) int64    { return num(o, "metadata", "generation") }
 func specReplicas(o object) int64  { return num(o, "spec", "replicas") }
-func operationID(o object) string  { return str(o, "status", "lifecycle", "operationID") }
-func deleting(o object) bool       { return str(o, "metadata", "deletionTimestamp") != "" }
 func annotation(o object, key string) string {
 	return str(o, "metadata", "annotations", key)
 }

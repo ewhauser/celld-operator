@@ -19,38 +19,18 @@ import (
 )
 
 type options struct {
-	bucketLifecycle     bool
-	orderedBucket       bool
-	persistentLifecycle bool
-	maintenance         bool
-	faults              bool
-	rwopCSI             bool
-	external            bool
-	leaderFailover      bool
-	// operatorImage runs a published controller/launcher image (repo@digest or
-	// repo:tag) instead of building from source; used to qualify a release.
-	operatorImage string
+	suite, runtimeImage, upgradeImage, operatorImage string
 }
 
 type harness struct {
-	ctx  context.Context //nolint:containedctx // one interrupt context spans the whole disposable run
-	opts options
-	// persistentLifecycle and bucketLifecycle are the derived suite groups.
-	persistentLifecycle bool
-	bucketLifecycle     bool
-	root                string
-	name                string
-	tmp                 string
-	kubeconfig          string
-	env                 []string
-	nodes               []string
-	arch                string
-	operatorKubeconfig  string
-	operatorLog         *os.File
-	operatorArgs        []string
-	process             *process
-	created             bool
-	launcherImage       string
+	ctx                         context.Context //nolint:containedctx // one interrupt context spans the disposable run
+	opts                        options
+	root, name, tmp, kubeconfig string
+	env                         []string
+	nodes                       []string
+	arch, launcherImage         string
+	operatorArgs                []string
+	created, builtLauncher      bool
 }
 
 func main() {
@@ -60,15 +40,10 @@ func main() {
 func realMain() (code int) {
 	var opts options
 	fs := flag.NewFlagSet("integration", flag.ContinueOnError)
-	fs.BoolVar(&opts.bucketLifecycle, "bucket-lifecycle", false, "in-cluster manager with Metrics Server: Bucket shrink/grow and automatic contraction")
-	fs.BoolVar(&opts.orderedBucket, "ordered-bucket", false, "Ordered Bucket placement, membership and ledger across two zones")
-	fs.BoolVar(&opts.persistentLifecycle, "persistent-lifecycle", false, "launcher-managed PersistentFleet growth, graceful retirement and same-host reactivation")
-	fs.BoolVar(&opts.maintenance, "maintenance", false, "live same-pin restart and RetainData deletion")
-	fs.BoolVar(&opts.faults, "faults", false, "fault injection: manager crash points, node loss, S3 latency/partition via toxiproxy")
-	fs.BoolVar(&opts.rwopCSI, "rwop-csi", false, "serve PersistentFleet claims as ReadWriteOncePod through the per-node hostpath CSI driver instead of local-path RWO")
-	fs.BoolVar(&opts.external, "external", false, "External capacity mode: a HorizontalPodAutoscaler drives spec.replicas through the /scale subresource")
-	fs.BoolVar(&opts.leaderFailover, "leader-failover", false, "two manager replicas; the elected leader is deleted while a contraction is issued")
-	fs.StringVar(&opts.operatorImage, "operator-image", "", "run this published controller/launcher image (repo@sha256:... or repo:tag) instead of building from source; implies the in-cluster manager")
+	fs.StringVar(&opts.suite, "suite", "all", "suite: all, lifecycle, maintenance, faults, external")
+	fs.StringVar(&opts.runtimeImage, "runtime-image", os.Getenv("CELLD_RUNTIME_IMAGE"), "required immutable ghcr.io/ewhauser/celld@sha256:... fork image")
+	fs.StringVar(&opts.upgradeImage, "upgrade-image", os.Getenv("CELLD_UPGRADE_IMAGE"), "optional second fork digest for live upgrade qualification")
+	fs.StringVar(&opts.operatorImage, "operator-image", "", "published controller/launcher image to qualify instead of building source")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -77,6 +52,20 @@ func realMain() (code int) {
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "unexpected arguments:", fs.Args())
+		return 2
+	}
+	if !runtimeImagePin.MatchString(opts.runtimeImage) {
+		fmt.Fprintln(os.Stderr, "--runtime-image or CELLD_RUNTIME_IMAGE must name the strict fork by immutable digest")
+		return 2
+	}
+	if opts.upgradeImage != "" && (!runtimeImagePin.MatchString(opts.upgradeImage) || opts.upgradeImage == opts.runtimeImage) {
+		fmt.Fprintln(os.Stderr, "--upgrade-image must name a different immutable strict fork digest")
+		return 2
+	}
+	switch opts.suite {
+	case "all", "lifecycle", "maintenance", "faults", "external":
+	default:
+		fmt.Fprintln(os.Stderr, "unknown suite:", opts.suite)
 		return 2
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -91,14 +80,7 @@ func realMain() (code int) {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	h := &harness{
-		ctx:                 ctx,
-		opts:                opts,
-		persistentLifecycle: opts.persistentLifecycle || opts.maintenance || opts.faults,
-		root:                root,
-		name:                "celld-step2-" + hex.EncodeToString(suffix),
-	}
-	h.bucketLifecycle = opts.bucketLifecycle || h.persistentLifecycle || opts.orderedBucket || opts.external || opts.leaderFailover || opts.operatorImage != ""
+	h := &harness{ctx: ctx, opts: opts, root: root, name: "celld-strict-" + hex.EncodeToString(suffix)}
 	h.tmp, err = os.MkdirTemp("", h.name)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -148,31 +130,23 @@ func (h *harness) exercise() {
 	h.deployApplication()
 	h.installStorageClass()
 	h.startOperator()
-	if h.opts.orderedBucket {
-		h.exerciseOrderedBucket()
-		return
-	}
 	h.exerciseIsolation()
-	switch {
-	case h.opts.maintenance:
-		h.exerciseMaintenance()
-	case h.opts.faults:
-		h.exerciseFaults()
-	case h.opts.external:
+	switch h.opts.suite {
+	case "all":
+		h.exerciseLifecycle()
 		h.exerciseExternal()
-	case h.opts.leaderFailover:
-		h.exerciseLeaderFailover()
-		fmt.Println(h.k("get", "celldstoragereservations", "-o", "json"))
-	case h.persistentLifecycle:
-		h.exercisePersistentLifecycle()
-	default:
-		h.exerciseAdditiveCapacity()
-		if h.bucketLifecycle {
-			h.exerciseBucketLifecycle()
-			return
-		}
-		h.exerciseBaseRemainder()
+		h.exerciseFaults()
+		h.exerciseMaintenance()
+	case "lifecycle":
+		h.exerciseLifecycle()
+	case "maintenance":
+		h.exerciseMaintenance()
+	case "faults":
+		h.exerciseFaults()
+	case "external":
+		h.exerciseExternal()
 	}
+	fmt.Println("PASS: strict control-plane integration suite", h.opts.suite, "runtime", h.opts.runtimeImage)
 }
 
 // diagnostics dumps cluster state after a failure, then optionally holds the
@@ -194,6 +168,11 @@ func (h *harness) diagnostics(recovered any) {
 			// usually what it measured rather than what the operator allowed.
 			{"-n", "fleets", "describe", "hpa"},
 			{"top", "pods", "-A"},
+			{"get", "pv", "-o", "yaml"},
+			{"-n", "fleets", "get", "pvc", "-o", "wide"},
+			{"get", "volumeattachments", "-o", "yaml"},
+			{"-n", "fleets", "logs", "alpha-0", "--all-containers=true", "--tail=80"},
+			{"-n", "fleets", "logs", "beta-0", "--all-containers=true", "--tail=80"},
 		} {
 			out, err := h.try(command{args: h.kubectl(args...), timeout: 5 * time.Minute, background: true})
 			if err != nil {
@@ -203,13 +182,8 @@ func (h *harness) diagnostics(recovered any) {
 			fmt.Println(out)
 		}
 	}
-	if logText, err := os.ReadFile(filepath.Join(h.tmp, "operator.log")); err == nil {
-		fmt.Println(string(logText))
-	}
-	if h.bucketLifecycle {
-		if out, err := h.try(command{args: h.kubectl("-n", "celld-system", "logs", "deployment/celld-operator"), timeout: 5 * time.Minute, background: true}); err == nil {
-			fmt.Println(out)
-		}
+	if out, err := h.try(command{args: h.kubectl("-n", "celld-system", "logs", "deployment/celld-operator"), timeout: 5 * time.Minute, background: true}); err == nil {
+		fmt.Println(out)
 	}
 	hold, _ := strconv.Atoi(os.Getenv("CELLD_TEST_DIAGNOSTIC_HOLD_SECONDS"))
 	hold = min(600, max(0, hold))
@@ -231,15 +205,9 @@ func (h *harness) diagnostics(recovered any) {
 	}
 }
 
-// cleanup stops the native manager and deletes only this invocation's cluster
+// cleanup deletes only this invocation's cluster
 // and launcher image, using a fresh context so an interrupt cannot skip it.
 func (h *harness) cleanup() error {
-	if h.process != nil {
-		h.process.stop(true)
-	}
-	if h.operatorLog != nil {
-		_ = h.operatorLog.Close()
-	}
 	var errs []error
 	if h.created {
 		fmt.Println("Cleaning up only cluster", h.name)
@@ -247,7 +215,7 @@ func (h *harness) cleanup() error {
 			errs = append(errs, err)
 		}
 	}
-	if h.launcherImage != "" {
+	if h.builtLauncher {
 		if _, err := h.try(command{args: []string{"docker", "image", "rm", h.launcherImage}, timeout: time.Minute, background: true}); err != nil {
 			errs = append(errs, err)
 		}

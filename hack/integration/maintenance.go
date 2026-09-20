@@ -2,69 +2,60 @@ package main
 
 import (
 	"fmt"
-	"slices"
 	"time"
 )
 
-// exerciseMaintenance covers live same-pin restart and RetainData deletion in
-// the harness-owned cluster. It runs only after the identity, network and
-// storage fixtures pass and never touches anything outside that cluster.
 func (h *harness) exerciseMaintenance() {
-	for _, f := range []struct{ fleet, kind, probe string }{
-		{"alpha", "deployment", "client"},
-		{"beta", "statefulset", "client-beta"},
-	} {
-		uid := uidOf(h.get("celldfleet", f.fleet))
-		// The UID is captured once so the pod query still works after deletion.
-		pods := func() []object { return h.listIn("fleets", "pods", "-l", "celld.eric.dev/fleet-uid="+uid) }
-		h.merge(f.fleet, `{"spec":{"capacity":null,"replicas":3,"maintenance":null}}`)
-		h.waitFor("maintenance fixture has three ready replicas: "+f.fleet, 360*time.Second, func() bool {
-			return specReplicas(h.get(f.kind, f.fleet)) == 3 && h.ready(f.fleet) && len(sub(h.journal(f.fleet), "Operation")) == 0
-		})
-		assert(stored(h.app(f.probe, f.fleet, "PUT", "/?cell=maintenance&id=ack")), "maintenance write not acknowledged")
-		before := podUIDs(pods())
-		claims := map[string]string{}
-		for _, claim := range h.listIn("fleets", "pvc", "-l", "celld.eric.dev/fleet-uid="+uid) {
-			claims[nameOf(claim)] = uidOf(claim)
-		}
-		token := "live-maintenance-" + f.fleet
-		h.merge(f.fleet, `{"spec":{"maintenance":{"restartToken":"`+token+`"}}}`)
-		h.waitFor("restart irreversible authority persisted: "+f.fleet, 180*time.Second, func() bool {
-			phase := str(h.journal(f.fleet), "Maintenance", "Phase")
-			return phase == "Stopping" || phase == "Authorized" || phase == "Recovering"
+	for _, f := range []struct{ name, probe string }{{"alpha", "client"}, {"beta", "client-beta"}} {
+		h.writeLedger(f.probe, f.name)
+		before := podUIDs(h.fleetPods(f.name))
+		oldClaims := h.claims(f.name)
+		token := "strict-restart-" + f.name
+		h.merge(f.name, encode(object{"spec": object{"maintenance": object{"restartToken": token, "allowCoordinatedDowntime": true}}}))
+		h.waitFor("coordinated restart accepted: "+f.name, 3*time.Minute, func() bool {
+			s := h.currentState(f.name)
+			return str(s, "RestartToken") == token || str(s, "Operation", "Kind") == "Restart"
 		})
 		h.restartOperator()
-		h.waitFor("restart recovers across operator replacement: "+f.fleet, 600*time.Second, func() bool {
-			return slices.Contains(strs(h.journal(f.fleet), "CompletedRestarts"), token) && h.ready(f.fleet)
-		})
-		after := podUIDs(pods())
-		assert(len(after) == 3 && disjoint(before, after), "%v %v", before, after)
-		assert(stored(h.app(f.probe, f.fleet, "GET", "/?cell=maintenance&id=ack")), "maintenance write unreadable after restart")
-		for name, claimUID := range claims {
-			assert(uidOf(h.get("pvc", name)) == claimUID, "claim %s was replaced by the restart", name)
+		h.waitFor("restart completes across manager replacement: "+f.name, 10*time.Minute, func() bool { return h.settled(f.name, 2) && str(h.currentState(f.name), "RestartToken") == token })
+		after := podUIDs(h.fleetPods(f.name))
+		assert(disjoint(before, after), "restart retained old Pod UID")
+		h.goneVolumes(oldClaims)
+		for name, current := range h.claims(f.name) {
+			old := oldClaims[name]
+			assert(current.UID != old.UID && current.VolumeUID != old.VolumeUID && current.Handle != old.Handle, "restart reused retired disk")
 		}
+		h.readLedger(f.probe, f.name)
 		h.restartOperator()
-		h.sleep(12 * time.Second)
-		assert(same(podUIDs(pods()), after), "completed token replayed")
-		fmt.Println("PASS: exact-UID rolling restart, acknowledged data, retained claims, and token replay: " + f.fleet)
-
-		retained := h.reservation(f.fleet)
-		h.k("-n", "fleets", "delete", "celldfleet", f.fleet, "--wait=false")
-		h.waitFor("RetainData finalizer completes with proven shutdown: "+f.fleet, 600*time.Second, func() bool {
-			for _, value := range h.listIn("fleets", "celldfleets") {
-				if uidOf(value) == uid {
-					return false
-				}
+		h.hold(12*time.Second, "completed token does not replay: "+f.name, func() bool { return same(podUIDs(h.fleetPods(f.name)), after) })
+		if h.opts.upgradeImage != "" {
+			h.merge(f.name, encode(object{"spec": object{"runtimeImage": h.opts.upgradeImage}}))
+			h.waitFor("fork digest upgrade: "+f.name, 10*time.Minute, func() bool {
+				return h.settled(f.name, 2) && str(h.currentState(f.name), "RuntimeImage") == h.opts.upgradeImage
+			})
+			for _, pod := range h.fleetPods(f.name) {
+				assert(str(list(pod, "spec", "containers")[0], "image") == h.opts.upgradeImage, "old runtime digest remains")
 			}
-			return true
-		})
-		assert(len(pods()) == 0, "runtime pods survived final shutdown")
-		assert(uidOf(h.reservation(f.fleet)) == uidOf(retained), "reservation was replaced by final shutdown")
-		assert(str(h.journal(f.fleet), "Maintenance", "Phase") == "Cleanup", "journal phase: %v", sub(h.journal(f.fleet), "Maintenance"))
-		for name, claimUID := range claims {
-			assert(uidOf(h.get("pvc", name)) == claimUID, "claim %s was replaced by final shutdown", name)
+			h.readLedger(f.probe, f.name)
 		}
-		fmt.Println("PASS: final shutdown removes compute and preserves reservation/PVC identities: " + f.fleet)
+		oldClaims = h.claims(f.name)
+		fleetUID := uidOf(h.get("celldfleet", f.name))
+		resUID := uidOf(h.reservation(f.name))
+		h.k("-n", "fleets", "delete", "celldfleet", f.name, "--wait=false")
+		h.waitFor("strict final deletion: "+f.name, 10*time.Minute, func() bool {
+			return h.k("-n", "fleets", "get", "celldfleet", f.name, "--ignore-not-found", "-o", "name") == ""
+		})
+		assert(len(h.listIn("pods", "-l", "celld.eric.dev/fleet-uid="+fleetUID)) == 0, "runtime Pods survived deletion")
+		h.goneVolumes(oldClaims)
+		for name := range oldClaims {
+			assert(h.k("-n", "fleets", "get", "pvc", name, "--ignore-not-found", "-o", "name") == "", "PVC survived final deletion")
+		}
+		assert(uidOf(h.reservation(f.name)) == resUID, "bucket reservation lost")
+		assert(str(h.currentState(f.name), "Completion", "Kind") == "Delete", "current completion does not record deletion")
+		fmt.Println("PASS:", f.name, "compute and disks deleted; bucket reservation retained")
+	}
+	if h.opts.upgradeImage == "" {
+		fmt.Println("NOT RUN: different-digest runtime upgrade; set CELLD_UPGRADE_IMAGE to qualify an actual upgrade")
 	}
 }
 
