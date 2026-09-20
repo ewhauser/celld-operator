@@ -99,7 +99,10 @@ Canceled unissued operations retain candidate admission records but never mark n
 
 `Automatic` policy must still satisfy its complete/fresh low-demand history,
 minimum samples, stabilization, bounds and cooldown, followed by all manual
-admission checks and another current low-demand observation before issue.
+admission checks, whose own survivor collection must still show current low
+demand before issue. That admission collection is the pass's only one: its
+freshness is measured from when the evidence was complete, so routine Metrics
+Server and `/state` latency is reported as latency rather than as expiry.
 Production automatic requests remain `BucketAutomaticUnqualified` until the AWS
 release gate is closed in a reviewed release. Manual operation remains explicitly
 experimental; it is not an assertion that AWS qualification has happened.

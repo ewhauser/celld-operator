@@ -16,7 +16,21 @@ import (
 
 var fleetGauges = map[string]*prometheus.GaugeVec{}
 
+// bucketCollectionSeconds records how long one complete Bucket assessment spent
+// collecting evidence: the Metrics Server and per-pod /state fan-out plus the
+// closing identity sweep. A collection that routinely approaches the five
+// second freshness window blocks every contraction, restart and deletion, so
+// the latency has to be visible on a dashboard before it becomes a blocker.
+// Fleet labels are deliberately omitted: this measures shared cluster latency,
+// and a histogram per fleet would multiply series for no extra diagnosis.
+var bucketCollectionSeconds = prometheus.NewHistogram(prometheus.HistogramOpts{
+	Name:    "celld_bucket_assessment_collection_seconds",
+	Help:    "Duration of evidence collection within one Bucket assessment, against a five second freshness window.",
+	Buckets: []float64{0.1, 0.25, 0.5, 1, 2, 3, 4, 5, 7.5, 10, 15},
+})
+
 func init() {
+	metrics.Registry.MustRegister(bucketCollectionSeconds)
 	for name, help := range map[string]string{
 		"desired_replicas":          "Latest requested replica count (shadow policy recommendations are informational).",
 		"applied_replicas":          "Replica target currently applied to the owned workload.",
