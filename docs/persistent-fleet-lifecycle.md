@@ -22,8 +22,9 @@ and fails on uncertain adoption or replacement. The Kubernetes permissions this 
 adds are Secret get/create, PV/Node/StorageClass get, VolumeAttachment list, and
 Pod update (for scheduling gates). Secret and Pod verbs are granted only inside
 fleet namespaces through the namespaced Role in
-`config/rbac/fleet-namespace.yaml`; the ClusterRole holds no Secret, Pod or
-workload verbs at all. There is no Secret list/watch/delete or EC2 permission
+`config/rbac/fleet-namespace.yaml`; the ClusterRole holds no Secret or workload
+verbs at all, and its only Pod verb is the read-only cluster-wide `list` that
+EC2 fencing needs to prove node dedication (see `docs/infrastructure-fencing.md`). There is no Secret list/watch/delete or EC2 permission
 from this path. Runtime service accounts still do not receive Kubernetes API tokens.
 
 Port 8083 is private: NetworkPolicy admits only operator pods in the configured

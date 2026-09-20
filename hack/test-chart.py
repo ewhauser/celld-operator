@@ -24,11 +24,17 @@ canonical = list(yaml.safe_load_all((ROOT / 'config/manager/operator.yaml').read
 assert role['rules'] == next(doc['rules'] for doc in canonical if doc['kind'] == 'ClusterRole')
 # Namespaced privileges never leak into the cluster role, and the per-namespace
 # Role renders exactly the canonical rules into each configured fleet namespace.
-namespaced_kinds = {('', 'secrets'), ('', 'pods'), ('apps', 'deployments'), ('apps', 'statefulsets')}
+# Pods are the one exception: EC2 fencing must prove a node hosts nothing but the
+# admitted target before terminating the whole instance, which no namespaced Role
+# can authorize. That grant is read-only and limited to list.
+namespaced_kinds = {('', 'secrets'), ('apps', 'deployments'), ('apps', 'statefulsets')}
 for rule in role['rules']:
     for group in rule['apiGroups']:
         for resource in rule['resources']:
             assert (group, resource) not in namespaced_kinds, f'cluster-wide grant on {group}/{resource}'
+            if (group, resource) == ('', 'pods'):
+                assert rule['verbs'] == ['list'], f"cluster-wide pod verbs beyond list: {rule['verbs']}"
+assert any('pods' in rule['resources'] and '' in rule['apiGroups'] for rule in role['rules']), 'EC2 fencing needs a cluster-wide pod list'
 assert not any(doc['kind'] == 'Role' and doc['metadata']['name'].endswith('-fleet') for doc in base)
 fleet_canonical = list(yaml.safe_load_all((ROOT / 'config/rbac/fleet-namespace.yaml').read_text()))
 scoped = render('--set', 'fleetNamespaces={agents-prod,agents-staging}')

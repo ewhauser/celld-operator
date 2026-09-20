@@ -95,11 +95,15 @@ func (r *Reconciler) ensureInfrastructureFence(ctx context.Context, f *fleet.Cel
 	}
 	// Isolation is necessary because TerminateInstances affects the entire VM.
 	// Only the admitted target and infrastructure DaemonSets may share this node.
+	// The list spans namespaces (granted cluster-wide in config/manager/operator.yaml)
+	// but is narrowed server-side to this node; the reconciler's client is direct,
+	// so the API server serves the spec.nodeName selector without a local index.
 	pods := &corev1.PodList{}
-	if err := r.List(ctx, pods); err != nil {
+	if err := r.List(ctx, pods, client.MatchingFields{"spec.nodeName": member.Host}); err != nil {
 		return false, err
 	}
 	for _, pod := range pods.Items {
+		// Defense in depth: never trust the selector alone to scope termination.
 		if pod.Spec.NodeName != member.Host {
 			continue
 		}

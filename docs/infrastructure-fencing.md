@@ -32,7 +32,11 @@ instance tags after Kubernetes registration:
 The operator never adds these tags. Protect tag mutation and Pod scheduling on
 these nodes with infrastructure IAM/admission controls. A reboot changes the
 binding and is not silently adopted. Nodes must contain only the selected fleet
-Pod and kube-system DaemonSets; another workload blocks termination. The operator
+Pod and kube-system DaemonSets; another workload blocks termination. That check
+lists Pods across every namespace (narrowed server-side by `spec.nodeName`), so
+the ClusterRole in `config/manager/operator.yaml` grants `pods` `list` at cluster
+scope. It is the only cluster-wide Pod verb, and without it fencing records its
+intent and then fails `Forbidden` on every subsequent reconcile. The operator
 cordons the bound Node before issuing termination. Its data EBS mapping must have
 `DeleteOnTermination=false`; any additional non-root data disk blocks the action.
 Use taints/admission controls to enforce dedicated-node placement; privileged
