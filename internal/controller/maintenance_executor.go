@@ -292,10 +292,11 @@ func invalidMaintenanceAuthority(j *lifecycleJournal) bool {
 
 func (r *Reconciler) executeMaintenanceCapture(ctx context.Context, p *maintenancePass) (ctrl.Result, bool, error) {
 	f, j, w, m, save, block := p.f, p.j, p.w, p.m, p.save, p.block
-	sessions, _, err := r.bucketAssessment(ctx, f, &p.view, j.Applied, false)
+	assessment, err := r.assessBucket(ctx, f, &p.view, j.Applied, false, bucketScopeCapacity)
 	if err != nil {
 		return block(err)
 	}
+	sessions := assessment.Sessions
 	if m.Phase == "Capture" {
 		pods, err := r.Evidence.pods(ctx, f)
 		if err != nil {
@@ -335,11 +336,12 @@ func (r *Reconciler) executeMaintenanceCapture(ctx context.Context, p *maintenan
 	if pod.UID != target.UID {
 		return block(errors.New("restart target replaced outside admitted operation"))
 	}
-	candidates, err := r.Evidence.bucketCandidates(ctx, f, &p.view, r.Options)
-	if err != nil {
-		return block(err)
-	}
-	if err := validateRestartPlacement(f, candidates, target.UID); err != nil {
+	// The assessment's closing sweep already re-read every candidate and refused
+	// to return unless it matched the opening one, so this pass holds a fenced,
+	// unchanged candidate set. Sweeping a third time here read the same objects
+	// again; the identity fence around the S3 read still guarantees that what
+	// placement is checked against is what the assessment admitted.
+	if err := validateRestartPlacement(f, assessment.Candidates, target.UID); err != nil {
 		return block(err)
 	}
 	if err := r.authorizeMaintenanceAction(ctx, w, m); err != nil {
@@ -361,19 +363,18 @@ func (r *Reconciler) executeMaintenanceAuthorized(ctx context.Context, p *mainte
 		if m.Deadline.IsZero() || !r.capacityNow().Before(m.Deadline) {
 			return block(errors.New("restart deadline expired before pod deletion"))
 		}
-		sessions, _, err := r.bucketAssessment(ctx, f, &p.view, j.Applied, false)
+		assessment, err := r.assessBucket(ctx, f, &p.view, j.Applied, false, bucketScopeCapacity)
 		if err != nil {
 			return block(err)
 		}
-		if !slices.Equal(sessions, m.Sessions) {
-			m.Sessions = sessions
+		if !slices.Equal(assessment.Sessions, m.Sessions) {
+			m.Sessions = assessment.Sessions
 			return save()
 		}
-		candidates, err := r.Evidence.bucketCandidates(ctx, f, &p.view, r.Options)
-		if err != nil {
-			return block(err)
-		}
-		if err := validateRestartPlacement(f, candidates, target.UID); err != nil {
+		// Same fence as in Capture: the assessment closed with a candidate sweep
+		// that had to equal its opening one, so placement is checked against the
+		// exact set this assessment admitted.
+		if err := validateRestartPlacement(f, assessment.Candidates, target.UID); err != nil {
 			return block(err)
 		}
 		if err := r.Delete(ctx, pod, client.Preconditions{UID: &target.UID, ResourceVersion: &pod.ResourceVersion}); err != nil && !apierrors.IsNotFound(err) {

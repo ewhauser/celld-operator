@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -86,21 +87,53 @@ const (
 // needsCapacity reports whether the scope demands survivor capacity evidence.
 func (s bucketAssessmentScope) needsCapacity() bool { return s == bucketScopeCapacity }
 
+// bucketFreshness is how long a complete Bucket assessment stays usable, and
+// equally how long the collection that produced it may take. Both ends of the
+// same window: evidence older than this may no longer describe the fleet.
+const bucketFreshness = 5 * time.Second
+
+// bucketEvidence is everything one complete Bucket assessment observed. A pass
+// that needs the same facts again inside the same reconcile reuses this value
+// rather than collecting them a second time; only a genuine identity fence
+// around an external read re-observes.
+type bucketEvidence struct {
+	Sessions   []bucketSession
+	Candidates map[types.UID]bucketCandidate
+	// Observation is the survivor capacity fan-out, empty unless the scope
+	// demanded capacity evidence.
+	Observation capacity.Observation
+	// CompletedAt is when the evidence became complete: after the S3 membership
+	// read, after the Collector fan-out, and after the closing candidate sweep.
+	// Every downstream freshness check measures from here, so it bounds the age
+	// of the whole assessment rather than the age of its first observation.
+	CompletedAt time.Time
+	// Collection is how long gathering that evidence took.
+	Collection time.Duration
+}
+
 func (r *Reconciler) bucketAssessment(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal, count int32, issued bool) ([]bucketSession, time.Time, error) {
 	return r.bucketAssessmentMode(ctx, f, j, count, issued, bucketScopeCapacity)
 }
 
 func (r *Reconciler) bucketAssessmentMode(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal, count int32, issued bool, scope bucketAssessmentScope) ([]bucketSession, time.Time, error) {
+	evidence, err := r.assessBucket(ctx, f, j, count, issued, scope)
+	return evidence.Sessions, evidence.CompletedAt, err
+}
+
+// assessBucket performs one complete Bucket assessment: the opening candidate
+// sweep, the S3 membership read, the survivor capacity fan-out its scope asks
+// for, and the closing candidate sweep that fences the external read.
+func (r *Reconciler) assessBucket(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal, count int32, issued bool, scope bucketAssessmentScope) (bucketEvidence, error) {
 	view := *j
 	op := *j.Operation
 	op.From = count
 	view.Operation = &op
 	candidates, err := r.Evidence.bucketCandidates(ctx, f, &view, r.Options)
 	if err != nil {
-		return nil, time.Time{}, err
+		return bucketEvidence{}, err
 	}
 	if err := validateBucketPlacement(f, candidates, !issued && scope.needsCapacity()); err != nil {
-		return nil, time.Time{}, err
+		return bucketEvidence{}, err
 	}
 	sessions := slices.Clone(j.BucketHistory)
 	for _, s := range j.Operation.BucketCandidates {
@@ -117,13 +150,13 @@ func (r *Reconciler) bucketAssessmentMode(ctx context.Context, f *fleet.CelldFle
 			s := &j.Inventory.Sessions[i]
 			if s.Node == string(uid) && s.Current && s.Container == c.Container && s.Epoch == 0 {
 				if observed != nil {
-					return nil, time.Time{}, errors.New("multiple current bucket generations")
+					return bucketEvidence{}, errors.New("multiple current bucket generations")
 				}
 				observed = s
 			}
 		}
 		if observed == nil {
-			return nil, time.Time{}, errors.New("current bucket association unavailable")
+			return bucketEvidence{}, errors.New("current bucket association unavailable")
 		}
 		index := slices.IndexFunc(sessions, func(s bucketSession) bool { return s.Node == string(uid) && s.SupersededBy == "" })
 		current := bucketSession{Node: string(uid), Generation: observed.Generation, Container: c.Container, Host: c.Host, IP: c.IP}
@@ -132,20 +165,20 @@ func (r *Reconciler) bucketAssessmentMode(ctx context.Context, f *fleet.CelldFle
 		} else {
 			old := sessions[index]
 			if old.Retired || old.Host != current.Host || old.IP != current.IP {
-				return nil, time.Time{}, errors.New("bucket retired member or changed host returned")
+				return bucketEvidence{}, errors.New("bucket retired member or changed host returned")
 			}
 			if old.Generation != current.Generation {
 				// Only an already admitted Bucket invocation may be superseded.
 				// A new container and fresh matching successor lease are required;
 				// adapter verification below positively reads that exact successor.
 				if old.Container == current.Container || slices.ContainsFunc(sessions, func(s bucketSession) bool { return s.Node == current.Node && s.Generation == current.Generation }) {
-					return nil, time.Time{}, errors.New("bucket successor reused a previous invocation")
+					return bucketEvidence{}, errors.New("bucket successor reused a previous invocation")
 				}
 				sessions[index].SupersededBy = current.Generation
 				sessions[index].Retired = true
 				sessions = append(sessions, current)
 			} else if old.Container != current.Container {
-				return nil, time.Time{}, errors.New("bucket container changed without successor generation")
+				return bucketEvidence{}, errors.New("bucket container changed without successor generation")
 			}
 		}
 	}
@@ -155,7 +188,7 @@ func (r *Reconciler) bucketAssessmentMode(ctx context.Context, f *fleet.CelldFle
 		if !slices.ContainsFunc(sessions, func(known bucketSession) bool {
 			return known.Node == s.Node && known.Generation == s.Generation && (known.Container == s.Container || s.Container == "") && s.Epoch == 0
 		}) {
-			return nil, time.Time{}, errors.New("unadmitted bucket history")
+			return bucketEvidence{}, errors.New("unadmitted bucket history")
 		}
 	}
 	var members []v050.BucketMember
@@ -163,7 +196,7 @@ func (r *Reconciler) bucketAssessmentMode(ctx context.Context, f *fleet.CelldFle
 		s := &sessions[i]
 		_, present := candidates[types.UID(s.Node)]
 		if !present && !s.Retired && !issued && j.Operation.Phase != "Blocked" {
-			return nil, time.Time{}, errors.New("bucket membership changed before issue")
+			return bucketEvidence{}, errors.New("bucket membership changed before issue")
 		}
 		s.Retired = !present || s.SupersededBy != ""
 		members = append(members, v050.BucketMember{Node: s.Node, Generation: s.Generation, SupersededBy: s.SupersededBy, Retired: s.Retired, Resolved: slices.ContainsFunc(j.BucketHistory, func(old bucketSession) bool {
@@ -177,15 +210,15 @@ func (r *Reconciler) bucketAssessmentMode(ctx context.Context, f *fleet.CelldFle
 	}
 	reader, err := r.Evidence.reader(ctx, f)
 	if err != nil {
-		return nil, time.Time{}, err
+		return bucketEvidence{}, err
 	}
 	adapter, err := catalog.New(runtimeImage(evidenceRuntime(f, j)))
 	if err != nil {
-		return nil, time.Time{}, err
+		return bucketEvidence{}, err
 	}
 	evidence, err := adapter.InspectBucketMembership(ctx, reader, members, r.capacityNow)
 	if err != nil {
-		return nil, time.Time{}, err
+		return bucketEvidence{}, err
 	}
 	var observation capacity.Observation
 	var maxAge time.Duration
@@ -196,7 +229,7 @@ func (r *Reconciler) bucketAssessmentMode(ctx context.Context, f *fleet.CelldFle
 			policy.Spec.Capacity.Default()
 		}
 		if r.Collector == nil {
-			return nil, time.Time{}, errors.New("bucket survivor collector unavailable")
+			return bucketEvidence{}, errors.New("bucket survivor collector unavailable")
 		}
 		observation = r.Collector.Collect(ctx, policy)
 		var ids []string
@@ -205,12 +238,12 @@ func (r *Reconciler) bucketAssessmentMode(ctx context.Context, f *fleet.CelldFle
 		}
 		if issued {
 			if !capacity.LowDemand(*policy.Spec.Capacity, observation, count) || !bucketObservationIdentities(observation, ids) {
-				return nil, time.Time{}, errors.New("bucket survivor health or membership uncertain")
+				return bucketEvidence{}, errors.New("bucket survivor health or membership uncertain")
 			}
 		} else {
 			for _, id := range ids {
 				if err := ValidateSurvivors(*policy.Spec.Capacity, observation, ids, id, r.capacityNow()); err != nil {
-					return nil, time.Time{}, err
+					return bucketEvidence{}, err
 				}
 			}
 		}
@@ -218,10 +251,27 @@ func (r *Reconciler) bucketAssessmentMode(ctx context.Context, f *fleet.CelldFle
 	}
 	after, err := r.Evidence.bucketCandidates(ctx, f, &view, r.Options)
 	if err != nil {
-		return nil, time.Time{}, err
+		return bucketEvidence{}, err
 	}
-	if !equality.Semantic.DeepEqual(candidates, after) || evidence.ObservedAt.After(r.capacityNow()) || r.capacityNow().Sub(evidence.ObservedAt) > 5*time.Second || (scope.needsCapacity() && (observation.At.After(r.capacityNow()) || r.capacityNow().Sub(observation.At) > maxAge)) {
-		return nil, time.Time{}, errors.New("bucket assessment expired or membership changed")
+	// The evidence is complete only here: the S3 membership read, the Collector
+	// fan-out over Metrics Server and every pod's /state, and the closing
+	// identity sweep have all returned. Stamping completion now, rather than
+	// handing callers the instant the S3 read finished, keeps the downstream
+	// freshness checks honest — they bound how old complete evidence is, not
+	// how long this pass spent collecting it.
+	completedAt := r.capacityNow()
+	collection := completedAt.Sub(evidence.ObservedAt)
+	bucketCollectionSeconds.Observe(collection.Seconds())
+	if !equality.Semantic.DeepEqual(candidates, after) {
+		return bucketEvidence{}, errors.New("bucket membership changed during assessment")
+	}
+	if evidence.ObservedAt.After(completedAt) || collection > bucketFreshness {
+		// Say why. Routine Metrics Server and /state latency is the usual cause,
+		// and a bare "expired" reads as a safety failure rather than a slow read.
+		return bucketEvidence{}, fmt.Errorf("bucket assessment expired: evidence collection took %s, freshness window %s", collection.Round(100*time.Millisecond), bucketFreshness)
+	}
+	if scope.needsCapacity() && (observation.At.After(completedAt) || completedAt.Sub(observation.At) > maxAge) {
+		return bucketEvidence{}, errors.New("bucket survivor capacity observation expired")
 	}
 	if issued {
 		for i := range sessions {
@@ -240,7 +290,7 @@ func (r *Reconciler) bucketAssessmentMode(ctx context.Context, f *fleet.CelldFle
 		}
 		return strings.Compare(a.Generation, b.Generation)
 	})
-	return sessions, evidence.ObservedAt, nil
+	return bucketEvidence{Sessions: sessions, Candidates: candidates, Observation: observation, CompletedAt: completedAt, Collection: collection}, nil
 }
 
 // Scheduling constraints do not control Deployment deletion order. Admit a
@@ -369,10 +419,11 @@ func (r *Reconciler) contractBucket(ctx context.Context, f *fleet.CelldFleet, re
 				return report("CapacityChanged", "Automatic Bucket removal policy changed")
 			}
 		}
-		sessions, assessedAt, err := r.bucketAssessment(ctx, f, j, op.From, false)
+		assessment, err := r.assessBucket(ctx, f, j, op.From, false, bucketScopeCapacity)
 		if err != nil {
 			return fail(err)
 		}
+		sessions := assessment.Sessions
 		if op.Phase == "Blocked" {
 			op.BucketCandidates = sessions
 			op.Phase = "Intent"
@@ -391,13 +442,18 @@ func (r *Reconciler) contractBucket(ctx context.Context, f *fleet.CelldFleet, re
 			return save()
 		}
 		if op.Automatic {
-			observation := r.Collector.Collect(ctx, f)
+			// The assessment above already fanned out over Metrics Server and
+			// every pod's /state under this same capacity policy, and its
+			// freshness is bounded by the window checked below. Collecting a
+			// second time here observed nothing the first collection had not,
+			// while doubling the latency the freshness window has to absorb.
+			observation := assessment.Observation
 			if j.Capacity.LowSince.IsZero() || j.Capacity.LowSamples < f.Spec.Capacity.MinSamples || observation.At.Sub(j.Capacity.LowSince) < capacity.Seconds(f.Spec.Capacity.ScaleInStabilizationSeconds) || !capacity.LowDemand(*f.Spec.Capacity, observation, op.From) || observation.At.After(r.capacityNow()) || r.capacityNow().Sub(observation.At) > capacity.Seconds(f.Spec.Capacity.MaxAgeSeconds) {
 				return report("CapacityUncertain", "Fresh sustained low demand required")
 			}
 		}
-		if assessedAt.After(r.capacityNow()) || r.capacityNow().Sub(assessedAt) > 5*time.Second {
-			return fail(errors.New("bucket preflight expired before replica issue"))
+		if assessment.CompletedAt.After(r.capacityNow()) || r.capacityNow().Sub(assessment.CompletedAt) > bucketFreshness {
+			return fail(fmt.Errorf("bucket preflight expired before replica issue: complete evidence is %s old, freshness window %s", r.capacityNow().Sub(assessment.CompletedAt).Round(100*time.Millisecond), bucketFreshness))
 		}
 		if err := r.applyReplicas(ctx, w, op); err != nil {
 			return fail(err)
