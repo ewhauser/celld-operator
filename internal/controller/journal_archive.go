@@ -15,6 +15,7 @@ import (
 
 const archivePageBytes = 128 * 1024
 const archiveMaxBytes = 16 * 1024 * 1024
+const archiveIndexBytes = 200 * 1024
 const archiveIdentityKey = "celld.eric.dev/journal-reservation-uid"
 const archiveDigestKey = "celld.eric.dev/journal-page-digest"
 
@@ -82,7 +83,7 @@ func (r *Reconciler) archiveJournal(ctx context.Context, res *fleet.CelldStorage
 	if err != nil {
 		return nil, err
 	}
-	if len(envelope) > 200*1024 {
+	if len(envelope) > archiveIndexBytes {
 		return nil, errors.New("journal archive index budget exhausted")
 	}
 	return envelope, nil
@@ -170,4 +171,45 @@ func (r *Reconciler) hydrate(ctx context.Context, res *fleet.CelldStorageReserva
 // that its reports project those instead of hydrating the journal again.
 func hydrated(res *fleet.CelldStorageReservation, j *lifecycleJournal) *hydratedJournal {
 	return &hydratedJournal{res: res, j: j}
+}
+
+// journalFootprint is the size of the stored journal: the encoded bytes
+// saveJournal wrote (the annotation itself while it is inline, the hydrated
+// size the index records once it is paged), the archive index size, and the
+// number of pages behind it. It is read from the reservation annotation rather
+// than re-encoded, so observing it costs nothing on a pass that writes nothing.
+type journalFootprint struct{ bytes, index, pages int }
+
+func measureJournal(res *fleet.CelldStorageReservation) journalFootprint {
+	raw := res.Annotations[journalKey]
+	if raw == "" {
+		return journalFootprint{}
+	}
+	var archive journalArchive
+	if err := json.Unmarshal([]byte(raw), &archive); err != nil || archive.ArchiveFormat == 0 {
+		return journalFootprint{bytes: len(raw)}
+	}
+	measured := journalFootprint{bytes: archive.Bytes, index: len(raw)}
+	for _, pages := range archive.Fields {
+		measured.pages += len(pages)
+	}
+	return measured
+}
+
+// nearCapacity reports whether the journal has consumed half of either budget
+// that fails closed: the 16 MiB hydrated cap, beyond which no journal can be
+// written at all, or the 200 KiB archive index. It warns; it blocks nothing.
+func (m journalFootprint) nearCapacity() bool {
+	return m.bytes > archiveMaxBytes/2 || m.index > archiveIndexBytes/2
+}
+
+func journalSizeReason(m journalFootprint) string {
+	if m.nearCapacity() {
+		return "JournalNearCapacity"
+	}
+	return "JournalWithinBudget"
+}
+
+func journalSizeMessage(m journalFootprint) string {
+	return fmt.Sprintf("Lifecycle journal is %d bytes of the %d byte hydrated cap; archive index %d bytes of %d across %d pages", m.bytes, archiveMaxBytes, m.index, archiveIndexBytes, m.pages)
 }

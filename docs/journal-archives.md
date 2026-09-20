@@ -39,5 +39,12 @@ an operational storage cost, not permission to prune evidence.
 Hydrated authority is limited to 16 MiB per reservation and archive indexes remain
 limited to 200 KiB. These explicit memory/API budgets fail closed. This supports
 much longer histories than the previous annotation-only scheme, but is not an
-unlimited-history claim. Monitor reservation size and ConfigMap storage; a future
+unlimited-history claim. Monitor reservation size and ConfigMap storage through
+`celld_fleet_journal_bytes`, `celld_fleet_journal_archive_pages` and the
+`JournalSizeWarning` condition, which warns at half of either budget; a future
 larger-scale archive backend must preserve the same integrity and fencing rules.
+
+Each reconcile hydrates the journal exactly once and every consumer of the pass
+— Bucket migration, reservation matching, the lifecycle run and the status
+report — decides on that one copy, so a paged journal costs one read per page
+per reconcile rather than one per consumer.

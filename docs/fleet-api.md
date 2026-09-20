@@ -79,6 +79,8 @@ replicas are runtime-ready. It may be true while the fleet target differs. It is
 Pending. `Blocked` identifies invalid configuration, missing dependencies,
 isolation verification, conflicting reservations, drift or missing workloads.
 `LifecycleBlocked=True` and `ProductionQualified=False` remain explicit throughout.
+`JournalSizeWarning` turns true once the retained lifecycle journal passes half
+of either budget that fails closed; see [operations](operations.md#monitoring).
 Use Pod events to distinguish insufficient nodes, AZ constraints, PVC binding and
 runtime health 503. Metrics serving is optional through `--metrics-bind-address`;
 Prometheus is never a provisioning prerequisite.

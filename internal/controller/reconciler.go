@@ -403,6 +403,13 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, h *hydrate
 	set("Blocked", !provisioned && reason != "LifecycleProgress", reason, message)
 	set("LifecycleBlocked", true, "QualificationIncomplete", "Production automatic contraction, runtime upgrades and uncertain-node recovery remain unqualified; experimental maintenance requires exact runtime and storage evidence")
 	set("ProductionQualified", false, "QualificationIncomplete", "Local prototype only; AWS, retained-EBS recovery, fencing, follower AZ diversity and restart safety remain unqualified")
+	// Both journal budgets fail closed, and a journal that reaches either one can
+	// no longer be written at all. Warn at half of each; block on neither.
+	footprint := journalFootprint{}
+	if h.res != nil {
+		footprint = measureJournal(h.res)
+	}
+	set("JournalSizeWarning", footprint.nearCapacity(), journalSizeReason(footprint), journalSizeMessage(footprint))
 	if meta.IsStatusConditionTrue(f.Status.Conditions, "Blocked") {
 		if f.Status.BlockedSince == "" || !meta.IsStatusConditionTrue(before.Status.Conditions, "Blocked") {
 			f.Status.BlockedSince = r.capacityNow().UTC().Format(time.RFC3339)
@@ -416,7 +423,7 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, h *hydrate
 		}
 	}
 	r.recordConditionChange(f, before.Status.Conditions)
-	publishFleetMetrics(f, r.capacityNow())
+	publishFleetMetrics(f, footprint, r.capacityNow())
 	return ctrl.Result{RequeueAfter: reconcileDelay(f)}, nil
 }
 
