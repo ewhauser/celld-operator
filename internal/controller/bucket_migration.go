@@ -58,7 +58,7 @@ func validateBucketMigration(j *lifecycleJournal) error {
 func (r *Reconciler) migrateBucket(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation) (ctrl.Result, bool, error) {
 	j, err := r.loadJournal(ctx, res)
 	if err != nil {
-		result, reportErr := r.report(ctx, f, "StorageScopeConflict", "Cannot load retained lifecycle authority: "+err.Error(), 0, false)
+		result, reportErr := r.report(ctx, f, "StorageScopeConflict", "Cannot load retained lifecycle authority: "+err.Error(), false)
 		return result, true, reportErr
 	}
 	if j == nil {
@@ -72,7 +72,7 @@ func (r *Reconciler) migrateBucket(ctx context.Context, f *fleet.CelldFleet, res
 		return ctrl.Result{}, false, nil
 	}
 	block := func(e error) (ctrl.Result, bool, error) {
-		result, err := r.report(ctx, f, "MigrationBlocked", e.Error(), 0, false)
+		result, err := r.report(ctx, f, "MigrationBlocked", e.Error(), false)
 		return result, true, err
 	}
 	old := f.DeepCopy()
@@ -369,7 +369,7 @@ func (r *Reconciler) migrationFailure(ctx context.Context, f *fleet.CelldFleet, 
 	if loss {
 		reason = "PossibleDataLoss"
 	}
-	result, err := r.report(ctx, f, reason, cause.Error(), 0, false)
+	result, err := r.report(ctx, f, reason, cause.Error(), false)
 	return result, true, err
 }
 

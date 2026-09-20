@@ -423,7 +423,7 @@ func (r *Reconciler) assessPersistent(ctx context.Context, f *fleet.CelldFleet, 
 func (r *Reconciler) contractPersistent(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, j *lifecycleJournal, w client.Object) (ctrl.Result, bool, error) {
 	op := j.Operation
 	report := func(reason, message string) (ctrl.Result, bool, error) {
-		result, err := r.report(ctx, f, reason, message, 0, false)
+		result, err := r.report(ctx, f, reason, message, false)
 		return result, true, err
 	}
 	save := func() (ctrl.Result, bool, error) {
@@ -695,7 +695,7 @@ func (r *Reconciler) finishReactivation(ctx context.Context, f *fleet.CelldFleet
 		if _, ok := errors.AsType[*v050.LossError](err); ok {
 			return r.recordLoss(ctx, f, w, res, j, err.Error())
 		}
-		result, e := r.report(ctx, f, "ReactivationBlocked", err.Error(), 0, false)
+		result, e := r.report(ctx, f, "ReactivationBlocked", err.Error(), false)
 		return result, true, e
 	}
 	if replicas(w) != op.To || w.GetAnnotations()[operationKey] != op.ID {

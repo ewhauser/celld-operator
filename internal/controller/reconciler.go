@@ -79,7 +79,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		// the namespaced Role from config/rbac/fleet-namespace.yaml. Report that
 		// instead of requeueing silently, and never touch namespace resources.
 		f.Default()
-		return r.report(ctx, f, "NamespaceAccessDenied", "Operator lacks the fleet-namespace Role in "+f.Namespace+"; apply config/rbac/fleet-namespace.yaml there ("+err.Error()+")", 0, false)
+		return r.report(ctx, f, "NamespaceAccessDenied", "Operator lacks the fleet-namespace Role in "+f.Namespace+"; apply config/rbac/fleet-namespace.yaml there ("+err.Error()+")", false)
 	}
 	return result, err
 }
@@ -90,7 +90,7 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 		return r.deleteFleet(ctx, f)
 	}
 	if err := f.Validate(); err != nil {
-		return r.report(ctx, f, "InvalidConfiguration", err.Error(), 0, false)
+		return r.report(ctx, f, "InvalidConfiguration", err.Error(), false)
 	}
 	if !controllerutil.ContainsFinalizer(f, Finalizer) {
 		base := f.DeepCopy()
@@ -103,14 +103,14 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 		return r.pauseFleet(ctx, f)
 	}
 	if !r.NetworkPolicyEnforced {
-		return r.report(ctx, f, "IsolationUnverified", "Administrator must verify a NetworkPolicy enforcing CNI and enable --network-policy-enforced before provisioning", 0, false)
+		return r.report(ctx, f, "IsolationUnverified", "Administrator must verify a NetworkPolicy enforcing CNI and enable --network-policy-enforced before provisioning", false)
 	}
 	sa := &corev1.ServiceAccount{}
 	if err := r.Get(ctx, types.NamespacedName{Namespace: f.Namespace, Name: f.Spec.ServiceAccountName}, sa); err != nil {
 		if !apierrors.IsNotFound(err) {
 			return ctrl.Result{}, err
 		}
-		return r.report(ctx, f, "ServiceAccountMissing", "Referenced ServiceAccount does not exist in the fleet namespace", 0, false)
+		return r.report(ctx, f, "ServiceAccountMissing", "Referenced ServiceAccount does not exist in the fleet namespace", false)
 	}
 	if f.Spec.Profile == "PersistentFleet" {
 		sc := &storagev1.StorageClass{}
@@ -118,10 +118,10 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 			if !apierrors.IsNotFound(err) {
 				return ctrl.Result{}, err
 			}
-			return r.report(ctx, f, "StorageClassMissing", "Referenced StorageClass does not exist", 0, false)
+			return r.report(ctx, f, "StorageClassMissing", "Referenced StorageClass does not exist", false)
 		}
 		if sc.ReclaimPolicy == nil || *sc.ReclaimPolicy != corev1.PersistentVolumeReclaimRetain || sc.VolumeBindingMode == nil || *sc.VolumeBindingMode != storagev1.VolumeBindingWaitForFirstConsumer || (!r.Options.LocalTest && sc.Provisioner != "ebs.csi.aws.com") {
-			return r.report(ctx, f, "InvalidStorageClass", "Requires EBS CSI, Retain reclaim policy and WaitForFirstConsumer binding (local test permits a different provisioner)", 0, false)
+			return r.report(ctx, f, "InvalidStorageClass", "Requires EBS CSI, Retain reclaim policy and WaitForFirstConsumer binding (local test permits a different provisioner)", false)
 		}
 	}
 	reservation := &fleet.CelldStorageReservation{Name: reservationName(f), Spec: fleet.ReservationSpec{InitialReplicas: f.Spec.Replicas, Bucket: f.Spec.Storage.Bucket, FleetNamespace: f.Namespace, FleetName: f.Name, FleetUID: string(f.UID), SpecHash: specHash(f)}}
@@ -138,12 +138,12 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 		return result, err
 	}
 	if len(reservation.OwnerReferences) != 0 || !reservation.DeletionTimestamp.IsZero() || !r.reservationMatches(ctx, f, reservation, expected) {
-		return r.report(ctx, f, "StorageScopeConflict", "Bucket is permanently reserved to another fleet UID or immutable configuration; no resources adopted", 0, false)
+		return r.report(ctx, f, "StorageScopeConflict", "Bucket is permanently reserved to another fleet UID or immutable configuration; no resources adopted", false)
 	}
 
 	for _, obj := range prerequisites(f, r.Options) {
 		if err := r.ensure(ctx, obj); err != nil {
-			return r.report(ctx, f, "InfrastructureBlocked", err.Error(), 0, false)
+			return r.report(ctx, f, "InfrastructureBlocked", err.Error(), false)
 		}
 	}
 	desired := workload(f, r.Options)
@@ -151,19 +151,19 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 	err := r.Get(ctx, client.ObjectKeyFromObject(desired), actual)
 	if apierrors.IsNotFound(err) {
 		if !knownRuntime(runtimeImage(f)) || (runtimeImage(f) != Image && (f.Spec.Profile != "PersistentFleet" || r.Options.LauncherImage == "")) {
-			return r.report(ctx, f, "UnsupportedTransition", "Initial runtime requires a qualified release; v0.4.1 requires PersistentFleet with the trusted launcher", 0, false)
+			return r.report(ctx, f, "UnsupportedTransition", "Initial runtime requires a qualified release; v0.4.1 requires PersistentFleet with the trusted launcher", false)
 		}
 		if reservation.Annotations[attemptAnnotation] != "" {
-			return r.report(ctx, f, "LifecycleBlocked", "Workload is missing after a recorded creation attempt; automatic recreation could reuse an unsafe identity or disk", 0, false)
+			return r.report(ctx, f, "LifecycleBlocked", "Workload is missing after a recorded creation attempt; automatic recreation could reuse an unsafe identity or disk", false)
 		}
 		if f.Spec.Profile == "PersistentFleet" && r.Options.LauncherImage != "" {
 			if err := r.createLauncherKey(ctx, f, reservation); err != nil {
-				return r.report(ctx, f, "LauncherIdentityBlocked", err.Error(), 0, false)
+				return r.report(ctx, f, "LauncherIdentityBlocked", err.Error(), false)
 			}
 		}
 		claims := initialClaims(f, desired)
 		if err := r.checkInitialClaims(ctx, claims); err != nil {
-			return r.report(ctx, f, "StorageIdentityConflict", err.Error(), 0, false)
+			return r.report(ctx, f, "StorageIdentityConflict", err.Error(), false)
 		}
 		// Persist intent BEFORE Create. A crash in this window intentionally blocks for review.
 		if reservation.Annotations == nil {
@@ -176,7 +176,7 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 		createdClaims := map[string]types.UID{}
 		for _, claim := range claims {
 			if err := r.Create(ctx, claim); err != nil {
-				return r.report(ctx, f, "StorageIdentityConflict", fmt.Sprintf("Cannot exclusively create PVC %s: %v; retained claims require manual review", claim.Name, err), 0, false)
+				return r.report(ctx, f, "StorageIdentityConflict", fmt.Sprintf("Cannot exclusively create PVC %s: %v; retained claims require manual review", claim.Name, err), false)
 			}
 			createdClaims[claim.Name] = claim.UID
 		}
@@ -191,7 +191,7 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 		if err := r.Create(ctx, desired); err != nil {
 			return ctrl.Result{}, err
 		}
-		return r.report(ctx, f, "Provisioning", "Initial workload created; waiting for runtime readiness and placement", 0, true)
+		return r.report(ctx, f, "Provisioning", "Initial workload created; waiting for runtime readiness and placement", true)
 	}
 	if err != nil {
 		return ctrl.Result{}, err
@@ -205,28 +205,15 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 		setReplicas(desired, replicas(actual))
 	}
 	if !matches(desired, actual) {
-		return r.report(ctx, f, "LifecycleBlocked", "Existing workload differs from the journaled spec; no rollout, adoption or drift repair is authorized", 0, false)
+		return r.report(ctx, f, "LifecycleBlocked", "Existing workload differs from the journaled spec; no rollout, adoption or drift repair is authorized", false)
 	}
 	if reservation.Annotations[attemptAnnotation] == "" {
-		return r.report(ctx, f, "LifecycleBlocked", "Existing workload has no creation journal; refusing adoption", 0, false)
+		return r.report(ctx, f, "LifecycleBlocked", "Existing workload has no creation journal; refusing adoption", false)
 	}
-	var ready int32
-	var observed int64
-	switch w := actual.(type) {
-	case *appsv1.Deployment:
-		ready = w.Status.ReadyReplicas
-		observed = w.Status.ObservedGeneration
-	case *appsv1.StatefulSet:
-		ready = w.Status.ReadyReplicas
-		observed = w.Status.ObservedGeneration
+	if readyReplicas(actual) != replicas(actual) {
+		return r.report(ctx, f, "Provisioning", "Waiting for ready replicas; inspect Pod scheduling, PVC binding and runtime readiness. Capacity is externally provisioned", true)
 	}
-	if observed < actual.GetGeneration() {
-		ready = 0
-	}
-	if ready != replicas(actual) {
-		return r.report(ctx, f, "Provisioning", "Waiting for ready replicas; inspect Pod scheduling, PVC binding and runtime readiness. Capacity is externally provisioned", ready, true)
-	}
-	return r.report(ctx, f, "Provisioned", "Initial infrastructure and runtime readiness observed; this is not production or durability qualification", ready, true)
+	return r.report(ctx, f, "Provisioned", "Initial infrastructure and runtime readiness observed; this is not production or durability qualification", true)
 }
 
 func (r *Reconciler) ensure(ctx context.Context, desired client.Object) error {
@@ -263,7 +250,24 @@ func emptyObject(obj client.Object) client.Object {
 	}
 }
 
-func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, reason, message string, ready int32, provisioned bool) (ctrl.Result, error) {
+// readyReplicas reports the workload's ready replica count. A status the workload
+// controller has not caught up to yet counts as zero ready replicas.
+func readyReplicas(w client.Object) int32 {
+	var ready int32
+	var observed int64
+	switch w := w.(type) {
+	case *appsv1.Deployment:
+		ready, observed = w.Status.ReadyReplicas, w.Status.ObservedGeneration
+	case *appsv1.StatefulSet:
+		ready, observed = w.Status.ReadyReplicas, w.Status.ObservedGeneration
+	}
+	if observed < w.GetGeneration() {
+		return 0
+	}
+	return ready
+}
+
+func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, reason, message string, provisioned bool) (ctrl.Result, error) {
 	before := f.DeepCopy()
 	f.Status.DesiredReplicas = f.Spec.Replicas
 	f.Status.AppliedReplicas = 0
@@ -351,6 +355,7 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, reason, me
 	}
 	f.Status.ObservedGeneration = f.Generation
 	observed := emptyObject(workload(f, r.Options))
+	var ready int32
 	serving := false
 	// A forbidden read means the fleet namespace lacks the operator Role; the
 	// caller reports that, and readiness is simply unknown (zero) meanwhile.
@@ -358,19 +363,8 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, reason, me
 		return ctrl.Result{}, err
 	} else if err == nil && observed.GetLabels()[FleetLabel] == string(f.UID) && observed.GetDeletionTimestamp().IsZero() {
 		f.Status.AppliedReplicas = replicas(observed)
-		var generation int64
-		switch w := observed.(type) {
-		case *appsv1.Deployment:
-			ready, generation = w.Status.ReadyReplicas, w.Status.ObservedGeneration
-		case *appsv1.StatefulSet:
-			ready, generation = w.Status.ReadyReplicas, w.Status.ObservedGeneration
-		}
-		if generation < observed.GetGeneration() {
-			ready = 0
-		}
+		ready = readyReplicas(observed)
 		serving = ready > 0 && ready == replicas(observed)
-	} else {
-		ready = 0
 	}
 	f.Status.ReadyReplicas = ready
 	r.observeReplicaCounts(ctx, f)

@@ -23,8 +23,9 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: CelldFleet supports journaled capacity and maintenance requests.
-          No scale subresource is exposed.
+        description: |-
+          CelldFleet supports journaled capacity and maintenance requests. The /scale
+          subresource declared below exposes spec.replicas for external capacity mode.
         properties:
           apiVersion:
             description: |-

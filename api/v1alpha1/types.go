@@ -17,7 +17,8 @@ var SchemeBuilder = runtime.NewSchemeBuilder(func(s *runtime.Scheme) error {
 })
 var AddToScheme = SchemeBuilder.AddToScheme
 
-// CelldFleet supports journaled capacity and maintenance requests. No scale subresource is exposed.
+// CelldFleet supports journaled capacity and maintenance requests. The /scale
+// subresource declared below exposes spec.replicas for external capacity mode.
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=cf

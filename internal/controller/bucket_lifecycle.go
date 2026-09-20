@@ -314,7 +314,7 @@ func bucketObservationIdentities(o capacity.Observation, ids []string) bool {
 func (r *Reconciler) contractBucket(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, j *lifecycleJournal, w client.Object) (ctrl.Result, bool, error) {
 	op := j.Operation
 	report := func(reason, message string) (ctrl.Result, bool, error) {
-		result, err := r.report(ctx, f, reason, message, 0, false)
+		result, err := r.report(ctx, f, reason, message, false)
 		return result, true, err
 	}
 	save := func() (ctrl.Result, bool, error) {

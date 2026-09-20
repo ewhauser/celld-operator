@@ -129,10 +129,10 @@ func validateTuning(s *CelldFleetSpec) error {
 		return fmt.Errorf("execution.memoryLimit must be at least memoryRequest")
 	}
 	if e.MaxResidentCells < 0 || e.MaxResidentCells > 1000000 {
-		return fmt.Errorf("execution.maxResidentCells must be between 1 and 1000000")
+		return fmt.Errorf("execution.maxResidentCells must be between 0 (unset) and 1000000")
 	}
 	if e.IdleEvictSeconds < 0 || e.IdleEvictSeconds > 86400 {
-		return fmt.Errorf("execution.idleEvictSeconds must be between 1 and 86400")
+		return fmt.Errorf("execution.idleEvictSeconds must be between 0 (unset) and 86400")
 	}
 	l := s.EffectiveLifecycle()
 	if l.ShutdownSeconds < 1 || l.ShutdownSeconds > 3600 {
