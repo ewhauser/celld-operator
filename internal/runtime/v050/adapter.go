@@ -319,6 +319,10 @@ func (a *Adapter) assess(ctx context.Context, r Reader, req Request, now func() 
 		if !ok || s.Generation != n.Generation {
 			return Evidence{}, errors.New("unknown node or generation replacement")
 		}
+		// Deliberately ahead of the Stopped split: a rewound or missing epoch
+		// disqualifies a live session too, so this must not move inside the
+		// stopped branch below. That branch therefore needs no epoch check of
+		// its own; n.Epoch >= s.Epoch already holds for every node past here.
 		if n.Epoch < s.Epoch {
 			return Evidence{}, errors.New("recovery epoch rewound or log missing")
 		}
@@ -326,7 +330,7 @@ func (a *Adapter) assess(ctx context.Context, r Reader, req Request, now func() 
 			return Evidence{}, errors.New("unresolved unavailable session")
 		}
 		if s.Stopped {
-			if n.LogState != "sealed" || n.Epoch < s.Epoch {
+			if n.LogState != "sealed" {
 				return Evidence{}, errors.New("session recovery unresolved")
 			}
 			result.Completed = append(result.Completed, s)
