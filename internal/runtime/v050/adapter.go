@@ -480,10 +480,14 @@ func listEach(ctx context.Context, r Reader, prefix string, budget *int, visit f
 //     of the body this process last parsed for that key, and on the listed size
 //     matching the size recorded with it. A key the listing gives no ETag for is
 //     always re-read.
-//   - A Get whose returned ETag differs from the listed ETag means the object
-//     changed between the list and the read: the pass fails closed and the next
-//     reconcile starts from a fresh listing. A body whose length disagrees with
-//     the size listed against a matching ETag fails the same way.
+//   - A Get whose returned ETag differs from the listed ETag means the writer
+//     rewrote its own record between the list and the read, which every live
+//     writer does on every lease heartbeat. That is an ordinary concurrent
+//     rewrite, not a contradiction: GetObject returned one self-consistent
+//     version of the object, and the freshness, lease and generation checks
+//     above this function judge that body alone. The body is used and simply
+//     not remembered. A body whose length disagrees with the size listed
+//     against a MATCHING ETag is a real contradiction and fails the pass.
 //   - Nothing is remembered unless the Get itself confirmed the listed ETag, so
 //     a Reader that cannot report an ETag re-reads every record forever.
 //   - Parse failures are never remembered; the next pass reads that body again.
@@ -526,10 +530,11 @@ func (a *Adapter) readNodes(ctx context.Context, r Reader, budget *int, want int
 		if err != nil {
 			return nodes, err
 		}
+		// A live writer rewrites nodes/<id>.json on every lease heartbeat, so on
+		// any link slow enough for the read to trail the listing the ETags simply
+		// differ. The body is still one whole version of the object; only the
+		// cache key is stale. Use it, remember nothing.
 		confirmed := entry.etag != "" && etag == entry.etag
-		if entry.etag != "" && etag != "" && !confirmed {
-			return nodes, errors.New("record changed between the listing and the read")
-		}
 		if confirmed && entry.size != 0 && entry.size != int64(len(data)) {
 			return nodes, errors.New("listed size disagrees with the record body")
 		}
