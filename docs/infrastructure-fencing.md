@@ -44,11 +44,24 @@ actors that bypass scheduling/cordoning remain outside this trust boundary.
 
 Authorize the **specific** stalled operation by setting the fleet annotation
 `celld.eric.dev/fence-operation` to its lifecycle operation ID. This annotation
-is a destructive-action request, never proof that fencing happened. A durable
-intent is saved before any EC2 mutation. Once recorded, reconciliation completes
-that intent rather than switching back to graceful same-host reuse. Removing the
-annotation stops further requests but does not undo a request already submitted.
-Remove it after completion. The default is no infrastructure termination.
+is a destructive-action request, never proof that fencing happened, and it is
+not a standing policy: it authorizes termination for the named operation only
+after that operation's donor launcher has been **continuously unreachable for at
+least 60 seconds**. Launcher calls use a 3-second timeout, so a single failed
+call is an ordinary transient, not a dead host. The operator records the start
+of the current run of consecutive failures in the reservation journal and clears
+it as soon as the donor answers again; a reachable donor never records fence
+intent in any path, and the first failing reconcile can never satisfy the window
+on its own. While waiting the fleet reports the condition reason
+`InfrastructureFencing` with how long the donor has been unreachable, so the
+operator sees progress rather than silence.
+
+A durable intent is saved before any EC2 mutation. Once recorded, reconciliation
+completes that intent regardless of later reachability, rather than switching
+back to graceful same-host reuse; a launcher that answers again after intent
+does not cancel the termination. Removing the annotation stops further requests
+but does not undo a request already submitted. Remove it after completion. The
+default is no infrastructure termination.
 
 Scope the operator role to one account/region and eligible dedicated fleet:
 

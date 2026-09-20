@@ -516,9 +516,25 @@ func (r *Reconciler) contractPersistent(ctx context.Context, f *fleet.CelldFleet
 			return fail(errors.New("donor invocation changed before stop"))
 		}
 		state, err := r.callLauncher(ctx, f, pod, "", "")
-		if err != nil || slices.ContainsFunc(j.InfrastructureFences, func(receipt infrastructureFence) bool {
+		recorded := slices.ContainsFunc(j.InfrastructureFences, func(receipt infrastructureFence) bool {
 			return receipt.Operation == op.ID && sameInvocation(receipt.Member, old)
-		}) {
+		})
+		// A single short-timeout launcher error is not evidence that the donor
+		// host is gone. Track continuous unreachability durably so that the
+		// fence annotation can only authorize termination after the window,
+		// and never while the last call to the donor succeeded. Intent already
+		// recorded still completes regardless of later reachability.
+		unreachable, changed := err != nil, false
+		if unreachable && op.DonorUnreachableSince.IsZero() {
+			op.DonorUnreachableSince, changed = r.capacityNow(), true
+		} else if !unreachable && !op.DonorUnreachableSince.IsZero() {
+			op.DonorUnreachableSince, changed = time.Time{}, true
+		}
+		// Sustained requires an earlier reconcile to have set the marker; the
+		// first failing reconcile can never satisfy the window on its own.
+		sustained := unreachable && !changed && !r.capacityNow().Before(op.DonorUnreachableSince.Add(fenceUnreachableWindow))
+		requested := f.Annotations[fenceRequestKey] == op.ID
+		if recorded || (unreachable && (sustained || !requested)) {
 			fenced, fenceErr := r.ensureInfrastructureFence(ctx, f, res, j, old, op.ID)
 			if fenceErr != nil {
 				return fail(fenceErr)
@@ -534,6 +550,14 @@ func (r *Reconciler) contractPersistent(ctx context.Context, f *fleet.CelldFleet
 			op.Phase = "Retiring"
 			op.WorkloadVersion = w.GetResourceVersion()
 			return save()
+		}
+		if changed {
+			if e := r.saveJournal(ctx, res, j); e != nil {
+				return ctrl.Result{}, true, e
+			}
+		}
+		if unreachable {
+			return report("InfrastructureFencing", fmt.Sprintf("donor launcher unreachable for %ds (%v); fencing requires %ds of sustained unreachability", int(r.capacityNow().Sub(op.DonorUnreachableSince).Seconds()), err, int(fenceUnreachableWindow.Seconds())))
 		}
 		if state.Invocation != old.Invocation || state.Generation != old.Generation {
 			return fail(errors.New("donor launcher changed before stop"))
