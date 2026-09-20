@@ -14,7 +14,7 @@ import (
 func TestHandoffBoundToExactInvocation(t *testing.T) {
 	state := State{Phase: "WaitingForHandoff", Invocation: "inv", Generation: "gen", PodUID: "pod", Host: "new", BootID: "boot", DiskID: "disk", PreviousHost: "old\noldboot"}
 	correct := Handoff{Invocation: state.Invocation, Generation: state.Generation, PodUID: state.PodUID, Host: state.Host, BootID: state.BootID, DiskID: state.DiskID, PreviousHost: state.PreviousHost}
-	for _, field := range []string{"valid", "invocation", "generation", "pod", "host", "boot", "disk", "previous", "expired", "future", "stop"} {
+	for _, field := range []string{"valid", "invocation", "generation", "pod", "host", "boot", "disk", "previous", "expired", "skew", "future", "stop"} {
 		t.Run(field, func(t *testing.T) {
 			s := &supervisor{key: bytes.Repeat([]byte{1}, 32), state: state, handoff: make(chan struct{})}
 			h := correct
@@ -36,8 +36,12 @@ func TestHandoffBoundToExactInvocation(t *testing.T) {
 				h.PreviousHost = "other"
 			case "expired":
 				q.NotAfterMS = 0
+			case "skew":
+				// The controller stamps now+3s on its own clock; a few seconds
+				// of forward skew must still land inside requestExpiryBound.
+				q.NotAfterMS = time.Now().Add(5 * time.Second).UnixMilli()
 			case "future":
-				q.NotAfterMS = time.Now().Add(time.Hour).UnixMilli()
+				q.NotAfterMS = time.Now().Add(requestExpiryBound + time.Second).UnixMilli()
 			case "stop":
 				q.Operation = "stop"
 			}
@@ -46,7 +50,7 @@ func TestHandoffBoundToExactInvocation(t *testing.T) {
 			req.Header.Set("X-Celld-MAC", MAC(s.key, "request", q))
 			rec := httptest.NewRecorder()
 			s.ServeHTTP(rec, req)
-			if (rec.Code == 200) != (field == "valid") {
+			if (rec.Code == 200) != (field == "valid" || field == "skew") {
 				t.Fatalf("code %d", rec.Code)
 			}
 			if field == "valid" {
@@ -60,6 +64,29 @@ func TestHandoffBoundToExactInvocation(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestHandoffGrantIsIdempotent(t *testing.T) {
+	state := State{Phase: "WaitingForHandoff", Invocation: "inv", Generation: "gen", PodUID: "pod", Host: "new", BootID: "boot", DiskID: "disk", PreviousHost: "old\noldboot"}
+	s := &supervisor{key: bytes.Repeat([]byte{1}, 32), state: state, handoff: make(chan struct{})}
+	q := Request{Nonce: Nonce(), NotAfterMS: time.Now().Add(time.Second).UnixMilli(), Handoff: &Handoff{Invocation: state.Invocation, Generation: state.Generation, PodUID: state.PodUID, Host: state.Host, BootID: state.BootID, DiskID: state.DiskID, PreviousHost: state.PreviousHost}}
+	b, _ := json.Marshal(q)
+	// A retried grant for the same association must answer 200 again without
+	// closing the handoff channel twice.
+	for i := range 2 {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1", bytes.NewReader(b))
+		req.Header.Set("X-Celld-MAC", MAC(s.key, "request", q))
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("grant %d: code %d", i, rec.Code)
+		}
+	}
+	select {
+	case <-s.handoff:
+	default:
+		t.Fatal("handoff not released")
 	}
 }
 
