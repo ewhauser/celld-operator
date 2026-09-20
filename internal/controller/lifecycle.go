@@ -774,11 +774,24 @@ func (s *lifecycleRun) executePersistentContraction() *lifecycleOutcome {
 			return outcome
 		}
 	}
-	op := s.op
-	if op.From == 2 && op.To == 1 && !op.Automatic && (op.Phase == "Blocked" || op.Phase == "Intent") && coordinatedDowntime(s.f) {
+	if s.coordinatedDowntimeRemoval() {
 		return s.stop(s.r.beginCoordinatedContraction(s.ctx, s.f, s.res, s.j, s.w))
 	}
 	return s.stop(s.r.contractPersistent(s.ctx, s.f, s.res, s.j, s.w))
+}
+
+// coordinatedDowntimeRemoval reports whether the recorded removal is the manual,
+// still unissued 2-to-1 for which the fleet grants explicit downtime permission.
+// The checks keep their original short-circuit order.
+func (s *lifecycleRun) coordinatedDowntimeRemoval() bool {
+	op := s.op
+	if op.From != 2 || op.To != 1 || op.Automatic {
+		return false
+	}
+	if op.Phase != "Blocked" && op.Phase != "Intent" {
+		return false
+	}
+	return coordinatedDowntime(s.f)
 }
 
 // reportBlockedRemoval establishes that a blocked removal retains its authority
