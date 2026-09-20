@@ -195,13 +195,18 @@ func TestStopGraceEscalatesToKillOnSchedule(t *testing.T) {
 		t.Skip("SIGTERM-ignoring fixture is not reproducible under CPU emulation")
 	}
 	c := config(t)
-	// The child ignores SIGTERM; only the configured escalation ends it.
-	ready := filepath.Join(c.Root, "ready")
-	c.Command = []string{"/bin/sh", "-c", `trap '' TERM; touch "$1"; while :; do sleep 1; done`, "child", ready}
+	// The child ignores SIGTERM; only the configured escalation ends it. Running
+	// means the shell has been started, not that it has reached its first
+	// statement, so wait for the fixture to announce that the trap is installed:
+	// a SIGTERM that arrives before it is still fatal by default disposition and
+	// would end the child in milliseconds rather than at the escalation.
+	ready, command := shellFixture(t)
+	c.Command = command("trap '' TERM")
 	c.StopGrace = 2 * time.Second
 	startSupervisor(t, c)
 	awaitChildReady(t, ready)
 	running := awaitPhase(t, c.Address, c.Key, "Running")
+	awaitReady(t, ready)
 	started := time.Now()
 	if _, err := query(t, c.Address, c.Key, "retire", running.Generation); err != nil {
 		t.Fatal(err)

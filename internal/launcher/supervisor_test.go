@@ -10,7 +10,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -27,16 +29,23 @@ func testAddress(t *testing.T) string {
 	_ = l.Close()
 	return a
 }
+
+// requestWindow is the expiry a test request carries and the client timeout it
+// waits with. It stays below requestExpiryBound so the supervisor accepts it,
+// but is wide enough that a scheduling delay under -race on a loaded runner
+// cannot expire a request the test means to succeed.
+const requestWindow = 5 * time.Second
+
 func query(t *testing.T, address string, key []byte, op, gen string) (State, error) {
 	t.Helper()
-	q := Request{Nonce: Nonce(), Operation: op, Generation: gen, NotAfterMS: time.Now().Add(time.Second).UnixMilli()}
+	q := Request{Nonce: Nonce(), Operation: op, Generation: gen, NotAfterMS: time.Now().Add(requestWindow).UnixMilli()}
 	b, _ := json.Marshal(q)
 	req, e := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://"+address+"/v1", bytes.NewReader(b))
 	if e != nil {
 		return State{}, e
 	}
 	req.Header.Set("X-Celld-MAC", MAC(key, "request", q))
-	c := &http.Client{Timeout: time.Second}
+	c := &http.Client{Timeout: requestWindow}
 	resp, e := c.Do(req)
 	if e != nil {
 		return State{}, e
@@ -56,9 +65,48 @@ func query(t *testing.T, address string, key []byte, op, gen string) (State, err
 	}
 	return ans.State, nil
 }
+
+// shellFixture builds a /bin/sh child that runs prologue, then announces its
+// readiness by writing the PID of its last background job (empty when it has
+// none) to the returned path, and finally idles.
+//
+// Signaling a shell that has only just been started is a race: until sh has
+// executed the prologue, the disposition a test relies on is not installed yet
+// and the default one applies. Tests therefore wait for the readiness file
+// before asking the supervisor to stop the child.
+func shellFixture(t *testing.T) (ready string, command func(prologue string) []string) {
+	t.Helper()
+	ready = filepath.Join(t.TempDir(), "fixture-ready")
+	return ready, func(prologue string) []string {
+		// The trailing newline marks the write complete, so a reader never sees a
+		// half-written PID. Statements are newline-separated: a prologue may end in
+		// "&", which no ";" may follow.
+		announce := "printf '%s\\n' \"$!\" > '" + ready + "'"
+		return []string{"/bin/sh", "-c", prologue + "\n" + announce + "\nwhile :; do sleep 1; done\n"}
+	}
+}
+
+// awaitReady blocks until a shellFixture child has announced itself and returns
+// what it announced: the PID of its background job, or "" when it has none.
+func awaitReady(t *testing.T, path string) string {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if b, err := os.ReadFile(path); err == nil && bytes.HasSuffix(b, []byte("\n")) {
+			return strings.TrimSpace(string(b))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("fixture never announced readiness at %s", path)
+	return ""
+}
+
 func awaitPhase(t *testing.T, address string, key []byte, phase string) State {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	// Only the failure path waits this long: the poll returns as soon as the
+	// phase appears. A short deadline turned ordinary CI scheduling delay into a
+	// test failure, so give a phase that genuinely never arrives time to prove it.
+	deadline := time.Now().Add(30 * time.Second)
 	var last State
 	for time.Now().Before(deadline) {
 		s, e := query(t, address, key, "", "")
@@ -73,8 +121,16 @@ func awaitPhase(t *testing.T, address string, key []byte, phase string) State {
 	t.Fatalf("phase %s not reached; last observed %+v", phase, last)
 	return State{}
 }
+
+// idleCommand is the ordinary fixture child: it idles until asked to stop and
+// leaves behind only sleeps that release the inherited descriptor within a
+// second, so a supervisor running it shuts down promptly.
+func idleCommand() []string {
+	return []string{"/bin/sh", "-c", "trap 'exit 0' TERM; while :; do sleep 1; done"}
+}
+
 func config(t *testing.T) Config {
-	return Config{Root: t.TempDir(), Address: testAddress(t), Key: bytes.Repeat([]byte{7}, 32), PodUID: "pod", Node: "node", Host: "host", BootID: "test-boot", Command: []string{"/bin/sh", "-c", "trap 'exit 0' TERM; while :; do sleep 1; done"}, Stdout: io.Discard, Stderr: io.Discard}
+	return Config{Root: t.TempDir(), Address: testAddress(t), Key: bytes.Repeat([]byte{7}, 32), PodUID: "pod", Node: "node", Host: "host", BootID: "test-boot", Command: idleCommand(), Stdout: io.Discard, Stderr: io.Discard}
 }
 func startSupervisor(t *testing.T, c Config) context.CancelFunc {
 	t.Helper()
@@ -181,6 +237,12 @@ func TestKilledLauncherCannotUnlockSurvivingChild(t *testing.T) {
 	c := config(t)
 	c.Stdout = nil
 	c.Stderr = nil
+	// The descendant that must outlive the launcher is an explicit long sleep, not
+	// whichever one-second sleep the idle loop happened to be running: that one
+	// releases the inherited descriptor within a second, after which a successor
+	// may legitimately acquire the volume and the test's premise disappears.
+	ready, command := shellFixture(t)
+	c.Command = command("sleep 600 &")
 	b, _ := json.Marshal(c)
 	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestLauncherHelper$")
 	cmd.Env = append(os.Environ(), "LAUNCHER_HELPER=1", "LAUNCHER_CONFIG="+string(b))
@@ -189,30 +251,64 @@ func TestKilledLauncherCannotUnlockSurvivingChild(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
 	first := awaitPhase(t, c.Address, c.Key, "Running")
-	if e := syscall.Kill(-first.PID, syscall.SIGSTOP); e != nil {
-		t.Fatal(e)
-	}
 	t.Cleanup(func() { _ = syscall.Kill(-first.PID, syscall.SIGKILL) })
+	descendant, e := strconv.Atoi(awaitReady(t, ready))
+	if e != nil {
+		t.Fatalf("fixture announced no descendant: %v", e)
+	}
 	// On Linux Pdeathsig kills the direct child. Its sleep descendant still owns
 	// the inherited descriptor, so no successor may use the volume prematurely.
-	time.Sleep(100 * time.Millisecond)
 	if e := cmd.Process.Kill(); e != nil {
 		t.Fatal(e)
 	}
 	_ = cmd.Wait()
+	// The direct child may still be dying, and a dying process still holds FD3, so
+	// a lock probe taken now cannot tell a survivor from the child's last moment.
+	// Wait for the child to release its descriptors before drawing any conclusion.
+	awaitReleased(t, first.PID)
 	// A surviving descendant is platform-dependent; explicitly confirm the
 	// lock owner survived rather than treating process absence as proof.
-	f, e := openLock(c.Root, true)
-	if e == nil {
-		_ = f.Close()
+	if !alive(descendant) {
 		t.Skip("no descendant survived direct-child termination")
+	}
+	if f, e := openLock(c.Root, true); e == nil {
+		_ = f.Close()
+		t.Fatalf("lock acquired while descendant %d still holds the inherited descriptor", descendant)
 	}
 	replacement := c
 	replacement.Address = testAddress(t)
+	// The successor only has to reach Running; give it the ordinary child so its
+	// own shutdown is not held up by a long-lived descendant of its own.
+	replacement.Command = idleCommand()
 	startSupervisor(t, replacement)
 	awaitPhase(t, replacement.Address, c.Key, "WaitingForExclusiveVolume")
 	_ = syscall.Kill(-first.PID, syscall.SIGKILL)
 	awaitPhase(t, replacement.Address, c.Key, "Running")
+}
+
+// alive reports whether pid names a process that still holds its descriptors: a
+// zombie has released them and is therefore not alive for this test's purpose.
+func alive(pid int) bool {
+	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if err != nil {
+		return false
+	}
+	// "pid (comm) state ..."; comm may contain spaces or parentheses.
+	fields := strings.Fields(string(b)[strings.LastIndexByte(string(b), ')')+1:])
+	return len(fields) > 0 && fields[0] != "Z"
+}
+
+// awaitReleased blocks until pid has released its descriptors.
+func awaitReleased(t *testing.T, pid int) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if !alive(pid) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("child %d never died after the launcher was killed", pid)
 }
 func TestRequestMACDomainSeparated(t *testing.T) {
 	key := []byte(strings.Repeat("k", 32))
