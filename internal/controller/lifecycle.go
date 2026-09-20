@@ -239,7 +239,7 @@ func (s *lifecycleRun) fail(err error) *lifecycleOutcome {
 
 // block ends the lifecycle by reporting a blocking condition on the fleet.
 func (s *lifecycleRun) block(reason, message string) *lifecycleOutcome {
-	result, err := s.r.report(s.ctx, s.f, reason, message, 0, false)
+	result, err := s.r.report(s.ctx, s.f, reason, message, false)
 	return s.stop(result, true, err)
 }
 
@@ -1074,7 +1074,7 @@ func (r *Reconciler) applyReplicas(ctx context.Context, w client.Object, op *lif
 func (r *Reconciler) expand(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, j *lifecycleJournal, w client.Object) (ctrl.Result, bool, error) {
 	op := j.Operation
 	fail := func(err error) (ctrl.Result, bool, error) {
-		result, reportErr := r.report(ctx, f, "ScaleOutBlocked", err.Error(), 0, false)
+		result, reportErr := r.report(ctx, f, "ScaleOutBlocked", err.Error(), false)
 		return result, true, reportErr
 	}
 	if op.Phase == "Reactivating" {
@@ -1172,6 +1172,6 @@ func (r *Reconciler) recordLoss(ctx context.Context, f *fleet.CelldFleet, w clie
 	if err := r.saveJournal(ctx, res, j); err != nil {
 		return ctrl.Result{}, true, err
 	}
-	result, err := r.report(ctx, f, "PossibleDataLoss", message, 0, false)
+	result, err := r.report(ctx, f, "PossibleDataLoss", message, false)
 	return result, true, err
 }

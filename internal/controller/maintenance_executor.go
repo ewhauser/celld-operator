@@ -47,7 +47,7 @@ func (r *Reconciler) beginMaintenance(ctx context.Context, f *fleet.CelldFleet, 
 		return ctrl.Result{}, true, errors.New("maintenance workload changed")
 	}
 	if j.Loss != "" {
-		result, err := r.report(ctx, f, "PossibleDataLoss", j.Loss, 0, false)
+		result, err := r.report(ctx, f, "PossibleDataLoss", j.Loss, false)
 		return result, true, err
 	}
 	if j.Operation != nil {
@@ -73,7 +73,7 @@ func (r *Reconciler) executeMaintenance(ctx context.Context, f *fleet.CelldFleet
 		if saveErr := r.saveJournal(ctx, res, j); saveErr != nil {
 			return ctrl.Result{}, true, saveErr
 		}
-		result, reportErr := r.report(ctx, f, "MaintenanceRecoveryBlocked", err.Error(), 0, false)
+		result, reportErr := r.report(ctx, f, "MaintenanceRecoveryBlocked", err.Error(), false)
 		return result, true, reportErr
 	}
 	if m.ID == "" || (m.Kind != "Restart" && m.Kind != "Delete" && m.Kind != "Contract" && m.Kind != "Upgrade") || m.Index < 0 || m.Index > len(m.Targets) || j.Operation != nil {
@@ -120,7 +120,7 @@ func (r *Reconciler) executeMaintenance(ctx context.Context, f *fleet.CelldFleet
 	}
 	if m.Phase == "Capture" || m.Phase == "Next" {
 		if paused(f) {
-			result, err := r.report(ctx, f, "MaintenancePaused", "No new maintenance action admitted", 0, false)
+			result, err := r.report(ctx, f, "MaintenancePaused", "No new maintenance action admitted", false)
 			return result, true, err
 		}
 		if m.Kind == "Upgrade" && (!canStopUpgrade(f, j, r.Options) || runtimeImage(f) != m.TargetImage || !f.DeletionTimestamp.IsZero()) {
@@ -451,7 +451,7 @@ func (r *Reconciler) saveMaintenance(ctx context.Context, f *fleet.CelldFleet, r
 	if err := r.saveJournal(ctx, res, j); err != nil {
 		return ctrl.Result{}, true, err
 	}
-	_, err := r.report(ctx, f, "LifecycleProgress", "Durable maintenance transition recorded; inspect lifecycle maintenance phase", 0, false)
+	_, err := r.report(ctx, f, "LifecycleProgress", "Durable maintenance transition recorded; inspect lifecycle maintenance phase", false)
 	return ctrl.Result{RequeueAfter: time.Second}, true, err
 }
 

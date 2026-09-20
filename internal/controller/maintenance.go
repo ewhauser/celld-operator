@@ -118,7 +118,7 @@ func (r *Reconciler) disruption(ctx context.Context, f *fleet.CelldFleet, res *f
 	if kind == "Delete" {
 		reason = "DeletionBlocked"
 	}
-	result, err := r.report(ctx, f, reason, "Request retained in shared lifecycle journal; no upgrade, rollback, restart or final shutdown is qualified. Workloads, PVCs, storage reservation and recovery evidence remain retained", 0, false)
+	result, err := r.report(ctx, f, reason, "Request retained in shared lifecycle journal; no upgrade, rollback, restart or final shutdown is qualified. Workloads, PVCs, storage reservation and recovery evidence remain retained", false)
 	return result, true, err
 }
 
@@ -142,7 +142,7 @@ func (r *Reconciler) maintenanceFleet(ctx context.Context, f *fleet.CelldFleet) 
 		if !f.DeletionTimestamp.IsZero() {
 			candidate := emptyObject(workload(f, r.Options))
 			if err := r.Get(ctx, client.ObjectKeyFromObject(f), candidate); err == nil {
-				return r.report(ctx, f, "DeletionBlocked", "Missing reservation for existing workload; refusing reconstruction of runtime authority", 0, false)
+				return r.report(ctx, f, "DeletionBlocked", "Missing reservation for existing workload; refusing reconstruction of runtime authority", false)
 			} else if !apierrors.IsNotFound(err) {
 				return ctrl.Result{}, err
 			}
@@ -151,7 +151,7 @@ func (r *Reconciler) maintenanceFleet(ctx context.Context, f *fleet.CelldFleet) 
 				return ctrl.Result{}, err
 			}
 			if len(pods.Items) != 0 {
-				return r.report(ctx, f, "DeletionBlocked", "Missing reservation with live pod identities requires investigation", 0, false)
+				return r.report(ctx, f, "DeletionBlocked", "Missing reservation with live pod identities requires investigation", false)
 			}
 			res = &fleet.CelldStorageReservation{Name: reservationName(f), Spec: fleet.ReservationSpec{InitialReplicas: f.Spec.Replicas, Bucket: f.Spec.Storage.Bucket, FleetNamespace: f.Namespace, FleetName: f.Name, FleetUID: string(f.UID), SpecHash: specHash(f)}}
 			res.Annotations = map[string]string{attemptAnnotation: "deletion-before-workload"}
@@ -160,14 +160,14 @@ func (r *Reconciler) maintenanceFleet(ctx context.Context, f *fleet.CelldFleet) 
 			}
 			return ctrl.Result{RequeueAfter: time.Second}, nil
 		}
-		return r.report(ctx, f, reason, "No reservation found; provisioning suspended", 0, false)
+		return r.report(ctx, f, reason, "No reservation found; provisioning suspended", false)
 	}
 	if result, handled, err := r.migrateBucket(ctx, f, res); handled || err != nil {
 		return result, err
 	}
 	want := fleet.ReservationSpec{InitialReplicas: f.Spec.Replicas, Bucket: f.Spec.Storage.Bucket, FleetNamespace: f.Namespace, FleetName: f.Name, FleetUID: string(f.UID), SpecHash: specHash(f)}
 	if len(res.OwnerReferences) != 0 || !res.DeletionTimestamp.IsZero() || !r.reservationMatches(ctx, f, res, want) {
-		return r.report(ctx, f, "StorageScopeConflict", "Cannot bind maintenance to retained storage authority", 0, false)
+		return r.report(ctx, f, "StorageScopeConflict", "Cannot bind maintenance to retained storage authority", false)
 	}
 	w := emptyObject(workload(f, r.Options))
 	if err := r.Get(ctx, client.ObjectKeyFromObject(f), w); err != nil {
@@ -203,10 +203,10 @@ func (r *Reconciler) maintenanceFleet(ctx context.Context, f *fleet.CelldFleet) 
 				return result, err
 			}
 		}
-		return r.report(ctx, f, reason, "Workload absent; retain finalizer and reservation because absence is not process fencing or recovery evidence", 0, false)
+		return r.report(ctx, f, reason, "Workload absent; retain finalizer and reservation because absence is not process fencing or recovery evidence", false)
 	}
 	if w.GetLabels()[FleetLabel] != string(f.UID) || len(w.GetOwnerReferences()) != 0 {
-		return r.report(ctx, f, "LifecycleBlocked", "Workload identity or garbage collection ownership changed", 0, false)
+		return r.report(ctx, f, "LifecycleBlocked", "Workload identity or garbage collection ownership changed", false)
 	}
 	if w.GetAnnotations()[maintenanceFenceKey] != maintenanceFence(f) {
 		if err := r.setMaintenanceFence(ctx, f, w, maintenanceFence(f)); err != nil {
@@ -217,7 +217,7 @@ func (r *Reconciler) maintenanceFleet(ctx context.Context, f *fleet.CelldFleet) 
 	if handled || err != nil {
 		return result, err
 	}
-	return r.report(ctx, f, reason, "Workload fence acknowledged; new actions suspended, issued operations continue recovery; all data and identities retained", 0, false)
+	return r.report(ctx, f, reason, "Workload fence acknowledged; new actions suspended, issued operations continue recovery; all data and identities retained", false)
 }
 
 func resetMaintenanceCapacity(j *lifecycleJournal) {
