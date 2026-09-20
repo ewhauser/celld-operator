@@ -185,6 +185,49 @@ func TestCompletionHistoryKeepsOnlyTheLastEntry(t *testing.T) {
 	}
 }
 
+// TestBootstrapConsumesCreationClaimInventory pins the ADR 0021 phase 1
+// boundary for the creation claim annotation: bootstrap is its only reader, so
+// the write that first persists the journal removes it, later reconciles still
+// load, and the crash window it guards still blocks for review.
+func TestBootstrapConsumesCreationClaimInventory(t *testing.T) {
+	r, f := lifecycleSetup(t, "PersistentFleet") // create, then bootstrap
+	res := &fleet.CelldStorageReservation{}
+	if err := r.Get(t.Context(), types.NamespacedName{Name: reservationName(f)}, res); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := res.Annotations[creationClaimsKey]; present {
+		t.Fatalf("bootstrap retained the consumed claim inventory: %v", res.Annotations)
+	}
+	j, err := readJournal(res)
+	if err != nil || j == nil || len(j.Claims) != 3 {
+		t.Fatalf("bootstrap did not carry the claim identities into the journal: %v %+v", err, j)
+	}
+	reason(t, reconcile(t, r, f), "Provisioning") // waiting on readiness, not blocked
+	if after := getJournal(t, r, f); after == nil || len(after.Claims) != 3 {
+		t.Fatalf("journal no longer loads without the annotation: %+v", after)
+	}
+
+	// A crash between PVC creation and bootstrap leaves a workload with neither
+	// a journal nor an inventory to verify it against; that still blocks.
+	other := fixture("beta", "bucket-beta", "PersistentFleet")
+	other.Spec.Placement.AZCount = 1
+	other.Spec.Placement.Zones = []string{"us-east-1a"}
+	x := setup(t, other)
+	reconcile(t, x, other)
+	crashed := &fleet.CelldStorageReservation{}
+	if err := x.Get(t.Context(), types.NamespacedName{Name: reservationName(other)}, crashed); err != nil {
+		t.Fatal(err)
+	}
+	delete(crashed.Annotations, creationClaimsKey)
+	if err := x.Update(t.Context(), crashed); err != nil {
+		t.Fatal(err)
+	}
+	reason(t, reconcile(t, x, other), "StorageIdentityConflict")
+	if j := getJournal(t, x, other); j != nil {
+		t.Fatalf("unverified workload was adopted: %+v", j)
+	}
+}
+
 func TestLifecycleScaleOutRestartsAndStatusLoss(t *testing.T) {
 	for _, profile := range []string{"Bucket", "PersistentFleet"} {
 		t.Run(profile, func(t *testing.T) {

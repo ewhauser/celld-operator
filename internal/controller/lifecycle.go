@@ -381,6 +381,13 @@ func (s *lifecycleRun) bootstrapJournal(ctx context.Context) *lifecycleOutcome {
 		}
 		j.Claims[got.Name] = got.UID
 	}
+	// This bootstrap is the only reader of the creation claim inventory, and it
+	// has just consumed it: from here the journal's own Claims map carries every
+	// identity. Remove the annotation in the same reservation write that first
+	// persists the journal, so no crash can leave the fleet with neither. While
+	// the journal is still absent the annotation stays exactly as creation wrote
+	// it, and a crash between PVC creation and bootstrap still blocks for review.
+	delete(res.Annotations, creationClaimsKey)
 	return s.persist(ctx)
 }
 
