@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -182,6 +183,26 @@ func (r *Reconciler) saveJournal(ctx context.Context, res *fleet.CelldStorageRes
 	// another controller may already have advanced the operation.
 	return r.Update(ctx, res)
 }
+
+// journalRendering serializes the journal the way saveJournal will write it, or
+// returns nil when it cannot be rendered.
+func journalRendering(j *lifecycleJournal) []byte {
+	b, err := json.Marshal(j)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+// sameJournal reports whether the journal still renders exactly as the earlier
+// rendering did, so a caller can tell a step that recorded something from one
+// that recorded nothing. An unrenderable side compares as changed: this can only
+// cause a write, never skip one.
+func sameJournal(rendering []byte, j *lifecycleJournal) bool {
+	current := journalRendering(j)
+	return rendering != nil && current != nil && bytes.Equal(rendering, current)
+}
+
 func (r *Reconciler) reservationMatches(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, want fleet.ReservationSpec) bool {
 	j, err := r.loadJournal(ctx, res)
 	if err != nil {
@@ -451,18 +472,67 @@ func (s *lifecycleRun) scheduleOrderedBucketMembership(ctx context.Context) *lif
 	return nil
 }
 
+// evidenceHeartbeat bounds how long the durable observation may lag the
+// in-memory one while nothing else changes, so the reservation journal and the
+// status.lifecycle.evidenceCheckedAt projection stay honest about the age of the
+// last observation even when no decision followed it.
+const evidenceHeartbeat = time.Minute
+
 // observeRuntimeEvidence establishes a durably journaled runtime observation, and
 // fences any possible-loss declaration before any further lifecycle action.
 func (s *lifecycleRun) observeRuntimeEvidence(ctx context.Context) *lifecycleOutcome {
 	if s.r.Evidence == nil {
 		return nil
 	}
+	before := *s.j
 	inventory, loss := s.r.Evidence.Observe(ctx, appliedRuntime(s.f, s.j), s.j.Inventory)
 	s.j.Inventory = inventory
 	if loss != "" && s.j.Loss == "" {
 		return s.stop(s.r.recordLoss(ctx, s.f, s.w, s.res, s.j, "possible loss declaration: "+loss))
 	}
+	if s.steadyObservation(&before) {
+		return nil
+	}
 	return s.persist(ctx)
+}
+
+// steadyObservation reports whether this observation may stay in memory until
+// something acts on it. Every lifecycle transition writes the whole journal,
+// including the inventory, and the five-second freshness bounds that gate an
+// action compare the in-memory inventory against the clock inside the same
+// reconcile. So a write is only skipped when the observation moved nothing but
+// its own clocks, nothing is in flight that a crash would have to resume, and
+// the durable observation is still younger than a heartbeat. After a crash the
+// loaded journal carries an older CheckedAt, which fails those freshness bounds
+// and forces a fresh observation before any action: the ADR 0012 order.
+func (s *lifecycleRun) steadyObservation(before *lifecycleJournal) bool {
+	j := s.j
+	if j.Operation != nil || j.Maintenance != nil || j.Request != nil || j.BucketMigration != nil {
+		return false
+	}
+	if !s.f.DeletionTimestamp.IsZero() {
+		return false
+	}
+	if s.r.capacityNow().Sub(before.Inventory.CheckedAt) >= evidenceHeartbeat {
+		return false
+	}
+	return sameJournal(journalRendering(withoutObservationClocks(before)), withoutObservationClocks(j))
+}
+
+// withoutObservationClocks copies a journal with the timestamps a steady-state
+// observation always advances zeroed: the per-session FirstSeen/LastSeen stamps
+// and the inventory CheckedAt. Everything else an observation can record -- a
+// new session, a Current flag, an association, a blocker, a loss -- still
+// compares, so a new field cannot silently join the ignored set.
+func withoutObservationClocks(j *lifecycleJournal) *lifecycleJournal {
+	out := *j
+	out.Inventory.CheckedAt = time.Time{}
+	out.Inventory.Sessions = slices.Clone(j.Inventory.Sessions)
+	for i := range out.Inventory.Sessions {
+		out.Inventory.Sessions[i].FirstSeen = time.Time{}
+		out.Inventory.Sessions[i].LastSeen = time.Time{}
+	}
+	return &out
 }
 
 // releaseStaleMaintenanceFence establishes that a workload fence left behind by a
@@ -538,10 +608,15 @@ func (s *lifecycleRun) admitOperation(ctx context.Context) *lifecycleOutcome {
 	if result, handled, err := s.r.disruption(ctx, s.f, s.res, s.j, s.w); handled || err != nil {
 		return s.stop(result, handled, err)
 	}
+	recorded := journalRendering(s.j)
 	target, automatic := s.r.capacityTarget(ctx, s.f, s.j)
 	// Persist diagnostics even when a qualification gate will reject the request.
 	// No replica action occurs until the later atomic journal+intent write succeeds.
-	if s.j.Capacity != nil {
+	// An evaluation carries fresh sample stamps and observation times, so this
+	// normally does write; the rendering comparison only skips a repeated
+	// evaluation that recorded literally the same diagnostics, such as a policy
+	// that has been disabled or handed to an external /scale writer.
+	if s.j.Capacity != nil && !sameJournal(recorded, s.j) {
 		if outcome := s.persist(ctx); outcome != nil {
 			return outcome
 		}
