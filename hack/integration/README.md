@@ -1,7 +1,7 @@
 # Strict control-plane integration
 
 The Go harness creates a uniquely named three-node Kind cluster, installs Calico,
-MinIO, Metrics Server and the upstream hostpath CSI driver, and runs the actual
+MinIO with a bounded memory-backed `/data` volume, Metrics Server and the upstream hostpath CSI driver, and runs the actual
 operator, launcher, celld processes and Kubernetes workload controllers. It never
 uses the default kubeconfig and removes only its own cluster and launcher image.
 
@@ -48,6 +48,7 @@ counts through a short storage outage. The external suite uses a real HPA and
 Metrics Server to write the fleet's `/scale` subresource.
 
 These suites establish local Kubernetes, protocol and hostpath CSI behavior.
-They do not qualify AWS EBS deletion, EC2 node loss, prolonged S3 partitions or
+MinIO data is not durable across replacement of its Pod; these scenarios do not
+replace the store. They do not qualify AWS EBS deletion, EC2 node loss, prolonged S3 partitions or
 managed service behavior. Unknown or lost strict completion deliberately blocks
 removal; the harness does not repair that ambiguity by deleting disks.

@@ -168,6 +168,7 @@ func (h *harness) diagnostics(recovered any) {
 			// usually what it measured rather than what the operator allowed.
 			{"-n", "fleets", "describe", "hpa"},
 			{"top", "pods", "-A"},
+			{"-n", storeNS, "logs", "minio", "--tail=80"},
 			{"get", "pv", "-o", "yaml"},
 			{"-n", "fleets", "get", "pvc", "-o", "wide"},
 			{"get", "volumeattachments", "-o", "yaml"},

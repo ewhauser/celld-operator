@@ -20,6 +20,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -137,6 +138,7 @@ func (h *harness) loadImages() {
 			h.sh(3*time.Minute, "docker", "image", "save", "--platform", "linux/"+h.arch, "-o", archive, image)
 			h.sh(3*time.Minute, "kind", "load", "image-archive", "--name", h.name, archive)
 			must(os.Remove(archive))
+			fmt.Println("Loaded cached image:", image)
 			continue
 
 		}
@@ -146,6 +148,7 @@ func (h *harness) loadImages() {
 			for attempt := range 3 {
 				_, err := h.try(command{args: []string{"docker", "exec", node, "crictl", "pull", image}, timeout: 10 * time.Minute})
 				if err == nil {
+					fmt.Println("Pulled image:", image, "on", node)
 					break
 				}
 				if attempt == 2 {
@@ -195,8 +198,10 @@ func (h *harness) deployStore() {
 		Name: "minio", Namespace: storeNS, Labels: map[string]string{"app": "minio", "role": "backend"},
 		Spec: corev1.PodSpec{Containers: []corev1.Container{{
 			Name: "minio", Image: minioImage, Args: []string{"server", "/data"},
-			Env: []corev1.EnvVar{{Name: "MINIO_ROOT_USER", Value: "qualification"}, {Name: "MINIO_ROOT_PASSWORD", Value: "qualification-only"}},
-		}}},
+			Env:          []corev1.EnvVar{{Name: "MINIO_ROOT_USER", Value: "qualification"}, {Name: "MINIO_ROOT_PASSWORD", Value: "qualification-only"}},
+			VolumeMounts: []corev1.VolumeMount{{Name: "data", MountPath: "/data"}},
+			Resources:    corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("128Mi")}, Limits: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("1Gi")}},
+		}}, Volumes: []corev1.Volume{{Name: "data", EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory, SizeLimit: new(resource.MustParse("2Gi"))}}}},
 	})
 	h.k("-n", storeNS, "wait", "--for=condition=Ready", "pod/minio", "--timeout=120s")
 	if h.opts.suite == "all" || h.opts.suite == "faults" {
