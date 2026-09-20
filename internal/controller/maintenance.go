@@ -188,7 +188,14 @@ func (r *Reconciler) maintenanceFleet(ctx context.Context, f *fleet.CelldFleet) 
 					res.Annotations = map[string]string{}
 				}
 				res.Annotations[attemptAnnotation] = "deletion-before-workload"
-				j = &lifecycleJournal{Version: 8, RuntimeImage: Image, Initial: res.Spec.InitialReplicas, Applied: res.Spec.InitialReplicas, Maintenance: &maintenanceOperation{ID: string(uuid.NewUUID()), Kind: "Delete", Phase: "Cleanup"}}
+				// Reservations predating InitialReplicas record 0, which readJournal
+				// rejects. Fall back to the fleet's configured count, which is also the
+				// baseline reservationMatches hashes while no workload exists.
+				initial := res.Spec.InitialReplicas
+				if initial == 0 {
+					initial = f.Spec.Replicas
+				}
+				j = &lifecycleJournal{Version: 8, RuntimeImage: runtimeImage(f), Initial: initial, Applied: initial, Maintenance: &maintenanceOperation{ID: string(uuid.NewUUID()), Kind: "Delete", Phase: "Cleanup"}}
 				if err := r.saveJournal(ctx, res, j); err != nil {
 					return ctrl.Result{}, err
 				}

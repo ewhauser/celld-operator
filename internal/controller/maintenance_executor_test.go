@@ -11,6 +11,7 @@ import (
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	"github.com/ewhauser/celld-operator/internal/capacity"
+	v041 "github.com/ewhauser/celld-operator/internal/runtime/v041"
 	v050 "github.com/ewhauser/celld-operator/internal/runtime/v050"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -19,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 type maintenanceReader struct {
@@ -280,6 +282,68 @@ func TestDeletionBeforeProvisioningLeavesPermanentReservation(t *testing.T) {
 				t.Fatal("late creation not fenced")
 			}
 		})
+	}
+}
+
+func TestDeletionBeforeProvisioningResumesAfterConflictOnLegacyReservation(t *testing.T) {
+	f := fixture("legacy", "legacy-data", "Bucket")
+	f.Spec.RuntimeImage = v041.Image
+	f.Finalizers = []string{Finalizer}
+	// Reservations created before InitialReplicas existed leave the field unset.
+	res := &fleet.CelldStorageReservation{Name: reservationName(f), Spec: fleet.ReservationSpec{Bucket: f.Spec.Storage.Bucket, FleetNamespace: f.Namespace, FleetName: f.Name, FleetUID: string(f.UID), SpecHash: specHash(f)}}
+	r := setup(t, f, res)
+	if err := r.Delete(t.Context(), f); err != nil {
+		t.Fatal(err)
+	}
+	base := r.Client
+	once := false
+	r.Client = interceptor.NewClient(base.(client.WithWatch), interceptor.Funcs{Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, p client.Patch, opts ...client.PatchOption) error {
+		if _, ok := obj.(*fleet.CelldFleet); ok && !once {
+			// The finalizer patch carries an optimistic lock; a concurrent writer
+			// invalidates it exactly once.
+			once = true
+			other := &fleet.CelldFleet{}
+			if err := c.Get(ctx, client.ObjectKeyFromObject(f), other); err != nil {
+				return err
+			}
+			other.Labels = map[string]string{"example.com/touched": "true"}
+			if err := c.Update(ctx, other); err != nil {
+				return err
+			}
+		}
+		return c.Patch(ctx, obj, p, opts...)
+	}})
+	step := func() error {
+		t.Helper()
+		latest := &fleet.CelldFleet{}
+		if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), latest); err != nil {
+			return err
+		}
+		_, err := r.deleteFleet(t.Context(), latest)
+		return err
+	}
+	if err := step(); !apierrors.IsConflict(err) {
+		t.Fatalf("expected the finalizer patch to conflict, got %v", err)
+	}
+	if !once {
+		t.Fatal("conflict never injected")
+	}
+	stored := &fleet.CelldStorageReservation{}
+	if err := r.Get(t.Context(), client.ObjectKey{Name: reservationName(f)}, stored); err != nil {
+		t.Fatal(err)
+	}
+	j, err := readJournal(stored)
+	if err != nil {
+		t.Fatalf("legacy deletion journal rejected on reload: %v", err)
+	}
+	if j.Initial != f.Spec.Replicas || j.Applied != f.Spec.Replicas || j.RuntimeImage != v041.Image {
+		t.Fatalf("legacy journal baseline %d/%d image %q", j.Initial, j.Applied, j.RuntimeImage)
+	}
+	if err := step(); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), &fleet.CelldFleet{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("deletion never completed after the conflict: %v", err)
 	}
 }
 
