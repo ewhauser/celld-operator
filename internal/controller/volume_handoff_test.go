@@ -69,11 +69,25 @@ func TestHandoffRequiresLatestRetiredDiskAndSameZone(t *testing.T) {
 	pod := &corev1.Pod{Name: old.Node, UID: "new-pod"}
 	node := &corev1.Node{Name: "new-host", UID: "node", Labels: map[string]string{corev1.LabelTopologyZone: "zone"}, Status: corev1.NodeStatus{NodeInfo: corev1.NodeSystemInfo{BootID: "new-boot"}, Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
 	state := launcher.State{DiskID: "disk", PreviousHost: "old-host\nold-boot", Generation: "new-gen", BootID: "new-boot"}
-	for _, which := range []string{"valid", "not-stopped", "not-retired", "wrong-disk", "wrong-boot", "wrong-zone", "stale-predecessor", "legacy"} {
+	for _, which := range []string{"valid", "superseded-earlier", "superseded-latest", "not-stopped", "not-retired", "wrong-disk", "wrong-boot", "wrong-zone", "stale-predecessor", "legacy"} {
 		t.Run(which, func(t *testing.T) {
 			p, n, s := old, node.DeepCopy(), state
 			j := &lifecycleJournal{PersistentHistory: []persistentMember{p}}
 			switch which {
+			case "superseded-earlier":
+				// The pod was recreated once on its old host, so the earlier
+				// invocation is resolved by the successor's exclusive lock.
+				earlier := p
+				earlier.PodUID = "earlier-pod"
+				earlier.Generation = "earlier-gen"
+				earlier.Stopped, earlier.Retired, earlier.RestartDenied = false, false, false
+				earlier.Superseded = true
+				j.PersistentHistory = append([]persistentMember{earlier}, j.PersistentHistory...)
+			case "superseded-latest":
+				// The predecessor the handoff is compared against must itself be
+				// a positive retirement, never merely superseded.
+				j.PersistentHistory[0].Stopped, j.PersistentHistory[0].Retired, j.PersistentHistory[0].RestartDenied = false, false, false
+				j.PersistentHistory[0].Superseded = true
 			case "not-stopped":
 				j.PersistentHistory[0].Stopped = false
 			case "not-retired":
@@ -93,7 +107,7 @@ func TestHandoffRequiresLatestRetiredDiskAndSameZone(t *testing.T) {
 				j.PersistentHistory[0].DiskID = ""
 			}
 			_, err := handoffPredecessor(j, pod, s, n)
-			if (err == nil) != (which == "valid") {
+			if (err == nil) != (which == "valid" || which == "superseded-earlier") {
 				t.Fatalf("error %v", err)
 			}
 		})

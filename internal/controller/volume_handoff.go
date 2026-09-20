@@ -76,12 +76,15 @@ func handoffPredecessor(j *lifecycleJournal, pod *corev1.Pod, state launcher.Sta
 		if p.Node != pod.Name {
 			continue
 		}
-		if !p.Stopped || !p.Retired || !p.RestartDenied {
+		// A superseded survivor is resolved by the successor launcher's exclusive
+		// lock on the same host incarnation, exactly as everywhere else in the
+		// journal. Only the predecessor below must be a positive retirement.
+		if !resolvedMember(p) {
 			return predecessor, errors.New("unresolved historical disk writer")
 		}
 
 	}
-	if !found || predecessor.DiskID == "" || predecessor.DiskID != state.DiskID || predecessor.Host+"\n"+predecessor.BootID != state.PreviousHost || predecessor.PodUID == string(pod.UID) || predecessor.Generation == state.Generation || predecessor.Zone == "" || predecessor.Zone != host.Labels[corev1.LabelTopologyZone] || !healthyHost(host) || state.BootID != host.Status.NodeInfo.BootID {
+	if !found || !predecessor.Stopped || !predecessor.Retired || !predecessor.RestartDenied || predecessor.DiskID == "" || predecessor.DiskID != state.DiskID || predecessor.Host+"\n"+predecessor.BootID != state.PreviousHost || predecessor.PodUID == string(pod.UID) || predecessor.Generation == state.Generation || predecessor.Zone == "" || predecessor.Zone != host.Labels[corev1.LabelTopologyZone] || !healthyHost(host) || state.BootID != host.Status.NodeInfo.BootID {
 		return predecessor, errors.New("handoff lacks exact retired disk, host or zone continuity")
 	}
 	return predecessor, nil
