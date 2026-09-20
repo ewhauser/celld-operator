@@ -1,6 +1,6 @@
 # ADR 0017 PersistentFleet launcher and graceful retirement
 
-Status: Accepted direction; implemented experimental graceful path, cloud qualification pending
+Status: Launcher shutdown and cross-host grants superseded by [strict supervision](../launcher-supervision.md); historical rationale below
 
 Date: 18 September 2026
 

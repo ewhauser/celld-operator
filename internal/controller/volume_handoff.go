@@ -6,8 +6,6 @@ import (
 	"slices"
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
-	"github.com/ewhauser/celld-operator/internal/launcher"
-	v050 "github.com/ewhauser/celld-operator/internal/runtime/v050"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -70,33 +68,13 @@ func (r *Reconciler) verifyVolumeAttachment(ctx context.Context, f *fleet.CelldF
 	return nil
 }
 
-func handoffPredecessor(j *lifecycleJournal, pod *corev1.Pod, state launcher.State, host *corev1.Node) (persistentMember, error) {
-	predecessor, found := latestPersistentMember(j.PersistentHistory, pod.Name)
-	for _, p := range j.PersistentHistory {
-		if p.Node != pod.Name {
-			continue
-		}
-		// A superseded survivor is resolved by the successor launcher's exclusive
-		// lock on the same host incarnation, exactly as everywhere else in the
-		// journal. Only the predecessor below must be a positive retirement.
-		if !resolvedMember(p) {
-			return predecessor, errors.New("unresolved historical disk writer")
-		}
-
-	}
-	if !found || !predecessor.Stopped || !predecessor.Retired || !predecessor.RestartDenied || predecessor.DiskID == "" || predecessor.DiskID != state.DiskID || predecessor.Host+"\n"+predecessor.BootID != state.PreviousHost || predecessor.PodUID == string(pod.UID) || predecessor.Generation == state.Generation || predecessor.Zone == "" || predecessor.Zone != host.Labels[corev1.LabelTopologyZone] || !healthyHost(host) || state.BootID != host.Status.NodeInfo.BootID {
-		return predecessor, errors.New("handoff lacks exact retired disk, host or zone continuity")
-	}
-	return predecessor, nil
-}
-
-func (r *Reconciler) authorizeVolumeHandoff(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal, pod *corev1.Pod) error {
+func (r *Reconciler) checkVolumeStartup(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal, pod *corev1.Pod) error {
 	if !slices.ContainsFunc(j.PersistentHistory, func(p persistentMember) bool { return p.Node == pod.Name }) {
 		return nil
 	}
 	owner := metav1.GetControllerOf(pod)
 	if owner == nil || owner.UID != j.WorkloadUID || owner.Kind != "StatefulSet" || !pod.DeletionTimestamp.IsZero() {
-		return errors.New("handoff pod ownership changed")
+		return errors.New("retained-volume pod ownership changed")
 	}
 	if err := validatePersistentPod(evidenceRuntime(f, j), pod, r.Options); err != nil {
 		return err
@@ -104,26 +82,19 @@ func (r *Reconciler) authorizeVolumeHandoff(ctx context.Context, f *fleet.CelldF
 	if !slices.ContainsFunc(pod.Spec.Volumes, func(v corev1.Volume) bool {
 		return v.Name == "data" && v.PersistentVolumeClaim != nil && v.PersistentVolumeClaim.ClaimName == "data-"+pod.Name && !v.PersistentVolumeClaim.ReadOnly
 	}) {
-		return errors.New("handoff pod data volume association changed")
+		return errors.New("retained-volume pod data association changed")
 	}
 	for _, status := range pod.Status.ContainerStatuses {
 		if status.Name == "celld" && status.RestartCount != 0 {
-			return errors.New("unexpected launcher restart cannot authorize handoff")
+			return errors.New("unexpected launcher restart during retained-volume startup")
 		}
 	}
 	// An unscheduled/unstarted pod has no endpoint yet; normal reconciliation retries.
 	if pod.Status.PodIP == "" {
 		return nil
 	}
-	// A launcher in WaitingForHandoff has not started the celld child yet, and the
-	// readiness probe is served by that child (:8080 /.well-known/celld/health),
-	// never by the launcher's own :8083 endpoint. So a waiting pod can never be
-	// Ready, and skipping the probe for Ready pods cannot miss one: a pod that is
-	// waiting is still probed on this very reconcile, with no added delay. The
-	// reverse transition is closed too: WaitingForHandoff is only ever entered
-	// before the first child spawn of a launcher process, so reaching it again
-	// demands a new launcher process, which is a container restart, which the
-	// RestartCount check above already refuses to authorize.
+	// Startup remains pinned to the original host incarnation. Disk-policy
+	// cutover owns cross-host reuse; this path sends no launcher handoff grant.
 	if podReady(pod) {
 		return nil
 	}
@@ -131,55 +102,17 @@ func (r *Reconciler) authorizeVolumeHandoff(ctx context.Context, f *fleet.CelldF
 	if err != nil {
 		return err
 	}
-	if state.Phase != "WaitingForHandoff" {
-		return nil
+	if state.Phase == "Blocked" {
+		return errors.New("launcher disk startup blocked: " + state.Error)
 	}
-	if r.Options.LocalTest {
-		return errors.New("cross-host handoff requires real EBS CSI")
-	}
-	node := &corev1.Node{}
-	if err := r.Get(ctx, client.ObjectKey{Name: pod.Spec.NodeName}, node); err != nil {
-		return err
-	}
-	previous, err := handoffPredecessor(j, pod, state, node)
-	if err != nil {
-		return err
-	}
-	reactivating := j.Operation != nil && j.Operation.Phase == "Reactivating" && reactivatedNode(f.Name, pod.Name, j.Operation.From, j.Operation.To)
-	maintenance := j.Maintenance
-	restarting := maintenance != nil && maintenance.Kind == "Restart" && maintenance.Phase == "Recovering" && maintenance.Index < len(maintenance.Targets) && maintenance.Targets[maintenance.Index].Name == pod.Name && maintenance.Targets[maintenance.Index].UID != pod.UID
-	coordinated := maintenance != nil && maintenance.Coordinated && maintenance.Phase == "Resuming" && reactivatedNode(f.Name, pod.Name, 0, maintenance.TargetReplicas)
-	if !reactivating && !restarting && !coordinated {
-		return errors.New("handoff requires durable reactivation authority")
-	}
-	if j.Loss != "" || r.Evidence == nil {
-		return errors.New("loss fence or missing live storage evidence blocks handoff")
-	}
-	inventory, err := r.readInventory(ctx, f, runtimeImage(evidenceRuntime(f, j)))
-	if err != nil {
-		return err
-	}
-	if !slices.ContainsFunc(inventory.Nodes, func(n v050.Node) bool {
-		return n.Name == previous.Node && n.Generation == previous.Generation && n.ExpiresMS <= uint64(r.capacityNow().UnixMilli()) && n.Epoch >= previous.Epoch && (n.LogState == "sealed" || (n.LogState == "" && previous.Epoch == 0))
-	}) {
-		return errors.New("retired predecessor revived or recovery evidence changed")
-	}
-	target := previous
-	target.Host = node.Name
-	if err := r.verifyVolumeAttachment(ctx, f, target); err != nil {
-		return err
-	}
-	// The fresh signed destination challenge is the one-use grant. A crash or a
-	// successor changes invocation/generation, so a delayed grant cannot launch it.
-	_, err = r.launcherRequest(ctx, f, pod, "", "", &launcher.Handoff{Invocation: state.Invocation, Generation: state.Generation, PodUID: string(pod.UID), Host: node.Name, BootID: state.BootID, DiskID: state.DiskID, PreviousHost: state.PreviousHost})
-	return err
+	return nil
 }
 
-func latestPersistentMember(history []persistentMember, node string) (persistentMember, bool) {
+func latestPersistentMember(history []persistentMember, node string) persistentMember {
 	for _, h := range slices.Backward(history) {
 		if h.Node == node {
-			return h, true
+			return h
 		}
 	}
-	return persistentMember{}, false
+	return persistentMember{}
 }

@@ -120,9 +120,7 @@ func persistentSetup(t *testing.T) *persistentFixture {
 			if gen != s.Generation {
 				return s, errors.New("generation differs")
 			}
-			s.Phase = "Stopped"
-			s.RestartDenied = true
-			s.Operation = op
+			completeLauncherRemoval(&s, op)
 			states[p.Name] = s
 			reader.stopped = true
 		}
@@ -503,4 +501,11 @@ func TestInfrastructureFenceReceiptRetiresWithItsOperation(t *testing.T) {
 	if err != nil || len(j.InfrastructureFences) != 1 {
 		t.Fatalf("journal without the retired receipt no longer loads: %v %+v", err, j)
 	}
+}
+
+// completeLauncherRemoval models the live supervisor's independent proofs.
+func completeLauncherRemoval(s *launcher.State, operation string) {
+	s.Phase, s.Operation = "Stopped", operation
+	s.ChildExited, s.InheritedLockReleased, s.RestartDenied = true, true, true
+	s.Removal = launcher.RemovalResult{Operation: operation, Generation: s.Generation, Mode: "remove-disk", Phase: "data_safe", ControlOnly: true, DataSafe: true}
 }

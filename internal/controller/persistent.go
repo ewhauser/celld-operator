@@ -205,7 +205,7 @@ func (r *Reconciler) persistentMembers(ctx context.Context, f *fleet.CelldFleet,
 		}
 		isDonor := stopping && pod.Name == j.Operation.TargetPod
 		if isDonor {
-			if state.Phase != "Stopped" || state.Operation != j.Operation.ID || !state.RestartDenied {
+			if !state.RemovalReady() || state.Operation != j.Operation.ID {
 				return nil, errors.New("exact child termination and inherited-lock release unconfirmed")
 			}
 		} else if state.Phase != "Running" || !podReady(pod) {
@@ -710,8 +710,8 @@ func (r *Reconciler) contractPersistentStopping(ctx context.Context, f *fleet.Ce
 	if state.Invocation != old.Invocation || state.Generation != old.Generation {
 		return c.fail(errors.New("donor launcher invocation changed"))
 	}
-	if state.Phase != "Stopped" {
-		return c.report("LifecycleProgress", "Waiting for launcher child exit and exclusive inherited-lock release")
+	if !state.RemovalReady() {
+		return c.report("LifecycleProgress", "Waiting for strict runtime completion, child exit, inherited-lock release and restart denial")
 	}
 	members, _, err := r.assessPersistent(ctx, f, j, true, false)
 	if err != nil {
@@ -833,7 +833,7 @@ func (r *Reconciler) finishReactivation(ctx context.Context, f *fleet.CelldFleet
 				if !prior.Retired || !prior.Stopped || !prior.RestartDenied || prior.Generation == m.Generation || prior.ClaimUID != m.ClaimUID || prior.VolumeUID != m.VolumeUID || prior.VolumeHandle != m.VolumeHandle {
 					return fail(errors.New("reactivation lacks retired predecessor or unchanged volume identity"))
 				}
-				latest, _ := latestPersistentMember(j.PersistentHistory, m.Node)
+				latest := latestPersistentMember(j.PersistentHistory, m.Node)
 				if prior.Generation == latest.Generation && (prior.Host != m.Host || prior.HostUID != m.HostUID || prior.BootID != m.BootID) {
 					if prior.DiskID == "" || prior.DiskID != m.DiskID || prior.Zone == "" || prior.Zone != m.Zone || r.Options.LocalTest {
 						return fail(errors.New("cross-host reactivation lacks authenticated disk and zone continuity"))

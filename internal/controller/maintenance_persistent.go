@@ -149,11 +149,8 @@ func (r *Reconciler) executePersistentStopping(ctx context.Context, p *maintenan
 	if state.Operation != m.ID || state.Invocation != old.Invocation || state.Generation != old.Generation {
 		return block(errors.New("restart receipt changed invocation"))
 	}
-	if state.Phase != "Stopped" {
+	if !state.RemovalReady() {
 		return ctrl.Result{RequeueAfter: time.Second}, true, nil
-	}
-	if !state.RestartDenied {
-		return block(errors.New("stopped restart donor lacks durable resurrection denial"))
 	}
 	members, _, err := r.assessPersistent(ctx, f, &p.view, true, false)
 	if err != nil {
@@ -305,18 +302,23 @@ func (r *Reconciler) executePersistentShutdown(ctx context.Context, f *fleet.Cel
 			if string(pod.UID) != old.PodUID || id != old.Container {
 				return block(errors.New("shutdown invocation changed"))
 			}
-			state, err := r.callLauncher(ctx, f, pod, m.ID, old.Generation)
+			state, err := r.callLauncher(ctx, f, pod, "", "")
 			if err != nil {
 				return block(err)
+			}
+			if state.Phase == "Running" {
+				stopCtx, cancel := context.WithDeadline(ctx, m.Deadline)
+				state, err = r.callLauncher(stopCtx, f, pod, m.ID, old.Generation)
+				cancel()
+				if err != nil {
+					return block(err)
+				}
 			}
 			if state.Operation != m.ID || state.Invocation != old.Invocation || state.Generation != old.Generation {
 				return block(errors.New("shutdown receipt differs from exact invocation"))
 			}
-			if state.Phase != "Stopped" {
+			if !state.RemovalReady() {
 				return ctrl.Result{RequeueAfter: time.Second}, true, nil
-			}
-			if !state.RestartDenied {
-				return block(errors.New("stopped shutdown child lacks durable resurrection denial"))
 			}
 			if !old.Stopped {
 				old.RestartDenied = true
@@ -476,7 +478,7 @@ func (r *Reconciler) verifyShutdownStops(ctx context.Context, f *fleet.CelldFlee
 		if err != nil {
 			return err
 		}
-		if !old.RestartDenied || !state.RestartDenied || state.Phase != "Stopped" || state.Invocation != old.Invocation || state.Generation != old.Generation || state.Operation != m.ID || state.DiskID != old.DiskID {
+		if !old.RestartDenied || !state.RemovalReady() || state.Invocation != old.Invocation || state.Generation != old.Generation || state.Operation != m.ID || state.DiskID != old.DiskID {
 			return errors.New("shutdown stop authority no longer matches launcher")
 		}
 	}

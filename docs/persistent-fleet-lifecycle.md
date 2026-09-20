@@ -1,5 +1,8 @@
 # PersistentFleet graceful lifecycle
 
+The launcher now follows the [strict supervision contract](launcher-supervision.md).
+The journal and S3 evidence paths described below await the remaining lifecycle cutover.
+
 18 September 2026. Experimental implementation around unchanged celld v0.5.0,
 commit `12d5b6333fe52717325addcfe1e99e9fd4f77bcd` and the existing image digest.
 This supplies an executable graceful retirement/reactivation path. It does not
@@ -212,45 +215,9 @@ reservation. It can resume an interrupted immutable Secret creation only when
 the Secret carries that exact nonce and fleet identity; it then pins the key
 digest. An existing unrelated Secret is never silently adopted.
 
-## Graceful cross-node volume handoff
+## Cross-node volume reuse
 
-This is an executable controller/launcher protocol, not proof that a cloud test
-passed. Production cross-node handoff requires EBS CSI filesystem RWOP claims,
-retained delayed-binding StorageClass with explicit `type: gp2` or `type: gp3`,
-and unchanged PVC/PV/CSI handle. Types permitting EBS Multi-Attach and unknown
-storage classes are rejected. Static or administrator-modified storage outside
-that contract is unsupported. Operators never force-delete or detach a volume.
-
-Each new launcher creates and fsyncs a random disk nonce before starting celld.
-The nonce travels in signed responses and retirement history. A launcher on a
-different host or boot acquires the local lock but stays `WaitingForHandoff`;
-it has not spawned celld. The operator requires the latest predecessor to be
-positively stopped and retired, unchanged disk nonce/bindings, the same AZ,
-healthy target boot, and fresh S3 evidence that the predecessor is still expired
-and sealed (or its positively captured no-log session remains no-log). Loss,
-revived lease, stale generation, or incomplete recovery blocks authorization.
-
-The CSI attachment list must contain exactly one healthy, nondeleting EBS
-attachment, to the destination. Any old attachment, attachment/deletion error,
-missing attachment, or additional target blocks. This is attachment continuity,
-not process-death evidence: the latter was already recorded from the exact live
-supervisor before retirement. Namespace/storage administrators must not bypass
-CSI fencing, copy volumes, or rewrite authority.
-
-The operator sends an HMAC-authenticated grant expiring within three seconds,
-bound to the destination Pod UID, launcher invocation, runtime generation, host,
-boot, disk nonce and old host stamp. The waiting launcher checks every field,
-atomically replaces/fsyncs the host stamp, waits restart spacing, then spawns the
-unchanged celld binary. Delayed grants cannot start a different invocation.
-Crashing before the grant leaves the disk blocked; crashing after the stamp
-commit cannot reconstruct positive predecessor termination or replay authority
-on another host. The same-host inherited lock still protects surviving children.
-
-Version 6 journals remain readable, but historical retirement receipts without
-signed `RestartDenied` authority cannot authorize reuse or excuse old writers.
-Older launchers did not enforce persistent negative startup authority and could
-resurrect a stopped Pod UID after a container restart. A legacy retired history
-therefore requires a separately qualified migration/fencing path, not merely a
-host match or a disk nonce. The operator never infers termination or nonresurrection
-from file markers. Active legacy invocations likewise must move to the qualified
-launcher before their stop can supply the new receipt.
+Launcher handoff grants have been removed. A different host or boot is blocked
+before celld starts; local flock does not supply cross-host exclusion. The later
+disk-policy and executor cutover must replace the retained-volume scheduling and
+reactivation path. See [the current launcher contract](launcher-supervision.md).

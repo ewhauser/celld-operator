@@ -38,9 +38,19 @@ const requestWindow = 5 * time.Second
 
 func query(t *testing.T, address string, key []byte, op, gen string) (State, error) {
 	t.Helper()
-	q := Request{Nonce: Nonce(), Operation: op, Generation: gen, NotAfterMS: time.Now().Add(requestWindow).UnixMilli()}
+	q := Request{Nonce: Nonce(), Operation: op, Generation: gen, NotAfterMS: time.Now().Add(requestWindow).UnixMilli(), DeadlineMS: time.Now().Add(time.Minute).UnixMilli()}
+	return sendRequest(t, address, key, q)
+}
+
+func sendRequest(t *testing.T, address string, key []byte, q Request) (State, error) {
+	t.Helper()
+	return sendRequestContext(t, t.Context(), address, key, q)
+}
+
+func sendRequestContext(t *testing.T, ctx context.Context, address string, key []byte, q Request) (State, error) {
+	t.Helper()
 	b, _ := json.Marshal(q)
-	req, e := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://"+address+"/v1", bytes.NewReader(b))
+	req, e := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+address+"/v2", bytes.NewReader(b))
 	if e != nil {
 		return State{}, e
 	}
@@ -130,7 +140,9 @@ func idleCommand() []string {
 }
 
 func config(t *testing.T) Config {
-	return Config{Root: t.TempDir(), Address: testAddress(t), Key: bytes.Repeat([]byte{7}, 32), PodUID: "pod", Node: "node", Host: "host", BootID: "test-boot", Command: idleCommand(), Stdout: io.Discard, Stderr: io.Discard}
+	c := Config{Root: t.TempDir(), Address: testAddress(t), Key: bytes.Repeat([]byte{7}, 32), PodUID: "pod", Node: "node", Host: "host", BootID: "test-boot", Command: idleCommand(), Stdout: io.Discard, Stderr: io.Discard}
+	c.Control = newStrictRuntime(t, c).client
+	return c
 }
 func startSupervisor(t *testing.T, c Config) context.CancelFunc {
 	t.Helper()
@@ -173,10 +185,10 @@ func TestPausedOwnerPreventsReplacement(t *testing.T) {
 }
 func TestProtocolRejectsForgedAndRetargetedStop(t *testing.T) {
 	s := &supervisor{key: bytes.Repeat([]byte{1}, 32), state: State{Phase: "Running", Generation: "generation"}, stop: make(chan struct{})}
-	q := Request{Nonce: Nonce(), Operation: "one", Generation: "wrong", NotAfterMS: time.Now().Add(time.Second).UnixMilli()}
+	q := Request{Nonce: Nonce(), Operation: "one", Generation: "wrong", NotAfterMS: time.Now().Add(time.Second).UnixMilli(), DeadlineMS: time.Now().Add(time.Minute).UnixMilli()}
 	for _, key := range [][]byte{bytes.Repeat([]byte{2}, 32), s.key} {
 		b, _ := json.Marshal(q)
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1", bytes.NewReader(b))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v2", bytes.NewReader(b))
 		req.Header.Set("X-Celld-MAC", MAC(key, "request", q))
 		rec := httptest.NewRecorder()
 		s.ServeHTTP(rec, req)
@@ -191,7 +203,7 @@ func TestProtocolRejectsForgedAndRetargetedStop(t *testing.T) {
 	for _, op := range []string{"one", "one", "two"} {
 		q.Operation = op
 		b, _ := json.Marshal(q)
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1", bytes.NewReader(b))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v2", bytes.NewReader(b))
 		req.Header.Set("X-Celld-MAC", MAC(s.key, "request", q))
 		rec := httptest.NewRecorder()
 		s.ServeHTTP(rec, req)
@@ -201,10 +213,16 @@ func TestProtocolRejectsForgedAndRetargetedStop(t *testing.T) {
 	}
 }
 func TestCrossHostAndCleanMarkerBlock(t *testing.T) {
-	for _, which := range []string{"host", "marker"} {
+	for _, which := range []string{"host", "boot", "marker"} {
 		t.Run(which, func(t *testing.T) {
 			c := config(t)
-			name, value := ".celld-launcher-host", "other"
+			name, value := ".celld-launcher-host", "other-host\n"+c.BootID
+			if which == "boot" {
+				value = c.Host + "\nother-boot"
+			}
+			if err := os.WriteFile(filepath.Join(c.Root, ".celld-launcher-disk"), []byte(Nonce()), 0o600); err != nil {
+				t.Fatal(err)
+			}
 			if which == "marker" {
 				name, value = ".clean-reload.json", "{}"
 			}

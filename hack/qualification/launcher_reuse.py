@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the inherited lock using the real unmodified runtime, locally only."""
+"""Exercise the real inherited lock locally; this does not qualify strict shutdown."""
 import argparse
 import hashlib
 import hmac
@@ -13,11 +13,11 @@ import urllib.request
 from run import Run, docker
 
 
-def state(port, key, operation='', generation=''):
-    body = {'Nonce': os.urandom(32).hex(), 'Operation': operation, 'Generation': generation, 'NotAfterMS': int(time.time()*1000)+3000}
+def state(port, key):
+    body = {'Nonce': os.urandom(32).hex(), 'Operation': '', 'Generation': '', 'NotAfterMS': 0, 'DeadlineMS': 0}
     data = json.dumps(body, separators=(',', ':')).encode()
     signature = hmac.new(key, b'request\0' + data, hashlib.sha256).hexdigest()
-    request = urllib.request.Request(f'http://127.0.0.1:{port}/v1', data=data,
+    request = urllib.request.Request(f'http://127.0.0.1:{port}/v2', data=data,
                                      headers={'X-Celld-MAC': signature})
     with urllib.request.urlopen(request, timeout=3) as response:
         result = json.load(response)

@@ -33,6 +33,11 @@ type fakeLauncher struct {
 }
 
 func (l *fakeLauncher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" || r.URL.Path != "/v2" {
+		http.NotFound(w, r)
+		return
+	}
+
 	l.calls.Add(1)
 	if l.redirect {
 		http.Redirect(w, r, "/elsewhere", http.StatusFound)
@@ -72,7 +77,7 @@ func launcherClientSetup(t *testing.T) (*Reconciler, *fleet.CelldFleet, *corev1.
 	pod := &corev1.Pod{Name: "alpha-2", Namespace: f.Namespace, UID: types.UID("pod-uid"), Spec: corev1.PodSpec{NodeName: "host-2"}, Status: corev1.PodStatus{PodIP: "127.0.0.1"}}
 	r := setup(t, f, secret, res, pod)
 	r.Options.LauncherImage = "launcher@sha256:" + strings.Repeat("a", 64)
-	fake := &fakeLauncher{key: key, state: launcher.State{PodUID: string(pod.UID), Node: pod.Name, Host: pod.Spec.NodeName, Invocation: "inv-1", Generation: "gen-1", Phase: "Running"}}
+	fake := &fakeLauncher{key: key, state: launcher.State{PodUID: string(pod.UID), Node: pod.Name, Host: pod.Spec.NodeName, Invocation: "inv-1", Generation: "gen-1", Phase: "Draining", Operation: "op-1"}}
 	server := httptest.NewServer(fake)
 	t.Cleanup(server.Close)
 	_, port, err := net.SplitHostPort(server.Listener.Addr().String())
@@ -88,7 +93,7 @@ func launcherClientSetup(t *testing.T) (*Reconciler, *fleet.CelldFleet, *corev1.
 func TestLauncherClientAuthenticatedRoundTrip(t *testing.T) {
 	r, f, pod, fake := launcherClientSetup(t)
 	before := time.Now()
-	state, err := r.callLauncher(t.Context(), f, pod, "op-1", "gen-1")
+	state, err := r.callLauncher(launcherTestContext(t), f, pod, "op-1", "gen-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +101,7 @@ func TestLauncherClientAuthenticatedRoundTrip(t *testing.T) {
 		t.Fatalf("state %+v", state)
 	}
 	req := fake.lastReq
-	if req.Operation != "op-1" || req.Generation != "gen-1" || len(req.Nonce) != 64 {
+	if req.Operation != "op-1" || req.Generation != "gen-1" || len(req.Nonce) != 64 || req.DeadlineMS <= req.NotAfterMS {
 		t.Fatalf("request not bound to operation and generation: %+v", req)
 	}
 	expires := time.UnixMilli(req.NotAfterMS)
@@ -126,6 +131,8 @@ func TestLauncherClientRejectsForgedOrMisboundResponses(t *testing.T) {
 		"other pod name":        func(l *fakeLauncher) { l.state.Node = "alpha-1" },
 		"other host":            func(l *fakeLauncher) { l.state.Host = "host-9" },
 		"empty invocation":      func(l *fakeLauncher) { l.state.Invocation = "" },
+		"wrong generation":      func(l *fakeLauncher) { l.state.Generation = "other" },
+		"wrong operation":       func(l *fakeLauncher) { l.state.Operation = "other" },
 		"empty generation":      func(l *fakeLauncher) { l.state.Generation = "" },
 		"HTTP conflict":         func(l *fakeLauncher) { l.status = http.StatusConflict },
 		"redirect":              func(l *fakeLauncher) { l.redirect = true },
@@ -136,7 +143,7 @@ func TestLauncherClientRejectsForgedOrMisboundResponses(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			r, f, pod, fake := launcherClientSetup(t)
 			fault(fake)
-			state, err := r.callLauncher(t.Context(), f, pod, "op-1", "gen-1")
+			state, err := r.callLauncher(launcherTestContext(t), f, pod, "op-1", "gen-1")
 			if err == nil {
 				t.Fatalf("accepted %s: %+v", name, state)
 			}
@@ -174,7 +181,7 @@ func TestLauncherClientRefusesWithoutCredentialAuthority(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			r, f, pod, fake := launcherClientSetup(t)
 			fault(t, r, f, pod)
-			if _, err := r.callLauncher(t.Context(), f, pod, "op-1", "gen-1"); err == nil {
+			if _, err := r.callLauncher(launcherTestContext(t), f, pod, "op-1", "gen-1"); err == nil {
 				t.Fatal("call succeeded without credential authority")
 			}
 			if fake.calls.Load() != 0 {
@@ -193,7 +200,62 @@ func TestLauncherClientWrongKeyIsRejectedByLauncher(t *testing.T) {
 	// Both the Secret and its recorded digest agree, but the launcher was started
 	// with a different key: its request MAC check must fail closed at the launcher.
 	fake.key = []byte(strings.Repeat("z", 32))
-	if _, err := r.callLauncher(t.Context(), f, pod, "op-1", "gen-1"); err == nil || !strings.Contains(err.Error(), "403") {
+	if _, err := r.callLauncher(launcherTestContext(t), f, pod, "op-1", "gen-1"); err == nil || !strings.Contains(err.Error(), "403") {
 		t.Fatalf("expected launcher 403 on request MAC mismatch, got %v", err)
+	}
+}
+
+func launcherTestContext(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	t.Cleanup(cancel)
+	return ctx
+}
+
+func TestLauncherClientRequiresEveryIndependentCompletionProof(t *testing.T) {
+	for _, fault := range []string{"none", "data-safe", "phase", "operation", "generation", "mode", "blocker", "control-only", "child", "lock", "restart"} {
+		t.Run(fault, func(t *testing.T) {
+			r, f, pod, fake := launcherClientSetup(t)
+			completeLauncherRemoval(&fake.state, "op-1")
+			switch fault {
+			case "data-safe":
+				fake.state.Removal.DataSafe = false
+			case "phase":
+				fake.state.Removal.Phase = "failed"
+			case "operation":
+				fake.state.Removal.Operation = "other"
+			case "generation":
+				fake.state.Removal.Generation = "other"
+			case "mode":
+				fake.state.Removal.Mode = "preserve"
+			case "blocker":
+				fake.state.Removal.Blocker = "blocked"
+			case "control-only":
+				fake.state.Removal.ControlOnly = false
+			case "child":
+				fake.state.ChildExited = false
+			case "lock":
+				fake.state.InheritedLockReleased = false
+			case "restart":
+				fake.state.RestartDenied = false
+			}
+			state, err := r.callLauncher(launcherTestContext(t), f, pod, "op-1", "gen-1")
+			if (err == nil) != (fault == "none") {
+				t.Fatalf("proof %s: %+v %v", fault, state, err)
+			}
+		})
+	}
+}
+
+func TestLauncherMutationRequiresDeadlineButObservationDoesNot(t *testing.T) {
+	r, f, pod, fake := launcherClientSetup(t)
+	if _, err := r.callLauncher(t.Context(), f, pod, "op-1", "gen-1"); err == nil {
+		t.Fatal("operation admitted without deadline")
+	}
+	if fake.calls.Load() != 0 {
+		t.Fatal("sent unbounded operation")
+	}
+	if _, err := r.callLauncher(t.Context(), f, pod, "", ""); err != nil {
+		t.Fatalf("observation requires no operation deadline: %v", err)
 	}
 }

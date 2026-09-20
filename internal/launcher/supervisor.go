@@ -20,6 +20,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/ewhauser/celld-operator/internal/runtime/controlplane"
 )
 
 type Config struct {
@@ -37,6 +39,9 @@ type Config struct {
 	// quickly; production leaves it zero and passes Grace instead.
 	StopGrace      time.Duration
 	Stdout, Stderr io.Writer
+	// Control defaults to the direct, node-local typed client. Tests may supply
+	// its transport; the launcher never implements runtime wire decoding.
+	Control *controlplane.Client `json:"-"`
 }
 
 // defaultGrace mirrors the operator's default terminationGracePeriodSeconds
@@ -78,41 +83,27 @@ func terminationBudget(grace time.Duration) (stop, proof time.Duration) {
 }
 
 type supervisor struct {
-	mu              sync.Mutex
-	state           State
-	stop            chan struct{}
-	stopping        bool
-	key             []byte
-	handoff         chan struct{}
-	handoffAccepted bool
+	mu       sync.Mutex
+	state    State
+	stop     chan struct{}
+	stopping bool
+	key      []byte
 }
 
 func (s *supervisor) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" || r.URL.Path != "/v1" {
+	if r.Method != "POST" || r.URL.Path != "/v2" {
 		http.Error(w, "unsupported", 404)
 		return
 	}
 	var req Request
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil || len(req.Nonce) != 64 || !Verify(s.key, "request", req, r.Header.Get("X-Celld-MAC")) {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil || len(req.Nonce) != 64 || !Verify(s.key, "request", req, r.Header.Get("X-Celld-MAC")) {
 		http.Error(w, "unauthorized", http.StatusForbidden)
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if req.Handoff != nil {
-		h := req.Handoff
-		now := time.Now().UnixMilli()
-		// The grant must be in the future and bounded by requestExpiryBound,
-		// the same allowance stop requests use for clock skew between pods.
-		if req.Operation != "" || req.NotAfterMS <= now || req.NotAfterMS > now+requestExpiryBound.Milliseconds() || s.state.Phase != "WaitingForHandoff" || h.Invocation != s.state.Invocation || h.Generation != s.state.Generation || h.PodUID != s.state.PodUID || h.Host != s.state.Host || h.BootID != s.state.BootID || h.DiskID != s.state.DiskID || h.PreviousHost != s.state.PreviousHost || h.DiskID == "" {
-			http.Error(w, "handoff association changed or expired", http.StatusConflict)
-			return
-		}
-		if !s.handoffAccepted {
-			s.handoffAccepted = true
-			close(s.handoff)
-		}
-	}
 	if req.Operation != "" {
 		now := time.Now().UnixMilli()
 		// Every stop request expires: the controller bounds NotAfterMS to a few
@@ -122,14 +113,17 @@ func (s *supervisor) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// only the operation it accepted while Running, never a later one.
 		expired := req.NotAfterMS <= now || req.NotAfterMS > now+requestExpiryBound.Milliseconds()
 		newBinding := s.state.Operation == ""
-		if expired || req.Generation != s.state.Generation || (s.state.Operation != "" && s.state.Operation != req.Operation) || (newBinding && s.state.Phase != "Running") {
+		if expired || req.Generation != s.state.Generation || (s.state.Operation != "" && s.state.Operation != req.Operation) || (newBinding && (s.state.Phase != "Running" || req.DeadlineMS <= now || req.DeadlineMS > now+int64((24*time.Hour)/time.Millisecond))) {
 			http.Error(w, "invocation changed or unavailable", http.StatusConflict)
 			return
 		}
-		s.state.Operation = req.Operation
+		if newBinding {
+			s.state.Operation = req.Operation
+			s.state.DeadlineMS = req.DeadlineMS
+		}
 		if !s.stopping {
 			s.stopping = true
-			s.state.Phase = "Stopping"
+			s.state.Phase = "Draining"
 			close(s.stop)
 		}
 	}
@@ -239,7 +233,7 @@ func Run(ctx context.Context, c Config) error {
 	if err != nil {
 		return err
 	}
-	s := &supervisor{state: State{PodUID: c.PodUID, Node: c.Node, Host: c.Host, Invocation: Nonce(), Generation: hex.EncodeToString(pub), Phase: "WaitingForExclusiveVolume"}, stop: make(chan struct{}), handoff: make(chan struct{}), key: c.Key}
+	s := &supervisor{state: State{PodUID: c.PodUID, Node: c.Node, Host: c.Host, Invocation: Nonce(), Generation: hex.EncodeToString(pub), Phase: "WaitingForExclusiveVolume"}, stop: make(chan struct{}), key: c.Key}
 	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", c.Address)
 	if err != nil {
 		return err
@@ -296,50 +290,35 @@ func Run(ctx context.Context, c Config) error {
 		<-ctx.Done()
 		return ctx.Err()
 	}
-	// A disk nonce binds controller authority to this mounted filesystem. Existing
-	// legacy disks can acquire one only on their original host incarnation.
+	// Local flock cannot prove exclusion on a different host incarnation.
+	// Cross-host reuse is blocked until the disk-policy executor supplies its
+	// replacement mechanism. No launcher handoff grant or history is retained.
+	if err == nil && string(old) != hostIdentity {
+		s.phase("Blocked", errors.New("cross-host disk reuse requires disk-policy cutover"))
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		if err := persistHost(c.Root, hostPath, []byte(hostIdentity)); err != nil {
+			return err
+		}
+	}
 	diskPath := filepath.Join(c.Root, ".celld-launcher-disk")
-	disk, diskErr := os.ReadFile(diskPath)
-	if errors.Is(diskErr, os.ErrNotExist) {
-		if err == nil && string(old) != hostIdentity {
-			s.phase("Blocked", errors.New("legacy disk has no transferable identity"))
-			<-ctx.Done()
-			return ctx.Err()
-		}
+	disk, err := os.ReadFile(diskPath)
+	if errors.Is(err, os.ErrNotExist) {
 		disk = []byte(Nonce())
-		if e := persistHost(c.Root, diskPath, disk); e != nil {
-			return e
+		if err := persistHost(c.Root, diskPath, disk); err != nil {
+			return err
 		}
-	} else if diskErr != nil {
-		return diskErr
+	} else if err != nil {
+		return err
 	}
 	if len(disk) != 64 {
 		return errors.New("invalid disk identity")
 	}
 	s.mu.Lock()
-	s.state.BootID = c.BootID
-	s.state.DiskID = string(disk)
+	s.state.BootID, s.state.DiskID = c.BootID, string(disk)
 	s.mu.Unlock()
-	if err == nil && string(old) != hostIdentity {
-		s.mu.Lock()
-		s.state.PreviousHost = string(old)
-		s.state.Phase = "WaitingForHandoff"
-		s.mu.Unlock()
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-s.handoff:
-		}
-		// No child exists yet. Commit the new host before spacing or spawning. A
-		// replay cannot authorize another host or a new invocation after a crash.
-		if e := replaceHost(c.Root, hostPath, []byte(hostIdentity)); e != nil {
-			return e
-		}
-	} else if errors.Is(err, os.ErrNotExist) {
-		if e := persistHost(c.Root, hostPath, []byte(hostIdentity)); e != nil {
-			return e
-		}
-	}
 	// New launches never use the runtime's preserve-mode generation override.
 	if _, err := os.Stat(filepath.Join(c.Root, ".clean-reload.json")); !errors.Is(err, os.ErrNotExist) {
 		s.phase("Blocked", errors.New("unqualified clean-reload marker"))
@@ -372,8 +351,9 @@ func Run(ctx context.Context, c Config) error {
 	s.state.PID = cmd.Process.Pid
 	s.state.Phase = "Running"
 	s.mu.Unlock()
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	done := make(chan struct{})
+	var waitErr error
+	go func() { waitErr = cmd.Wait(); close(done) }()
 	reaperCtx, stopReaper := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopReaper()
 	go reapOrphans(reaperCtx, cmd.Process.Pid)
@@ -382,6 +362,34 @@ func Run(ctx context.Context, c Config) error {
 	// the independent lock acquisition can certify completion.
 	select {
 	case <-s.stop:
+		s.mu.Lock()
+		operation, generation, deadline := s.state.Operation, s.state.Generation, s.state.DeadlineMS
+		s.mu.Unlock()
+		removalCtx, cancel := context.WithDeadline(ctx, time.UnixMilli(deadline))
+		go func() {
+			select {
+			case <-done:
+				cancel()
+			case <-removalCtx.Done():
+			}
+		}()
+		err := s.captureRemoval(removalCtx, c.Control, controlplane.Target{IP: "127.0.0.1", Node: c.Node, Generation: generation}, operation, done)
+		cancel()
+		if err != nil {
+			s.phase("Failed", err)
+			// Preserve recovery service after failure or ambiguous HTTP results.
+			// At the fixed deadline (or pod termination) the exact child can be
+			// stopped, but that can never manufacture a data-safe result.
+			timer := time.NewTimer(time.Until(time.UnixMilli(deadline)))
+			select {
+			case <-ctx.Done():
+			case <-done:
+			case <-timer.C:
+			}
+			timer.Stop()
+		} else {
+			s.phase("Terminating", nil)
+		}
 	case <-ctx.Done():
 		// Termination the controller did not request. Close the binding window
 		// now: a stop request arriving during shutdown must not adopt this exit.
@@ -389,10 +397,13 @@ func Run(ctx context.Context, c Config) error {
 		s.stopping = true
 		s.state.Phase = "Terminating"
 		s.mu.Unlock()
-	case err := <-done:
+	case <-done:
 		// An unsolicited exit cannot certify an operation. Retain the lock and
 		// report failure; no automatic child restart resurrects an invocation.
-		s.phase("ExitedUnrequested", err)
+		s.mu.Lock()
+		s.state.ChildExited = true
+		s.mu.Unlock()
+		s.phase("ExitedUnrequested", waitErr)
 		<-ctx.Done()
 		return ctx.Err()
 	}
@@ -407,6 +418,9 @@ func Run(ctx context.Context, c Config) error {
 		_ = cmd.Process.Kill()
 		<-done
 	}
+	s.mu.Lock()
+	s.state.ChildExited = true
+	s.mu.Unlock()
 	// Do not use LOCK_UN: that unlocks the shared open-file description while
 	// descendants may still possess it. Closing only our FD preserves their
 	// ownership. Successful independent reacquisition proves all inherited
@@ -430,8 +444,11 @@ func Run(ctx context.Context, c Config) error {
 		defer proofCancel()
 	} else {
 		go func() {
-			<-ctx.Done()
-			proofCancel()
+			select {
+			case <-ctx.Done():
+				proofCancel()
+			case <-proofCtx.Done():
+			}
 		}()
 	}
 	proof, err := waitLock(proofCtx, c.Root, false)
@@ -449,6 +466,9 @@ func Run(ctx context.Context, c Config) error {
 		<-ctx.Done()
 		return ctx.Err()
 	}
+	s.mu.Lock()
+	s.state.InheritedLockReleased = true
+	s.mu.Unlock()
 	// Persist only negative authority before publishing the live receipt. This
 	// file cannot certify termination to another process or reconstruct Stopped.
 	// A failure here leaves the supervisor blocked, with no positive receipt.
@@ -459,8 +479,15 @@ func Run(ctx context.Context, c Config) error {
 	}
 	s.mu.Lock()
 	s.state.RestartDenied = true
+	switch {
+	case s.state.RuntimeDataSafe():
+		s.state.Phase = "Stopped"
+	case s.state.Operation != "":
+		s.state.Phase = "Failed"
+	default:
+		s.state.Phase = "Terminated"
+	}
 	s.mu.Unlock()
-	s.phase("Stopped", nil)
 	<-ctx.Done()
 	return nil
 }
@@ -503,24 +530,52 @@ func persistHost(root, path string, body []byte) error {
 	return directory.Sync()
 }
 
-func replaceHost(root, path string, body []byte) error {
-	temporary := path + "." + Nonce()
-	if err := persistHost(root, temporary, body); err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(temporary) }()
-	if err := os.Rename(temporary, path); err != nil {
-		return err
-	}
-	directory, err := os.Open(root)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = directory.Close() }()
-	return directory.Sync()
-}
-
 func retiredPodPath(root, podUID string) string {
 	hash := sha256.Sum256([]byte(podUID))
 	return filepath.Join(root, ".celld-launcher-retired-"+hex.EncodeToString(hash[:]))
+}
+
+// captureRemoval consumes only the typed strict API, independently of actor load.
+// A POST acknowledgement never sets DataSafe, even if it reports completion.
+func (s *supervisor) captureRemoval(ctx context.Context, client *controlplane.Client, target controlplane.Target, operation string, exited <-chan struct{}) error {
+	if client == nil {
+		client = controlplane.New(nil)
+	}
+	if _, err := client.RemoveDisk(ctx, target, operation); err != nil {
+		return fmt.Errorf("strict shutdown request: %w", err)
+	}
+	for {
+		status, err := client.RemovalStatus(ctx, target, operation)
+		if err != nil {
+			return fmt.Errorf("strict shutdown result unavailable: %w", err)
+		}
+		// A deadline or child exit racing the HTTP response invalidates capture.
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		select {
+		case <-exited:
+			return errors.New("child exited before strict result capture")
+		default:
+		}
+		result := RemovalResult{Operation: status.OperationID, Generation: status.Generation,
+			Mode: "remove-disk", Phase: status.Phase, ControlOnly: status.ControlOnly, DataSafe: status.DataSafe()}
+		if status.Blocker != nil {
+			result.Blocker = *status.Blocker
+		}
+		s.mu.Lock()
+		s.state.Removal = result
+		s.mu.Unlock()
+		if status.DataSafe() {
+			return nil
+		}
+		if status.Phase == "failed" {
+			return fmt.Errorf("strict shutdown failed: %s", result.Blocker)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }

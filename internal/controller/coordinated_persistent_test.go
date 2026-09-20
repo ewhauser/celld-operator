@@ -261,9 +261,7 @@ func TestCoordinatedZeroRequiresFreshExactStopAndSealedEvidence(t *testing.T) {
 				members[i].RestartDenied = true
 				members[i].Epoch = 1
 				state := p.states[members[i].Node]
-				state.Phase = "Stopped"
-				state.RestartDenied = true
-				state.Operation = "coordinated"
+				completeLauncherRemoval(&state, "coordinated")
 				p.states[members[i].Node] = state
 			}
 			p.j.Maintenance = &maintenanceOperation{ID: "coordinated", Kind: "Contract", Phase: "Empty", Coordinated: true, TargetReplicas: 1, Persistent: members}

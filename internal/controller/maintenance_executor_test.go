@@ -706,9 +706,7 @@ func TestShutdownRejectsLegacyStoppedReceiptWithoutResurrectionDenial(t *testing
 		member.Stopped = true
 		member.RestartDenied = true
 		state := p.states[member.Node]
-		state.Phase = "Stopped"
-		state.Operation = m.ID
-		state.RestartDenied = true
+		completeLauncherRemoval(&state, m.ID)
 		p.states[member.Node] = state
 	}
 	if err := p.r.verifyShutdownStops(t.Context(), p.f, m); err != nil {

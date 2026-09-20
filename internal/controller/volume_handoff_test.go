@@ -69,56 +69,6 @@ func TestEBSHandoffRequiresUniqueHealthyRWOPAttachment(t *testing.T) {
 	}
 }
 
-func TestHandoffRequiresLatestRetiredDiskAndSameZone(t *testing.T) {
-	old := persistentMember{Node: "persistent-2", PodUID: "old-pod", Generation: "old-gen", Host: "old-host", BootID: "old-boot", DiskID: "disk", Zone: "zone", Stopped: true, Retired: true, RestartDenied: true}
-	pod := &corev1.Pod{Name: old.Node, UID: "new-pod"}
-	node := &corev1.Node{Name: "new-host", UID: "node", Labels: map[string]string{corev1.LabelTopologyZone: "zone"}, Status: corev1.NodeStatus{NodeInfo: corev1.NodeSystemInfo{BootID: "new-boot"}, Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
-	state := launcher.State{DiskID: "disk", PreviousHost: "old-host\nold-boot", Generation: "new-gen", BootID: "new-boot"}
-	for _, which := range []string{"valid", "superseded-earlier", "superseded-latest", "not-stopped", "not-retired", "wrong-disk", "wrong-boot", "wrong-zone", "stale-predecessor", "legacy"} {
-		t.Run(which, func(t *testing.T) {
-			p, n, s := old, node.DeepCopy(), state
-			j := &lifecycleJournal{PersistentHistory: []persistentMember{p}}
-			switch which {
-			case "superseded-earlier":
-				// The pod was recreated once on its old host, so the earlier
-				// invocation is resolved by the successor's exclusive lock.
-				earlier := p
-				earlier.PodUID = "earlier-pod"
-				earlier.Generation = "earlier-gen"
-				earlier.Stopped, earlier.Retired, earlier.RestartDenied = false, false, false
-				earlier.Superseded = true
-				j.PersistentHistory = append([]persistentMember{earlier}, j.PersistentHistory...)
-			case "superseded-latest":
-				// The predecessor the handoff is compared against must itself be
-				// a positive retirement, never merely superseded.
-				j.PersistentHistory[0].Stopped, j.PersistentHistory[0].Retired, j.PersistentHistory[0].RestartDenied = false, false, false
-				j.PersistentHistory[0].Superseded = true
-			case "not-stopped":
-				j.PersistentHistory[0].Stopped = false
-			case "not-retired":
-				j.PersistentHistory[0].Retired = false
-			case "wrong-disk":
-				s.DiskID = "other"
-			case "wrong-boot":
-				s.BootID = "old-boot"
-			case "wrong-zone":
-				n.Labels[corev1.LabelTopologyZone] = "other"
-			case "stale-predecessor":
-				next := p
-				next.Host = "intermediate"
-				next.Generation = "intermediate"
-				j.PersistentHistory = append(j.PersistentHistory, next)
-			case "legacy":
-				j.PersistentHistory[0].DiskID = ""
-			}
-			_, err := handoffPredecessor(j, pod, s, n)
-			if (err == nil) != (which == "valid" || which == "superseded-earlier") {
-				t.Fatalf("error %v", err)
-			}
-		})
-	}
-}
-
 func TestTransferableDiskSchedulingDoesNotRequireOldHost(t *testing.T) {
 	p := persistentSetup(t)
 	p.r.Options.LocalTest = false
@@ -182,8 +132,7 @@ func TestPersistentStopRequiresAuthenticatedRestartDenial(t *testing.T) {
 	p := persistentSetup(t)
 	p.j.Operation.TargetPod = "persistent-2"
 	state := p.states["persistent-2"]
-	state.Phase = "Stopped"
-	state.Operation = p.j.Operation.ID
+	completeLauncherRemoval(&state, p.j.Operation.ID)
 	state.RestartDenied = false
 	p.states["persistent-2"] = state
 	if _, err := p.r.persistentMembers(t.Context(), p.f, p.j, 3, true); err == nil {
@@ -202,10 +151,10 @@ func TestPersistentStopRequiresAuthenticatedRestartDenial(t *testing.T) {
 	}
 }
 
-// A survivor that is Ready cannot be waiting for a handoff, so steady-state
+// A survivor that is Ready cannot be blocked before startup, so steady-state
 // reconciles must not spend a launcher round trip (and the reservation read its
 // key lookup performs) on it; a survivor that is not Ready is still probed.
-func TestHandoffProbeSkipsReadySurvivors(t *testing.T) {
+func TestDiskStartupProbeSkipsReadySurvivors(t *testing.T) {
 	for _, which := range []string{"ready", "not-ready-running", "not-ready-waiting"} {
 		t.Run(which, func(t *testing.T) {
 			p := persistentSetup(t)
@@ -231,7 +180,7 @@ func TestHandoffProbeSkipsReadySurvivors(t *testing.T) {
 			}
 			if which == "not-ready-waiting" {
 				for name, s := range p.states {
-					s.Phase = "WaitingForHandoff"
+					s.Phase = "Blocked"
 					p.states[name] = s
 				}
 			}
@@ -271,10 +220,10 @@ func TestHandoffProbeSkipsReadySurvivors(t *testing.T) {
 					t.Fatalf("not-Ready survivors probed %d times, want 3", calls)
 				}
 			case "not-ready-waiting":
-				// The probe reached the launcher and the waiting phase was acted on;
-				// this fixture is LocalTest, where cross-host handoff is refused.
-				if err == nil || !strings.Contains(err.Error(), "cross-host handoff requires real EBS CSI") {
-					t.Fatalf("waiting launcher was not probed and authorized: %v", err)
+				// The probe must expose a blocked startup without attempting to
+				// authorize any cross-host handoff.
+				if err == nil || !strings.Contains(err.Error(), "launcher disk startup blocked") {
+					t.Fatalf("blocked launcher was not reported: %v", err)
 				}
 				if calls == 0 {
 					t.Fatal("waiting launcher was not probed")

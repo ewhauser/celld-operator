@@ -96,9 +96,6 @@ func (r *Reconciler) callLauncher(ctx context.Context, f *fleet.CelldFleet, pod 
 	if r.launcherCall != nil {
 		return r.launcherCall(ctx, f, pod, operation, generation)
 	}
-	return r.launcherRequest(ctx, f, pod, operation, generation, nil)
-}
-func (r *Reconciler) launcherRequest(ctx context.Context, f *fleet.CelldFleet, pod *corev1.Pod, operation, generation string, handoff *launcher.Handoff) (launcher.State, error) {
 	var zero launcher.State
 	if net.ParseIP(pod.Status.PodIP) == nil {
 		return zero, errors.New("launcher Pod IP unavailable")
@@ -111,14 +108,21 @@ func (r *Reconciler) launcherRequest(ctx context.Context, f *fleet.CelldFleet, p
 	if deadline, ok := ctx.Deadline(); ok && deadline.Before(expires) {
 		expires = deadline
 	}
-	req := launcher.Request{Nonce: launcher.Nonce(), Operation: operation, Generation: generation, NotAfterMS: expires.UnixMilli(), Handoff: handoff}
+	req := launcher.Request{Nonce: launcher.Nonce(), Operation: operation, Generation: generation, NotAfterMS: expires.UnixMilli()}
+	if operation != "" {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			return zero, errors.New("strict launcher stop requires an operation deadline")
+		}
+		req.DeadlineMS = deadline.UnixMilli()
+	}
 	body, err := json.Marshal(req)
 	if err != nil {
 		return zero, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+net.JoinHostPort(pod.Status.PodIP, launcherPort)+"/v1", bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+net.JoinHostPort(pod.Status.PodIP, launcherPort)+"/v2", bytes.NewReader(body))
 	if err != nil {
 		return zero, err
 	}
@@ -149,6 +153,12 @@ func (r *Reconciler) launcherRequest(ctx context.Context, f *fleet.CelldFleet, p
 	if answer.Nonce != req.Nonce || !launcher.Verify(key, "response", signed, answer.MAC) || answer.State.PodUID != string(pod.UID) || answer.State.Node != pod.Name || answer.State.Host != pod.Spec.NodeName || answer.State.Invocation == "" || answer.State.Generation == "" {
 		return zero, errors.New("launcher association or authentication failed")
 	}
+	if (generation != "" && answer.State.Generation != generation) || (operation != "" && answer.State.Operation != operation) {
+		return zero, errors.New("launcher response operation or generation changed")
+	}
+	if answer.State.Phase == "Stopped" && !answer.State.RemovalReady() {
+		return zero, errors.New("launcher completion lacks strict runtime or process proof")
+	}
 	return answer.State, nil
 }
 func healthyHost(node *corev1.Node) bool {
@@ -165,7 +175,7 @@ func (r *Reconciler) schedulePersistent(ctx context.Context, f *fleet.CelldFleet
 		pod := &pods.Items[i]
 		if !slices.ContainsFunc(pod.Spec.SchedulingGates, func(g corev1.PodSchedulingGate) bool { return g.Name == launcherGate }) {
 			if pod.Spec.NodeName != "" && len(j.PersistentHistory) > 0 {
-				if err := r.authorizeVolumeHandoff(ctx, f, j, pod); err != nil {
+				if err := r.checkVolumeStartup(ctx, f, j, pod); err != nil {
 					return err
 				}
 			}
@@ -180,7 +190,7 @@ func (r *Reconciler) schedulePersistent(ctx context.Context, f *fleet.CelldFleet
 			if previous.Node != pod.Name {
 				continue
 			}
-			latest, _ := latestPersistentMember(j.PersistentHistory, pod.Name)
+			latest := latestPersistentMember(j.PersistentHistory, pod.Name)
 			if previous.Generation != latest.Generation {
 				continue
 			}

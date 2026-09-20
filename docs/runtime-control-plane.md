@@ -30,13 +30,12 @@ separate boundary. No Services, network policy, credentials or RBAC are changed.
 Ordinary shutdown/reload APIs cannot atomically bind a runtime generation. The
 client rejects requests that ask those APIs to enforce one; it does not
 simulate safety with a racy GET followed by an unguarded POST. There are currently
-no controller callers of these mutations. The existing lifecycle journal,
-launcher, private storage evidence, deletion policy and runtime image allowlist
-are outside this task. The journal/S3 evidence/old release adapters are explicitly
+no controller callers of these mutations. The [launcher](launcher-supervision.md) uses the strict API to capture completion
+before terminating celld. The lifecycle journal, private storage evidence,
+deletion policy and runtime image allowlist remain pending cutover. The journal/S3 evidence/old release adapters are explicitly
 queued for deletion in the later lifecycle cutover, not retained as compatibility
 requirements. That cutover must install a single compatible fork image digest
-across the fleet; no digest is invented while its release is pending. A `data_safe` observation is not wired into disk deletion or
-process termination by this change.
+across the fleet; no digest is invented while its release is pending. Disk deletion still requires the later executor rewrite.
 
 ## Strict schema alignment
 
@@ -85,8 +84,9 @@ blocker. A lost operation, replacement process, malformed response, network
 failure or deadline cannot become completion. The process remains alive in the
 control-only phase. The current handler returns only `shutdown` after joining
 the actor. Lifecycle decoding is independent of load fields: terminal polling
-still succeeds while capacity marks that node unavailable. Termination, restart exclusion and recorded intent/results
-belong to the later lifecycle cutover; there is no private-S3 fallback.
+still succeeds while capacity marks that node unavailable. The launcher supplies exact termination and restart exclusion; the executor
+must persist the current operation and result before authorizing deletion.
+There is no private-S3 fallback in this client.
 
 ## Validation boundary
 
