@@ -68,7 +68,10 @@ func (s *supervisor) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer s.mu.Unlock()
 	if req.Handoff != nil {
 		h := req.Handoff
-		if req.Operation != "" || req.NotAfterMS <= time.Now().UnixMilli() || req.NotAfterMS > time.Now().Add(3*time.Second).UnixMilli() || s.state.Phase != "WaitingForHandoff" || h.Invocation != s.state.Invocation || h.Generation != s.state.Generation || h.PodUID != s.state.PodUID || h.Host != s.state.Host || h.BootID != s.state.BootID || h.DiskID != s.state.DiskID || h.PreviousHost != s.state.PreviousHost || h.DiskID == "" {
+		now := time.Now().UnixMilli()
+		// The grant must be in the future and bounded by requestExpiryBound,
+		// the same allowance stop requests use for clock skew between pods.
+		if req.Operation != "" || req.NotAfterMS <= now || req.NotAfterMS > now+requestExpiryBound.Milliseconds() || s.state.Phase != "WaitingForHandoff" || h.Invocation != s.state.Invocation || h.Generation != s.state.Generation || h.PodUID != s.state.PodUID || h.Host != s.state.Host || h.BootID != s.state.BootID || h.DiskID != s.state.DiskID || h.PreviousHost != s.state.PreviousHost || h.DiskID == "" {
 			http.Error(w, "handoff association changed or expired", http.StatusConflict)
 			return
 		}
@@ -215,15 +218,15 @@ func Run(ctx context.Context, c Config) error {
 	if err != nil {
 		return err
 	}
-	token, err := lockToken(lock)
-	if err != nil {
-		return err
-	}
 	defer func() {
 		if lock != nil {
 			_ = lock.Close()
 		}
 	}()
+	token, err := lockToken(lock)
+	if err != nil {
+		return err
+	}
 	// Retirement is a one-way deny rule for this Kubernetes pod identity.
 	// A stale kubelet may restart a container after an observed stop. It must
 	// never resurrect that pod's writer, even after later reuse of this disk.
