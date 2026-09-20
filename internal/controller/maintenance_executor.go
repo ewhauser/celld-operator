@@ -42,6 +42,46 @@ type maintenanceTarget struct {
 	UID  types.UID
 }
 
+// transition is the (result, handled, error) triple every lifecycle phase
+// returns. Carrying it as a value lets the shared helpers below hand a caller's
+// own terminal transition back to it unchanged, instead of inventing one.
+type transition struct {
+	result  ctrl.Result
+	handled bool
+	err     error
+}
+
+func asTransition(result ctrl.Result, handled bool, err error) *transition {
+	return &transition{result: result, handled: handled, err: err}
+}
+
+func (t *transition) unwrap() (ctrl.Result, bool, error) { return t.result, t.handled, t.err }
+
+// settlingWindow is the convergence window every recovery phase waits out
+// before it may record history and advance.
+const settlingWindow = 10 * time.Second
+
+// awaitSettling opens and waits out the settling window. The first observation
+// is recorded through settledAt and durably persisted with save; a later
+// observation still inside the window returns wait. A nil return means the
+// window has elapsed and the caller may proceed. Clearing settledAt on the way
+// out stays with the caller: phases that step to a further target reset it,
+// phases that finish the operation do not.
+func awaitSettling(settledAt *time.Time, observedAt time.Time, save, wait func() (ctrl.Result, bool, error)) *transition {
+	if settledAt.IsZero() {
+		*settledAt = observedAt
+		return asTransition(save())
+	}
+	if observedAt.Sub(*settledAt) < settlingWindow {
+		return asTransition(wait())
+	}
+	return nil
+}
+
+// requeueSoon is the wait every maintenance phase uses inside the settling
+// window: no progress is recorded, the pass is simply repeated.
+func requeueSoon() (ctrl.Result, bool, error) { return ctrl.Result{RequeueAfter: time.Second}, true, nil }
+
 func (r *Reconciler) beginMaintenance(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, j *lifecycleJournal, w client.Object) (ctrl.Result, bool, error) {
 	if w.GetUID() != j.WorkloadUID {
 		return ctrl.Result{}, true, errors.New("maintenance workload changed")
@@ -251,12 +291,8 @@ func (r *Reconciler) executeMaintenance(ctx context.Context, f *fleet.CelldFleet
 			return block(errors.New("restart target has not retired with positive lease expiry"))
 		}
 		m.Sessions = sessions
-		if m.SettledAt.IsZero() {
-			m.SettledAt = at
-			return save()
-		}
-		if at.Sub(m.SettledAt) < 10*time.Second {
-			return ctrl.Result{RequeueAfter: time.Second}, true, nil
+		if t := awaitSettling(&m.SettledAt, at, save, requeueSoon); t != nil {
+			return t.unwrap()
 		}
 		j.BucketHistory = sessions
 		m.Index++
@@ -335,12 +371,8 @@ func (r *Reconciler) executeBucketDeletion(ctx context.Context, f *fleet.CelldFl
 			m.Sessions[i].ExpiryObserved = true
 			m.Sessions[i].ExpiryInvalidated = false
 		}
-		if m.SettledAt.IsZero() {
-			m.SettledAt = evidence.ObservedAt
-			return save()
-		}
-		if evidence.ObservedAt.Sub(m.SettledAt) < 10*time.Second {
-			return ctrl.Result{RequeueAfter: time.Second}, true, nil
+		if t := awaitSettling(&m.SettledAt, evidence.ObservedAt, save, requeueSoon); t != nil {
+			return t.unwrap()
 		}
 		j.BucketHistory = m.Sessions
 		m.Phase = "Cleanup"

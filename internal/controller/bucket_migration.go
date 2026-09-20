@@ -229,12 +229,8 @@ func (r *Reconciler) migrateBucket(ctx context.Context, f *fleet.CelldFleet, res
 			j.BucketHistory[i].ExpiryObserved = true
 			j.BucketHistory[i].ExpiryInvalidated = false
 		}
-		if m.SettledAt.IsZero() {
-			m.SettledAt = evidence.ObservedAt
-			return save()
-		}
-		if evidence.ObservedAt.Sub(m.SettledAt) < 10*time.Second {
-			return ctrl.Result{RequeueAfter: time.Second}, true, nil
+		if t := awaitSettling(&m.SettledAt, evidence.ObservedAt, save, requeueSoon); t != nil {
+			return t.unwrap()
 		}
 		m.Phase = "DeleteOld"
 		return save()

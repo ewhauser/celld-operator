@@ -213,12 +213,8 @@ func (r *Reconciler) executePersistentMaintenance(ctx context.Context, f *fleet.
 				return block(errors.New("replacement membership lacks live storage evidence"))
 			}
 		}
-		if m.SettledAt.IsZero() {
-			m.SettledAt = inventory.ObservedAt
-			return save()
-		}
-		if inventory.ObservedAt.Sub(m.SettledAt) < 10*time.Second {
-			return ctrl.Result{RequeueAfter: time.Second}, true, nil
+		if t := awaitSettling(&m.SettledAt, inventory.ObservedAt, save, requeueSoon); t != nil {
+			return t.unwrap()
 		}
 		for _, member := range members {
 			upsertMaintenanceMember(j, member)
@@ -350,12 +346,8 @@ func (r *Reconciler) executePersistentShutdown(ctx context.Context, f *fleet.Cel
 		if err != nil {
 			return block(err)
 		}
-		if m.SettledAt.IsZero() {
-			m.SettledAt = evidence.ObservedAt
-			return save()
-		}
-		if evidence.ObservedAt.Sub(m.SettledAt) < 10*time.Second {
-			return ctrl.Result{RequeueAfter: time.Second}, true, nil
+		if t := awaitSettling(&m.SettledAt, evidence.ObservedAt, save, requeueSoon); t != nil {
+			return t.unwrap()
 		}
 		for _, member := range m.Persistent {
 			member.Retired = true
