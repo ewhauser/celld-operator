@@ -80,7 +80,12 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	mgr, err := ctrl.NewManager(config, ctrl.Options{Scheme: scheme, LeaderElection: true, LeaderElectionID: "celld-operator.celld.eric.dev", LeaderElectionNamespace: *namespace, Metrics: metricsserver.Options{BindAddress: *metrics}, HealthProbeBindAddress: ":8082"})
+	// Releasing the lease on SIGTERM hands over in about a RetryPeriod instead of a
+	// full LeaseDuration. Safe here because run() returns straight after Start and
+	// main() then exits, and controller-runtime only cancels the elector after every
+	// runnable has stopped. Lease timings stay at defaults: ADR 0012 puts authority in
+	// the journal CAS, not the Lease, so shortening them buys no safety.
+	mgr, err := ctrl.NewManager(config, ctrl.Options{Scheme: scheme, LeaderElection: true, LeaderElectionID: "celld-operator.celld.eric.dev", LeaderElectionNamespace: *namespace, LeaderElectionReleaseOnCancel: true, Metrics: metricsserver.Options{BindAddress: *metrics}, HealthProbeBindAddress: ":8082"})
 	if err != nil {
 		return err
 	}

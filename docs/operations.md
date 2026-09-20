@@ -38,6 +38,51 @@ roll back to an operator that cannot read the persisted journal version. A
 controller release is distinct from a celld runtime upgrade; only registered,
 qualified runtime adapters may authorize transitions.
 
+## Leader handover and restarts
+
+The manager runs with `LeaderElectionReleaseOnCancel`. On SIGTERM -- a
+`kubectl rollout restart`, a drain, or any ordinary Pod deletion -- the outgoing
+leader deletes its hold on the Lease instead of letting it expire, so the
+successor starts reconciling after about one `RetryPeriod` (2s default) rather
+than a full `LeaseDuration` (15s default). Only a *graceful* exit releases;
+a killed or partitioned leader still hands over on the ordinary expiry path.
+
+This matters for Bucket retirement. Completing a retirement requires positively
+reading a retired writer's `nodes/<uid>.json` while its lease is already expired,
+and the pinned runtime's `dead_node_gc` deletes that record a second or two after
+expiry. A controller that spends fifteen seconds waiting to become leader can miss
+that window entirely, which blocks Bucket contraction for that fleet permanently
+(see [bucket scale-in](bucket-scale-in.md) and
+[ADR 0016](decisions/0016-bucket-preflight-and-completion-boundary.md)).
+
+Two properties make the option safe rather than merely faster:
+
+- The binary ends when the manager ends. `run()` returns the result of
+  `mgr.Start` and `main` exits immediately, which is the condition
+  controller-runtime's own documentation attaches to this option
+  ("requires the binary to immediately end when the Manager is stopped").
+- The lease is released only after every runnable has already stopped.
+  In `pkg/manager/internal.go`, `engageStopProcedure` registers the
+  `leaderElectionCancel()` deferral *before* the goroutine that calls
+  `runnables.LeaderElection.StopAndWait(...)`; that goroutine ends with
+  `shutdownCancel()`, and the function blocks on `<-cm.shutdownCtx.Done()`
+  before any deferral runs. No reconciler is still running when the next
+  leader can acquire.
+
+Lease timings themselves are left at controller-runtime's defaults.
+[ADR 0012](decisions/0012-restart-safe-manual-lifecycle.md) puts lifecycle
+authority in the journal and workload CAS, not in the Lease -- "an old leader
+can only win that exact CAS once" -- so a shorter `LeaseDuration` would buy no
+safety, and a shorter `RenewDeadline`/`RetryPeriod` would make a loaded
+apiserver more likely to make a healthy leader drop its lease. A manager that
+loses the lease exits, so that change would cause the restarts this option is
+meant to make cheap.
+
+Keep the termination grace period at or above the manager's
+`GracefulShutdownTimeout` (both default to 30s). If the kubelet sends SIGKILL
+first the release is skipped and handover falls back to lease expiry, which is
+the behaviour before this option, not a regression.
+
 ## Monitoring
 
 `metrics.enabled=true` exposes port 8084 through a ClusterIP service.
