@@ -12,7 +12,8 @@ on:
       suite:
         description: Suite to run (all, lifecycle, maintenance, faults, external)
         default: all
-        type: string
+        type: choice
+        options: [all, lifecycle, maintenance, faults, external]
   pull_request:
     types: [opened, labeled, synchronize, reopened]
 
@@ -47,6 +48,10 @@ jobs:
           else
             REQUESTED="$INPUT"
           fi
+          case "$REQUESTED" in
+            all|lifecycle|maintenance|faults|external) ;;
+            *) echo "Unknown integration suite: $REQUESTED" >&2; exit 1 ;;
+          esac
           if [ "$REQUESTED" != all ] && [ "$REQUESTED" != "${{ matrix.suite }}" ]; then
             echo "run=false" >> "$GITHUB_OUTPUT"
           else
