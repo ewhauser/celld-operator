@@ -3,7 +3,6 @@ package v050
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 )
 
@@ -36,13 +35,8 @@ func (a *Adapter) Inventory(ctx context.Context, r Reader, now func() time.Time)
 		}
 		out.Nodes = append(out.Nodes, n)
 	}
-	_, err = listEach(ctx, r, "log/", &budget, func(key string) error {
-		if strings.HasSuffix(key, ".loss.json") {
-			out.Loss = key
-			return &LossError{Key: key}
-		}
-		return nil
-	})
+	_, loss, err := scanLog(ctx, r, &budget)
+	out.Loss = loss
 	if err != nil {
 		return out, err
 	}

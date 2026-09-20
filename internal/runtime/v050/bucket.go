@@ -3,7 +3,6 @@ package v050
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 )
 
@@ -55,16 +54,9 @@ func (a *Adapter) InspectBucket(ctx context.Context, r Reader, req Request, now 
 			return BucketObservation{}, errors.New("bucket writer observation expired")
 		}
 	}
-	// Complete the scan even after an ordinary log name, so a later loss remains
+	// scanLog completes even after an ordinary log name, so a later loss remains
 	// distinguishable and can acquire the controller's durable loss fence.
-	hasLog := false
-	_, err = listEach(ctx, r, "log/", &budget, func(key string) error {
-		hasLog = true
-		if strings.HasSuffix(key, ".loss.json") {
-			return &LossError{Key: key}
-		}
-		return nil
-	})
+	hasLog, _, err := scanLog(ctx, r, &budget)
 	if err != nil {
 		return BucketObservation{}, err
 	}
@@ -193,14 +185,7 @@ func (a *Adapter) InspectBucketMembership(ctx context.Context, r Reader, members
 			return BucketObservation{}, errors.New("unresolved bucket writer record missing")
 		}
 	}
-	hasLog := false
-	_, err = listEach(ctx, r, "log/", &budget, func(key string) error {
-		hasLog = true
-		if strings.HasSuffix(key, ".loss.json") {
-			return &LossError{Key: key}
-		}
-		return nil
-	})
+	hasLog, _, err := scanLog(ctx, r, &budget)
 	if err != nil {
 		return BucketObservation{}, err
 	}

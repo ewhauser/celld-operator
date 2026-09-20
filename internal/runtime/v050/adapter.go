@@ -338,13 +338,7 @@ func (a *Adapter) assess(ctx context.Context, r Reader, req Request, now func() 
 		return Evidence{}, errors.New("no stopped session")
 	}
 	// Ordering is intentional: completion reads precede the full historical scan.
-	_, err = listEach(ctx, r, "log/", &budget, func(key string) error {
-		if strings.HasSuffix(key, ".loss.json") {
-			return &LossError{Key: key}
-		}
-		return nil
-	})
-	if err != nil {
+	if _, _, err := scanLog(ctx, r, &budget); err != nil {
 		return Evidence{}, err
 	}
 	result.ObservedAt = now()
@@ -407,6 +401,25 @@ func listEach(ctx context.Context, r Reader, prefix string, budget *int, visit f
 		seenTokens[page.Next] = true
 		token = page.Next
 	}
+}
+
+// scanLog walks the complete log/ listing. It reports whether ANY peer-log
+// object exists and fails closed on the first loss declaration; the loss key is
+// returned alongside the error so partial results can retain the observation.
+// The scan is deliberately not short-circuited on an ordinary log name, so a
+// later loss stays distinguishable from a bucket with no peer-log history.
+func scanLog(ctx context.Context, r Reader, budget *int) (bool, string, error) {
+	var hasLog bool
+	var loss string
+	_, err := listEach(ctx, r, "log/", budget, func(key string) error {
+		hasLog = true
+		if strings.HasSuffix(key, ".loss.json") {
+			loss = key
+			return &LossError{Key: key}
+		}
+		return nil
+	})
+	return hasLog, loss, err
 }
 
 // LossError is sticky lifecycle evidence, even if the object later disappears.
