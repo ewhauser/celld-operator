@@ -163,10 +163,14 @@ func (r *Reconciler) executeMaintenance(ctx context.Context, f *fleet.CelldFleet
 			if err != nil {
 				return block(err)
 			}
+			// Capture is replayed whenever a later step in this pass blocks, so the
+			// inventory is rebuilt and replaced rather than appended to. Appending
+			// duplicated every target and wedged the journal on its next load.
+			targets := make([]maintenanceTarget, 0, len(pods))
 			for _, pod := range pods {
-				m.Targets = append(m.Targets, maintenanceTarget{Name: pod.Name, UID: pod.UID})
+				targets = append(targets, maintenanceTarget{Name: pod.Name, UID: pod.UID})
 			}
-			slices.SortFunc(m.Targets, func(a, b maintenanceTarget) int {
+			slices.SortFunc(targets, func(a, b maintenanceTarget) int {
 				if a.Name < b.Name {
 					return -1
 				}
@@ -175,6 +179,7 @@ func (r *Reconciler) executeMaintenance(ctx context.Context, f *fleet.CelldFleet
 				}
 				return 0
 			})
+			m.Targets = targets
 		}
 		m.Sessions = sessions
 		if m.Index == len(m.Targets) {

@@ -48,10 +48,17 @@ func (r *Reconciler) executePersistentMaintenance(ctx context.Context, f *fleet.
 			if err != nil {
 				return block(err)
 			}
+			// Capture is replayed whenever a later step in this pass blocks, so the
+			// inventory is rebuilt and replaced rather than appended to. Appending
+			// duplicated every target and wedged the journal on its next load.
+			targets := make([]maintenanceTarget, 0, len(members))
 			for _, member := range members {
-				m.Targets = append(m.Targets, maintenanceTarget{Name: member.Node, UID: types.UID(member.PodUID)})
+				targets = append(targets, maintenanceTarget{Name: member.Node, UID: types.UID(member.PodUID)})
 			}
-			view.Operation.TargetPod = m.Targets[0].Name
+			m.Targets = targets
+			if len(m.Targets) > 0 {
+				view.Operation.TargetPod = m.Targets[0].Name
+			}
 		}
 		if m.Index == len(m.Targets) {
 			j.CompletedRestarts = append(j.CompletedRestarts, m.Token)
