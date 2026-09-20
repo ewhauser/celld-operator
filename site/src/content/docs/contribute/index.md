@@ -49,7 +49,7 @@ at build time. Edit their repository sources, not the ignored generated copies.
 - [Architecture](../concepts/architecture/): components, workloads, and data flow.
 - [How operations resume](../concepts/lifecycle-journal/): persisted operations and retained recovery records.
 - [How removal is checked](../concepts/safety-model/): why uncertain operations stop for investigation.
-- [Implementation details](../contracts/fleet-api/): controller behavior and links to individual protocols.
+- The [fleet API and installation contract](../contracts/fleet-api/) and the protocol pages it links to describe controller behavior in detail; they are reachable from the guides and design records rather than the navigation.
 
 ## Design and test archive
 

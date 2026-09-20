@@ -92,7 +92,6 @@ export default defineConfig({
                     { label: 'Architecture', slug: 'concepts/architecture' },
                     { label: 'How operations resume', slug: 'concepts/lifecycle-journal' },
                     { label: 'How removal is checked', slug: 'concepts/safety-model' },
-                    { label: 'Implementation details', collapsed: true, items: sidebar.contracts },
                     { label: 'Test reports', collapsed: true, items: sidebar.qualification },
                     { label: 'Design records', collapsed: true, items: sidebar.decisions },
                     { label: 'Historical investigations', collapsed: true, items: sidebar.history },
