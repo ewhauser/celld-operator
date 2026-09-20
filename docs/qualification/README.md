@@ -27,6 +27,11 @@ binary. After deletion of every original disk, all three fresh nodes recovered
 a peer-only acknowledgment. Its failed-deadline case retained storage. This is
 native/MinIO evidence, separate from Kind and EBS.
 
+The [native peer-address comparison](native-peer-addresses/README.md) reproduces
+acknowledged-tail loss after changed peer endpoints and verifies 10/10 recovery
+with stable endpoints. It motivated PersistentFleet ordinal DNS; delayed or
+unavailable peer startup remains a separate runtime limitation.
+
 Use [the EKS test plan](eks-smoke-plan.md) for cloud validation. Keep unsupported
 or blocked outcomes visible; never clear authority or force storage finalizers
 to make a test pass.

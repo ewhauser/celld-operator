@@ -42,6 +42,15 @@ can publish a new lease. Advertising an ephemeral Pod IP makes those old peer
 addresses unreachable after replacement and can cause celld to declare bounded
 loss despite retained disks. Bucket uses a fresh runtime identity and Pod address.
 
+Stable addressing does not guarantee recovery from arbitrarily delayed peer
+startup. In the current fork, a failed witness request after a peer lease has
+expired by `max(3 × lease TTL, 20 seconds)` can be treated as conclusive loss.
+Simultaneous same-host recovery with reachable retained followers is a distinct
+qualification case from unavailable disks, delayed startup or cross-host reuse.
+Strict shutdown does not change that existing recovery policy. The operator
+leaves unsolicited child exits stopped and does not inspect private recovery
+metadata.
+
 ## Strict schema alignment
 
 The adapter follows the implemented `State::snapshot` in
@@ -91,6 +100,13 @@ the actor. Lifecycle decoding is independent of load fields: terminal polling
 still succeeds while capacity marks that node unavailable. The launcher supplies exact termination and restart exclusion; the executor
 must persist the current operation and result before authorizing deletion.
 There is no private-S3 fallback in this client.
+
+celld drains existing HTTP connections before entering control-only mode. After
+an accepted strict request, the launcher retries incomplete transport reads
+within the original operation deadline while the exact child remains alive.
+It never replays the mutation or treats a connection failure as proof. HTTP
+rejections, malformed results, identity mismatches and runtime failures remain
+terminal; completion still requires a fresh matching `data_safe` observation.
 
 ## Validation boundary
 

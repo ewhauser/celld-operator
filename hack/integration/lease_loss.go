@@ -151,13 +151,14 @@ func (h *harness) exerciseLeaseLoss() {
 		assert(same(h.claims(fleetName), before), "administrative recovery replaced claims or CSI disks")
 	}
 	for _, target := range targets {
-		if target.fleet == "beta" {
-			pod := h.get("pod", nameOf(target.pod))
-			advertise := strings.TrimSpace(h.k("-n", "fleets", "exec", nameOf(pod), "-c", "celld", "--", "printenv", "CELLD_ADVERTISE"))
-			want := fmt.Sprintf("%s.%s-peers.%s.svc:8081", nameOf(pod), target.fleet, str(pod, "metadata", "namespace"))
-			assert(advertise == want, "PersistentFleet advertises %q, expected stable peer DNS %q", advertise, want)
-			fmt.Printf("PASS: PersistentFleet DNS rebinding pod=%s old_ip=%s new_ip=%s advertise=%s\n", nameOf(pod), str(target.pod, "status", "podIP"), str(pod, "status", "podIP"), advertise)
+		if target.fleet != "beta" {
+			continue
 		}
+		pod := h.get("pod", nameOf(target.pod))
+		advertise := strings.TrimSpace(h.k("-n", "fleets", "exec", nameOf(pod), "-c", "celld", "--", "printenv", "CELLD_ADVERTISE"))
+		want := fmt.Sprintf("%s.%s-peers.%s.svc:8081", nameOf(pod), target.fleet, str(pod, "metadata", "namespace"))
+		assert(advertise == want, "PersistentFleet advertises %q, expected stable peer DNS %q", advertise, want)
+		fmt.Printf("PASS: PersistentFleet DNS rebinding pod=%s old_ip=%s new_ip=%s advertise=%s\n", nameOf(pod), str(target.pod, "status", "podIP"), str(pod, "status", "podIP"), advertise)
 	}
 	h.readLedger("client", "alpha")
 	h.readLedger("client-beta", "beta")

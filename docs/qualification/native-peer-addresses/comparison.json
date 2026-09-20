@@ -1,0 +1,160 @@
+{
+  "runtime": {
+    "version": "0.5.1-ewhauser.2",
+    "source_commit": "2a65a4df99bed5254bdd679df57ed98556454dec",
+    "platform": "darwin-arm64",
+    "binary": "/Users/ewhauser/.codex/artifacts/celld/0.5.1-ewhauser.2/macos-arm64/celld",
+    "sha256": "f9b68e9e9608d74c40a9d8e9dab1846c3532f4f51762dc25e863c0986f2146db"
+  },
+  "harness": {
+    "path": "repro.py",
+    "sha256": "4050f9c286eb714741cfdcc8192ac5afddc5bdb61dabc44b475480683c65f48f",
+    "imported_helper": "/Users/ewhauser/working/celld-strict-shutdown-fix/examples/disk-removal/demo.py",
+    "imported_helper_sha256": "189c89dbfbe4d36d3279a27dab30093665131a27f0b1c3fda202395faa2121ed",
+    "esbuild": "/tmp/celld-strict-tools/node_modules/@esbuild/darwin-arm64/bin/esbuild"
+  },
+  "schedule": "Two active Fleet members each acknowledge writes; pause MinIO and acknowledge two peer-only writes; both self-fence exit3; preserve disks; kill/start MinIO on the same mounted tmpfs volume to discard queued requests; wait33seconds; restart both processes together; verify every exact acknowledged ID/value through both nodes.",
+  "object_store": "Pinned MinIO, owned 1GiB named tmpfs volume kept mounted by keeper container across MinIO process restart; existing object contents preserved. Keeper and MinIO containers and volume removed after each run.",
+  "cases": {
+    "changed": {
+      "command": "uv run /Users/ewhauser/.codex/artifacts/celld/0.5.1-ewhauser.2/lease-address-recovery/repro.py changed",
+      "observed": {
+        "event": "result",
+        "at": 1789945764.592743,
+        "mode": "changed",
+        "acknowledged": 10,
+        "preserved": {
+          "a": 0,
+          "b": 0
+        },
+        "loss_records": [
+          "log/a/52423cec250311c3841f4109c1bbb25b023f7b6cc1c6b882dd6dd6190cacea5a.e1.loss.json",
+          "log/b/68e896d177d1e00850c191b5b2abc9b626adb23e32be9bcb353b25deefbc0dc8.e1.loss.json"
+        ]
+      },
+      "endpoints": [
+        {
+          "at": 1789945712.487318,
+          "node": "a",
+          "internal": 63177,
+          "old_internal": null
+        },
+        {
+          "at": 1789945712.489384,
+          "node": "b",
+          "internal": 63179,
+          "old_internal": null
+        },
+        {
+          "at": 1789945761.1547148,
+          "node": "a",
+          "internal": 63362,
+          "old_internal": 63177
+        },
+        {
+          "at": 1789945761.1594071,
+          "node": "b",
+          "internal": 63364,
+          "old_internal": 63179
+        }
+      ],
+      "lease_fence_exit_codes": {
+        "a": 3,
+        "b": 3
+      },
+      "peer_only_acknowledgements": [
+        "peer-only-a",
+        "peer-only-b"
+      ],
+      "result_path": "changed/results.json",
+      "events_path": "changed/events.json",
+      "full_log_path": "changed.log",
+      "loss_records": {
+        "log/a/52423cec250311c3841f4109c1bbb25b023f7b6cc1c6b882dd6dd6190cacea5a.e1.loss.json": {
+          "declared_at_ms": 1789945762221,
+          "declared_by": "a",
+          "ensemble": [
+            "b"
+          ],
+          "epoch": 1,
+          "leader": "a/52423cec250311c3841f4109c1bbb25b023f7b6cc1c6b882dd6dd6190cacea5a",
+          "note": "no complete true witness survived; acked writes within the final flush window may be unrecovered"
+        },
+        "log/b/68e896d177d1e00850c191b5b2abc9b626adb23e32be9bcb353b25deefbc0dc8.e1.loss.json": {
+          "declared_at_ms": 1789945762220,
+          "declared_by": "b",
+          "ensemble": [
+            "a"
+          ],
+          "epoch": 1,
+          "leader": "b/68e896d177d1e00850c191b5b2abc9b626adb23e32be9bcb353b25deefbc0dc8",
+          "note": "no complete true witness survived; acked writes within the final flush window may be unrecovered"
+        }
+      }
+    },
+    "stable": {
+      "command": "uv run /Users/ewhauser/.codex/artifacts/celld/0.5.1-ewhauser.2/lease-address-recovery/repro.py stable",
+      "observed": {
+        "event": "result",
+        "at": 1789945733.3436532,
+        "mode": "stable",
+        "acknowledged": 10,
+        "preserved": {
+          "a": 10,
+          "b": 10
+        },
+        "loss_records": []
+      },
+      "endpoints": [
+        {
+          "at": 1789945681.418564,
+          "node": "a",
+          "internal": 63113,
+          "old_internal": null
+        },
+        {
+          "at": 1789945681.42081,
+          "node": "b",
+          "internal": 63115,
+          "old_internal": null
+        },
+        {
+          "at": 1789945729.893543,
+          "node": "a",
+          "internal": 63113,
+          "old_internal": 63113
+        },
+        {
+          "at": 1789945729.8988001,
+          "node": "b",
+          "internal": 63115,
+          "old_internal": 63115
+        }
+      ],
+      "lease_fence_exit_codes": {
+        "a": 3,
+        "b": 3
+      },
+      "peer_only_acknowledgements": [
+        "peer-only-a",
+        "peer-only-b"
+      ],
+      "result_path": "stable/results.json",
+      "events_path": "stable/events.json",
+      "full_log_path": "stable.log",
+      "loss_records": {}
+    }
+  },
+  "conclusion": "Changed advertised endpoint loses 10/10 writes and writes 2 permanent loss markers. Stable hostname endpoint recovers 10/10 through each node with 0 loss markers. No celld source change required for the simultaneous stable-address case.",
+  "limitations": [
+    "Native stable case keeps localhost:port unchanged; Kind must separately qualify StatefulSet DNS rebinding across changed Pod IPs.",
+    "Stable DNS does not establish arbitrary delayed full-fleet restart safety. With old member lease expiry plus max(3*TTL,20s) elapsed, a failed seal request is conclusive; no complete witness permits permanent loss declaration. The 10-second HTTP timeout is a maximum, not a minimum wait.",
+    "Recovery gathers reachable follower disks and bucket bundles; the retained local writer image is not an independent predecessor recovery witness.",
+    "Public docs require retaining node names, peer addresses, data directories but do not clearly disclose bounded-loss exception; no claim of slow-attach, arbitrary-lag or cross-host recovery safety."
+  ],
+  "excluded_attempts": {
+    "stable-minio507": "Unrelated MinIO507 from Docker VM disk pressure; interrupted, not qualification.",
+    "changed-overlay": "Initial successful reproduction on container disk:0/10writes and2lossrecords; finalcomparisonusesmatchedtmpfssetup."
+  },
+  "local_evidence_directory": "/Users/ewhauser/.codex/artifacts/celld/0.5.1-ewhauser.2/lease-address-recovery"
+}
