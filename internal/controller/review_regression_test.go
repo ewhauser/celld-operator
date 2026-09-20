@@ -97,6 +97,9 @@ func TestSlowFleetDoesNotBlockOtherFleet(t *testing.T) {
 		}
 		return ctrl.Result{}, nil
 	})
+	// Controller names are process-global, so a fixed name fails on the second
+	// -count iteration; let the runtime skip the uniqueness check.
+	options.SkipNameValidation = new(true)
 	c, err := crcontroller.NewUnmanaged("review-fairness", options)
 	if err != nil {
 		t.Fatal(err)
