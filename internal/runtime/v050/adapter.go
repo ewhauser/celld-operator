@@ -11,6 +11,7 @@ import (
 	"io"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -23,7 +24,15 @@ const (
 )
 
 // Adapter must be selected using a verified image identity, never a mutable tag.
-type Adapter struct{}
+// It also carries the ETag-gated record cache (records.go), so a caller that
+// keeps one Adapter per fleet across reconciles re-reads only the node records
+// whose listed ETag changed. The zero Adapter is a valid, empty cache.
+type Adapter struct {
+	// mu guards records: the manager reconciles up to four fleets concurrently,
+	// and a caller may hand the same Adapter to any of them.
+	mu      sync.Mutex
+	records map[string]cachedRecord
+}
 
 func New(image string) (*Adapter, error) {
 	if image != Image && image != ARM64 && image != AMD64 {
@@ -245,8 +254,24 @@ type Reader interface {
 	Get(context.Context, string) ([]byte, error)
 	List(ctx context.Context, prefix, continuation string) (Page, error)
 }
+
+// ETagReader is an optional Reader extension: GetETag returns a body together
+// with the ETag the store reported for that exact body. A Reader that does not
+// implement it can never satisfy the reuse rules in readNodes, so every record
+// it serves is read on every pass, exactly as before this extension existed.
+type ETagReader interface {
+	Reader
+	GetETag(ctx context.Context, key string) ([]byte, string, error)
+}
 type Page struct {
-	Keys     []string
+	Keys []string
+	// ETags and Sizes are optional listing metadata, each either empty or exactly
+	// parallel to Keys: ETags[i] and Sizes[i] describe Keys[i]. An empty ETag, or
+	// a listing that reports none at all, means "content unknown" and forces a
+	// body read; a zero Size means "size not reported". A Reader that reports
+	// neither keeps the pre-ETag behavior of re-reading every record.
+	ETags    []string
+	Sizes    []int64
 	Next     string
 	Complete bool // explicitly confirmed final page; zero-value pages fail closed
 }
@@ -358,11 +383,20 @@ func (a *Adapter) assess(ctx context.Context, r Reader, req Request, now func() 
 	result.OperationID = req.OperationID
 	return result, nil
 }
-func list(ctx context.Context, r Reader, prefix string, budget *int) ([]string, error) {
+func list(ctx context.Context, r Reader, prefix string, budget *int) ([]listed, error) {
 	return listEach(ctx, r, prefix, budget, nil)
 }
-func listEach(ctx context.Context, r Reader, prefix string, budget *int, visit func(string) error) ([]string, error) {
-	var keys []string
+
+// listed is one object exactly as the fresh listing named it. The ETag and Size
+// are whatever that listing reported and are never carried over from an earlier
+// pass; an unreported ETag is the empty string, which no cached record matches.
+type listed struct {
+	key, etag string
+	size      int64
+}
+
+func listEach(ctx context.Context, r Reader, prefix string, budget *int, visit func(string) error) ([]listed, error) {
+	var entries []listed
 	seenTokens, seenKeys := map[string]bool{}, map[string]bool{}
 	token := ""
 	for {
@@ -380,7 +414,13 @@ func listEach(ctx context.Context, r Reader, prefix string, budget *int, visit f
 		if len(page.Keys) > 1000 || len(seenKeys)+len(page.Keys) > 100000 {
 			return nil, errors.New("listing key budget exceeded")
 		}
-		for _, key := range page.Keys {
+		// Metadata is positional, so a page that reports some of it must report
+		// exactly as much of it as it has keys. A short or long vector could
+		// otherwise attach one object's ETag to another object's key.
+		if (len(page.ETags) != 0 && len(page.ETags) != len(page.Keys)) || (len(page.Sizes) != 0 && len(page.Sizes) != len(page.Keys)) {
+			return nil, errors.New("listing metadata does not match its keys")
+		}
+		for i, key := range page.Keys {
 			if !strings.HasPrefix(key, prefix) || seenKeys[key] {
 				return nil, errors.New("invalid or duplicate listing key")
 			}
@@ -389,15 +429,25 @@ func listEach(ctx context.Context, r Reader, prefix string, budget *int, visit f
 				if err := visit(key); err != nil {
 					return nil, err
 				}
-			} else {
-				keys = append(keys, key)
+				continue
 			}
+			entry := listed{key: key}
+			if len(page.ETags) != 0 {
+				entry.etag = page.ETags[i]
+			}
+			if len(page.Sizes) != 0 {
+				if page.Sizes[i] < 0 {
+					return nil, errors.New("invalid listing size")
+				}
+				entry.size = page.Sizes[i]
+			}
+			entries = append(entries, entry)
 		}
 		if page.Complete {
 			if page.Next != "" {
 				return nil, errors.New("ambiguous final page")
 			}
-			return keys, nil
+			return entries, nil
 		}
 		if page.Next == "" {
 			return nil, errors.New("incomplete listing")
@@ -410,32 +460,85 @@ func listEach(ctx context.Context, r Reader, prefix string, budget *int, visit f
 	}
 }
 
-// readNodes lists nodes/ and parses every record it names. The listing spends
-// the caller's shared page budget. When want is non-negative the listing size is
-// compared against it and mismatch is returned before any body is read, so an
-// inventory that changed under us costs no object reads; pass -1 and a nil
-// mismatch to accept whatever the fleet currently publishes.
+// readNodes lists nodes/ and produces a record for every key it names. The
+// listing spends the caller's shared page budget. When want is non-negative the
+// listing size is compared against it and mismatch is returned before any body
+// is read, so an inventory that changed under us costs no object reads; pass -1
+// and a nil mismatch to accept whatever the fleet currently publishes.
 //
-// On failure the records parsed before the error are still returned: they are
+// The pinned runtime retains folded records as sealed tombstones rather than
+// deleting them, so this listing names every invocation the fleet has ever had.
+// A body is therefore read only when the listing cannot prove its content is
+// unchanged since this process last parsed it. The rules are:
+//
+//   - The listing is always fresh from the primary bucket. A cached listing is
+//     never used, and a listing that is incomplete, over budget, or internally
+//     inconsistent fails before any record is reused, so reuse can never let a
+//     partial listing pass as complete. Pages cost the page budget they always
+//     did, whether or not their records are then re-read.
+//   - A record is reused only on exact equality of the listed ETag with the ETag
+//     of the body this process last parsed for that key, and on the listed size
+//     matching the size recorded with it. A key the listing gives no ETag for is
+//     always re-read.
+//   - A Get whose returned ETag differs from the listed ETag means the object
+//     changed between the list and the read: the pass fails closed and the next
+//     reconcile starts from a fresh listing. A body whose length disagrees with
+//     the size listed against a matching ETag fails the same way.
+//   - Nothing is remembered unless the Get itself confirmed the listed ETag, so
+//     a Reader that cannot report an ETag re-reads every record forever.
+//   - Parse failures are never remembered; the next pass reads that body again.
+//   - Keys the fresh listing no longer names are evicted, so a record that
+//     disappears and later reappears is read again rather than resurrected.
+//
+// SSE-KMS objects carry a non-MD5 ETag, so an ETag is not a content digest
+// there. It remains a version token that S3 changes on every rewrite of the
+// object, which is the only property equality is relied on for here.
+//
+// Loss detection is unaffected: scanLog works on key names from its own fresh
+// log/ listing and reads no bodies at all.
+//
+// On failure the records produced before the error are still returned: they are
 // negative observations that Inventory callers retain. They are NEVER positive
 // evidence, so every caller that assesses completion discards them.
 func (a *Adapter) readNodes(ctx context.Context, r Reader, budget *int, want int, mismatch error) ([]Node, error) {
 	var nodes []Node
-	keys, err := list(ctx, r, "nodes/", budget)
+	entries, err := list(ctx, r, "nodes/", budget)
 	if err != nil {
 		return nodes, err
 	}
-	if want >= 0 && len(keys) != want {
+	if want >= 0 && len(entries) != want {
 		return nodes, mismatch
 	}
-	for _, key := range keys {
-		data, err := r.Get(ctx, key)
+	a.retain(entries)
+	verifier, _ := r.(ETagReader)
+	for _, entry := range entries {
+		if n, ok := a.reuse(entry); ok {
+			nodes = append(nodes, n)
+			continue
+		}
+		var data []byte
+		var etag string
+		if verifier != nil {
+			data, etag, err = verifier.GetETag(ctx, entry.key)
+		} else {
+			data, err = r.Get(ctx, entry.key)
+		}
 		if err != nil {
 			return nodes, err
 		}
-		n, err := a.ParseNode(key, data)
+		confirmed := entry.etag != "" && etag == entry.etag
+		if entry.etag != "" && etag != "" && !confirmed {
+			return nodes, errors.New("record changed between the listing and the read")
+		}
+		if confirmed && entry.size != 0 && entry.size != int64(len(data)) {
+			return nodes, errors.New("listed size disagrees with the record body")
+		}
+		n, err := a.ParseNode(entry.key, data)
 		if err != nil {
 			return nodes, err
+		}
+		if confirmed {
+			a.remember(entry, n)
 		}
 		nodes = append(nodes, n)
 	}
