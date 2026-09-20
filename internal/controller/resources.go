@@ -218,7 +218,9 @@ func workload(f *fleet.CelldFleet, opts Options) client.Object {
 		}
 	}
 	if orderedBucket(f) {
-		return &appsv1.StatefulSet{ObjectMeta: metadata(f, f.Name), Spec: appsv1.StatefulSetSpec{Replicas: new(f.Spec.Replicas), Selector: selector(f), ServiceName: f.Name + "-peers", PodManagementPolicy: appsv1.OrderedReadyPodManagement, PersistentVolumeClaimRetentionPolicy: &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{WhenDeleted: appsv1.RetainPersistentVolumeClaimRetentionPolicyType, WhenScaled: appsv1.RetainPersistentVolumeClaimRetentionPolicyType}, Template: template, UpdateStrategy: appsv1.StatefulSetUpdateStrategy{Type: appsv1.OnDeleteStatefulSetStrategyType}}}
+		// Ordinal identity determines contraction targets. Parallel management
+		// lets coordinated maintenance remove every already-stopped, unready pod.
+		return &appsv1.StatefulSet{ObjectMeta: metadata(f, f.Name), Spec: appsv1.StatefulSetSpec{Replicas: new(f.Spec.Replicas), Selector: selector(f), ServiceName: f.Name + "-peers", PodManagementPolicy: appsv1.ParallelPodManagement, PersistentVolumeClaimRetentionPolicy: &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{WhenDeleted: appsv1.RetainPersistentVolumeClaimRetentionPolicyType, WhenScaled: appsv1.RetainPersistentVolumeClaimRetentionPolicyType}, Template: template, UpdateStrategy: appsv1.StatefulSetUpdateStrategy{Type: appsv1.OnDeleteStatefulSetStrategyType}}}
 	}
 	return &appsv1.StatefulSet{
 		ObjectMeta: metadata(f, f.Name),

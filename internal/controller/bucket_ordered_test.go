@@ -15,7 +15,9 @@ func TestOrderedBucketZoneGateAndDeterministicVictim(t *testing.T) {
 	f := fixture("ordered", "ordered-data", "Bucket")
 	f.Spec.BucketWorkload = "Ordered"
 	w := workload(f, Options{}).(*appsv1.StatefulSet)
-	if len(w.Spec.VolumeClaimTemplates) != 0 || w.Spec.PodManagementPolicy != appsv1.OrderedReadyPodManagement || len(w.Spec.Template.Spec.TopologySpreadConstraints) != 0 {
+	// Maintenance stops every child before scaling to zero. OrderedReady would
+	// wait for a lower unready ordinal and never delete the higher stopped pod.
+	if len(w.Spec.VolumeClaimTemplates) != 0 || w.Spec.PodManagementPolicy != appsv1.ParallelPodManagement || len(w.Spec.Template.Spec.TopologySpreadConstraints) != 0 {
 		t.Fatal("ordered Bucket must use ephemeral disk and ordinal placement")
 	}
 	objects := []client.Object{}
