@@ -151,7 +151,7 @@ func TestReplacedLockFileNeverCertifies(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := awaitPhase(t, c.Address, c.Key, "Blocked")
-	if !strings.Contains(st.Error, "replaced") || st.RestartDenied {
+	if !strings.Contains(st.Error, "replaced") || st.InheritedLockReleased || st.RemovalReady() {
 		t.Fatalf("expected replaced-lock block without a certificate: %+v", st)
 	}
 }

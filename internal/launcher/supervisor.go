@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -51,7 +50,7 @@ const defaultGrace = 30 * time.Second
 
 // graceMargin reserves the tail of the pod's grace period for the work that
 // follows the lock proof: reacquiring the lock, reading back its token and
-// linking the retired-pod marker. It matches the operator's
+// linking the retired-disk marker. It matches the operator's
 // terminationGraceHeadroom.
 const graceMargin = 5 * time.Second
 
@@ -254,15 +253,22 @@ func Run(ctx context.Context, c Config) error {
 	if err != nil {
 		return err
 	}
-	// Retirement is a one-way deny rule for this Kubernetes pod identity.
-	// A stale kubelet may restart a container after an observed stop. It must
-	// never resurrect that pod's writer, even after later reuse of this disk.
-	retiredPath := retiredPodPath(c.Root, c.PodUID)
+	// Retirement is a one-way deny rule for the disk. Neither a stale kubelet
+	// nor a replacement Pod UID may reopen it after proof has been captured.
+	// Growth always receives a fresh disk; no marker history is needed.
+	retiredPath := retiredDiskPath(c.Root)
 	if _, err := os.Stat(retiredPath); !errors.Is(err, os.ErrNotExist) {
 		if err != nil {
 			return err
 		}
-		s.phase("Blocked", errors.New("pod identity was durably retired"))
+		// A permanent deny marker excludes all successors independently of
+		// flock. Release promptly so the retiring supervisor can finish its
+		// independent inherited-descriptor proof if we won that acquisition.
+		if err := lock.Close(); err != nil {
+			return err
+		}
+		lock = nil
+		s.phase("Blocked", errors.New("disk was durably retired"))
 		<-ctx.Done()
 		return ctx.Err()
 	}
@@ -421,6 +427,17 @@ func Run(ctx context.Context, c Config) error {
 	s.mu.Lock()
 	s.state.ChildExited = true
 	s.mu.Unlock()
+	// Persist negative authority before releasing our descriptor: another
+	// launcher must never open the disk in the gap before independent lock
+	// reacquisition. This marker cannot reconstruct positive stop authority.
+	if err := persistHost(c.Root, retiredPath, []byte(c.PodUID)); err != nil {
+		s.phase("Blocked", fmt.Errorf("cannot durably deny retired disk restart: %w", err))
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	s.mu.Lock()
+	s.state.RestartDenied = true
+	s.mu.Unlock()
 	// Do not use LOCK_UN: that unlocks the shared open-file description while
 	// descendants may still possess it. Closing only our FD preserves their
 	// ownership. Successful independent reacquisition proves all inherited
@@ -468,17 +485,6 @@ func Run(ctx context.Context, c Config) error {
 	}
 	s.mu.Lock()
 	s.state.InheritedLockReleased = true
-	s.mu.Unlock()
-	// Persist only negative authority before publishing the live receipt. This
-	// file cannot certify termination to another process or reconstruct Stopped.
-	// A failure here leaves the supervisor blocked, with no positive receipt.
-	if err := persistHost(c.Root, retiredPath, []byte(c.PodUID)); err != nil {
-		s.phase("Blocked", fmt.Errorf("cannot durably deny retired pod restart: %w", err))
-		<-ctx.Done()
-		return ctx.Err()
-	}
-	s.mu.Lock()
-	s.state.RestartDenied = true
 	switch {
 	case s.state.RuntimeDataSafe():
 		s.state.Phase = "Stopped"
@@ -530,9 +536,8 @@ func persistHost(root, path string, body []byte) error {
 	return directory.Sync()
 }
 
-func retiredPodPath(root, podUID string) string {
-	hash := sha256.Sum256([]byte(podUID))
-	return filepath.Join(root, ".celld-launcher-retired-"+hex.EncodeToString(hash[:]))
+func retiredDiskPath(root string) string {
+	return filepath.Join(root, ".celld-launcher-retired")
 }
 
 // captureRemoval consumes only the typed strict API, independently of actor load.

@@ -178,9 +178,9 @@ func TestPausedOwnerPreventsReplacement(t *testing.T) {
 	awaitPhase(t, c.Address, c.Key, "Stopped")
 	awaitPhase(t, replacement.Address, c.Key, "WaitingForExclusiveVolume")
 	cancel()
-	next := awaitPhase(t, replacement.Address, c.Key, "Running")
-	if next.Generation == first.Generation {
-		t.Fatal("generation reused")
+	next := awaitPhase(t, replacement.Address, c.Key, "Blocked")
+	if next.PID != 0 || next.RemovalReady() {
+		t.Fatal("waiting replacement reopened the retired disk or reconstructed proof")
 	}
 }
 func TestProtocolRejectsForgedAndRetargetedStop(t *testing.T) {

@@ -5,8 +5,8 @@ replication, tiering and recovery safety. The launcher consumes the typed client
 in `internal/runtime/controlplane`; it neither reads S3 nor interprets load,
 leases, cell counts or replication metadata.
 
-This is item #3 of the lifecycle simplification. It requires celld's schema 1
-strict disk-removal contract. Stock v0.5.1 cannot satisfy it. A homogeneous fork
+It requires celld's schema 1 strict disk-removal contract. Stock v0.5.1 cannot
+satisfy it. A homogeneous fork
 release, including recovery readers that understand `bucket_complete`, and a
 verified image digest remain deployment prerequisites.
 
@@ -53,13 +53,17 @@ verified image digest remain deployment prerequisites.
    termination. The launcher never sends a conflicting ordinary `/shutdown`.
    If the child does not exit within its termination grace, SIGKILL ends it;
    neither signal nor exit code supplies data safety.
-6. After `Wait` confirms exact child exit, the launcher closes its inherited
-   descriptor without `LOCK_UN` and reacquires the same lock independently. It
+6. After `Wait` confirms exact child exit, the launcher durably creates/fsyncs
+   the disk's permanent restart-deny marker while still holding the inherited
+   descriptor. This blocks every Pod identity from reopening the disk, including
+   during the subsequent lock reacquisition. The marker is negative authority
+   only; it cannot reconstruct data safety or a successful stop.
+7. The launcher closes its inherited descriptor without `LOCK_UN` and
+   reacquires the same lock independently. It
    checks both file identity and the original random lock token. Surviving
    descendants keep the inherited lock and prevent completion or a second writer.
-7. While holding the reacquired lock, the launcher durably creates/fsyncs the
-   Pod UID's restart-deny marker. Only then does it publish `Stopped`. It keeps
-   the lock and serves the current result until the Pod is terminated.
+   Only then does it publish `Stopped`. It keeps the reacquired lock and serves
+   the current result until the Pod is terminated.
 
 The response carries `Removal` (operation, generation, mode, phase, blocker,
 control-only and validated data-safe flag), `ChildExited`,
@@ -93,7 +97,7 @@ and expired leases cannot substitute for these proofs.
 
 A launcher crash loses its in-memory result. If Kubernetes has not durably
 captured completion, removal remains blocked. The negative disk marker only
-refuses another launch of that Pod UID; it never reconstructs data safety,
+refuses every launch on that disk, including a replacement Pod UID; it never reconstructs data safety,
 termination or a positive receipt. Same-host successors must first acquire the
 inherited lock. A different host or boot is blocked before child startup because
 local flock cannot establish exclusion across kernels. Preserve-mode generation
@@ -102,17 +106,18 @@ overrides (`.clean-reload.json`) are refused.
 ## Operator integration
 
 [Bounded current operations](current-operation.md) now capture this result in
-Kubernetes before any compute or PVC removal. Completed operations discard
-runtime proof. Retained PV/EBS deletion and cross-host disk policy remain separate
-qualification work; neither negative restart markers nor the operator's
-DiskCleanupPending condition provide a positive historical deletion receipt.
+Kubernetes before any compute or PVC removal. The [disposable disk
+policy](disposable-disks.md) retains that proof through CSI deletion, then
+discards it at operation completion. Neither negative restart markers nor
+status conditions provide a positive historical deletion receipt. Cross-host
+reuse of an old disk remains blocked.
 
 ## Verification
 
 `make check` runs build, race tests and native/Linux lint. `make test-linux`
-executes the process/lock/crash tests in a Linux container. Its stock runtime
-image supplies the test environment and shell fixtures; it is not a compatible
-strict runtime qualification.
+executes the process/lock/crash tests in a Linux container. The image supplies
+the test environment and shell fixtures; this alone does not qualify the
+runtime's strict shutdown or recovery behavior.
 
 The opt-in test starts isolated MinIO, deploys a minimal worker, then runs a real
 strict celld child through the supervisor and HTTP client:
@@ -124,9 +129,8 @@ go test -race ./internal/launcher -run '^TestStrictRuntimeSupervisorHTTP$' -v -c
 ```
 
 The September 20 local macOS ARM64 run used binary SHA256
-`840fac6de89d3083db9945aa28e099bd9776cc9786ac7ca2b11fe9ec5bdcdd9a`, built from
-`celld-strict-shutdown` (verified via its dependency file and the runtime task's
-qualification artifact). It captured the control-only result, exact seeded
+`a295e40f971e9800164b33e1e8e6e13f5d96ead32a210481f348bba35223c785`, from the
+verified `0.5.1-ewhauser.1` fork release. It captured the control-only result, exact seeded
 generation, child exit, inherited-lock release and restart denial. This empty-disk
 handshake does not qualify replicated recovery, a published runtime image, or
 EKS/EBS removal. Those remain separate integration gates.
