@@ -67,14 +67,7 @@ func (r *Reconciler) executeMaintenance(ctx context.Context, f *fleet.CelldFleet
 			return r.recordLoss(ctx, f, w, res, j, err.Error())
 		}
 		if e, ok := errors.AsType[*v050.BucketExpiryInvalidatedError](err); ok {
-			for _, records := range [][]bucketSession{m.Sessions, j.BucketHistory} {
-				for i := range records {
-					if records[i].Node == e.Node && records[i].Generation == e.Generation {
-						records[i].ExpiryObserved = false
-						records[i].ExpiryInvalidated = true
-					}
-				}
-			}
+			invalidateBucketExpiry([][]bucketSession{m.Sessions, j.BucketHistory}, e)
 		}
 		m.SettledAt = time.Time{}
 		if saveErr := r.saveJournal(ctx, res, j); saveErr != nil {
@@ -316,7 +309,7 @@ func (r *Reconciler) executeBucketDeletion(ctx context.Context, f *fleet.CelldFl
 		}
 		members := make([]v050.BucketMember, 0, len(m.Sessions))
 		for _, s := range m.Sessions {
-			members = append(members, v050.BucketMember{Node: s.Node, Generation: s.Generation, SupersededBy: s.SupersededBy, Retired: true, Resolved: s.ExpiryObserved && !s.ExpiryInvalidated})
+			members = append(members, v050.BucketMember{Node: s.Node, Generation: s.Generation, SupersededBy: s.SupersededBy, Retired: true, Resolved: resolvedBucketSession(s)})
 		}
 		reader, err := r.Evidence.reader(ctx, f)
 		if err != nil {

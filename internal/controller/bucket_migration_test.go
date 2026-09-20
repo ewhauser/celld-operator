@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -461,5 +462,60 @@ func TestBucketMigrationUnknownWriterRemainsBlockedAfterMetadataDisappears(t *te
 	p.step(t)
 	if p.j.BucketMigration.CreationAuthorized {
 		t.Fatal("unknown historical writer forgotten after GC")
+	}
+}
+
+// One writer's contrary lease evidence is authority about that generation only.
+// Blanket invalidation would revoke the positive expiry proof of every other
+// writer, and a writer whose record the runtime has already GCed could then
+// never be resolved again: the migration would wedge on "unresolved bucket
+// writer record missing" with no later observation able to clear it.
+func TestBucketMigrationExpiryInvalidationIsScopedToTheNamedWriter(t *testing.T) {
+	p := migrationSetup(t)
+	p.advance(t, "Recovering")
+	for i := range p.pods.Items {
+		if err := p.r.Delete(t.Context(), &p.pods.Items[i]); err != nil && !apierrors.IsNotFound(err) {
+			t.Fatal(err)
+		}
+	}
+	p.reader.expired = map[string]bool{"pod-0": true, "pod-1": true, "pod-2": true}
+	p.step(t)
+	if p.j.BucketMigration.SettledAt.IsZero() || len(p.j.BucketHistory) != 3 {
+		t.Fatalf("no positive expiry for every writer: %+v", p.j.BucketHistory)
+	}
+	for _, s := range p.j.BucketHistory {
+		if !s.Retired || !s.ExpiryObserved || s.ExpiryInvalidated {
+			t.Fatalf("writer lacks positive expiry proof: %+v", s)
+		}
+	}
+	// Only pod-1's retired lease comes back.
+	p.reader.expired["pod-1"] = false
+	p.step(t)
+	if !p.j.BucketMigration.SettledAt.IsZero() {
+		t.Fatal("renewed lease retained the settling window")
+	}
+	for _, s := range p.j.BucketHistory {
+		if s.Node == "pod-1" {
+			if s.ExpiryObserved || !s.ExpiryInvalidated {
+				t.Fatalf("renewed writer kept its expiry authority: %+v", s)
+			}
+			continue
+		}
+		if !s.ExpiryObserved || s.ExpiryInvalidated {
+			t.Fatalf("unrelated writer %s lost its own expiry proof: %+v", s.Node, s)
+		}
+	}
+	// The runtime GCs pod-0's record. Its retained proof still resolves it, so
+	// the migration can complete once pod-1 is positively expired again.
+	p.reader.expired["pod-1"] = true
+	p.reader.nodes = slices.DeleteFunc(p.reader.nodes, func(node string) bool { return node == "pod-0" })
+	p.step(t)
+	if p.j.BucketMigration.SettledAt.IsZero() {
+		t.Fatalf("migration wedged after a resolved record disappeared: %+v", p.j.BucketHistory)
+	}
+	p.reader.now = p.reader.now.Add(11 * time.Second)
+	p.step(t)
+	if p.j.BucketMigration.Phase != "DeleteOld" {
+		t.Fatalf("migration did not complete recovery: %+v", p.j.BucketMigration)
 	}
 }

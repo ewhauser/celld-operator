@@ -335,7 +335,7 @@ func (r *Reconciler) migrationRetirementEvidence(ctx context.Context, f *fleet.C
 	}
 	members := make([]v050.BucketMember, 0, len(j.BucketHistory))
 	for _, s := range j.BucketHistory {
-		members = append(members, v050.BucketMember{Node: s.Node, Generation: s.Generation, SupersededBy: s.SupersededBy, Retired: true, Resolved: s.ExpiryObserved && !s.ExpiryInvalidated})
+		members = append(members, v050.BucketMember{Node: s.Node, Generation: s.Generation, SupersededBy: s.SupersededBy, Retired: true, Resolved: resolvedBucketSession(s)})
 	}
 	reader, err := r.Evidence.reader(ctx, f)
 	if err != nil {
@@ -350,11 +350,8 @@ func (r *Reconciler) migrationRetirementEvidence(ctx context.Context, f *fleet.C
 
 func (r *Reconciler) migrationFailure(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, j *lifecycleJournal, w client.Object, cause error) (ctrl.Result, bool, error) {
 	j.BucketMigration.SettledAt = time.Time{}
-	if _, ok := errors.AsType[*v050.BucketExpiryInvalidatedError](cause); ok {
-		for i := range j.BucketHistory {
-			j.BucketHistory[i].ExpiryObserved = false
-			j.BucketHistory[i].ExpiryInvalidated = true
-		}
+	if invalidated, ok := errors.AsType[*v050.BucketExpiryInvalidatedError](cause); ok {
+		invalidateBucketExpiry([][]bucketSession{j.BucketHistory}, invalidated)
 	}
 	_, loss := errors.AsType[*v050.LossError](cause)
 	if loss && j.Loss == "" {

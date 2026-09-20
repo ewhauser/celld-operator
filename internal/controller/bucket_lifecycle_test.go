@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -408,5 +409,66 @@ func TestBucketStrictPlacementChecksEveryVictim(t *testing.T) {
 func TestOrderedBucketContractionCrashReplay(t *testing.T) {
 	for _, contrary := range []string{"renewal", "replacement", "wrong-victim"} {
 		t.Run(contrary, func(t *testing.T) { testBucketManualContractionCrashReplay(t, contrary, true) })
+	}
+}
+
+// Retirement is membership state, not expiry proof. A journal entry written
+// before ExpiryObserved existed is Retired without it, and readJournal does not
+// backfill it, so both flags must be consulted: only positive expiry authority
+// may let the adapter tolerate a garbage-collected writer record.
+func TestBucketRetiredHistoryWithoutPositiveExpiryIsNotResolved(t *testing.T) {
+	for _, observed := range []bool{false, true} {
+		name := "without-expiry-proof"
+		if observed {
+			name = "with-expiry-proof"
+		}
+		t.Run(name, func(t *testing.T) {
+			p, f, j, opts, reader := bucketPreflightSetup(t)
+			j.Operation = nil
+			j.Applied = 3
+			r := &Reconciler{Client: p.client, Evidence: p, Options: opts, now: p.now}
+			if _, err := r.admitBucketHistory(t.Context(), f, j); err != nil {
+				t.Fatal(err)
+			}
+			pod := &corev1.Pod{}
+			if err := r.Get(t.Context(), client.ObjectKey{Namespace: f.Namespace, Name: "pod-1"}, pod); err != nil {
+				t.Fatal(err)
+			}
+			if err := r.Delete(t.Context(), pod); err != nil {
+				t.Fatal(err)
+			}
+			j.Applied = 2
+			j.Inventory.Sessions[1].Current = false
+			reader.expired = map[string]bool{"pod-1": true}
+			if _, err := r.admitBucketHistory(t.Context(), f, j); err != nil {
+				t.Fatal(err)
+			}
+			retired := false
+			for i := range j.BucketHistory {
+				if j.BucketHistory[i].Node != "pod-1" {
+					continue
+				}
+				if !j.BucketHistory[i].Retired || !j.BucketHistory[i].ExpiryObserved {
+					t.Fatalf("writer was not retired with positive expiry: %+v", j.BucketHistory[i])
+				}
+				j.BucketHistory[i].ExpiryObserved = observed
+				retired = true
+			}
+			if !retired {
+				t.Fatal("no retired writer in history")
+			}
+			// The runtime garbage-collects the retired writer's record.
+			reader.nodes = slices.DeleteFunc(reader.nodes, func(node string) bool { return node == "pod-1" })
+			_, err := r.admitBucketHistory(t.Context(), f, j)
+			if observed {
+				if err != nil {
+					t.Fatalf("positive expiry proof did not resolve the missing record: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), "unresolved bucket writer record missing") {
+				t.Fatalf("retirement alone resolved a missing writer record: %v", err)
+			}
+		})
 	}
 }
