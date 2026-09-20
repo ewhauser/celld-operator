@@ -515,7 +515,7 @@ func validateMaintenanceJournal(j *lifecycleJournal) error {
 	if m == nil {
 		return nil
 	}
-	if j.Operation != nil || m.ID == "" || (m.Kind != "Restart" && m.Kind != "Delete" && m.Kind != "Contract" && m.Kind != "Upgrade") || m.Index < 0 || m.Index > len(m.Targets) {
+	if invalidMaintenanceAuthority(j) {
 		return errors.New("invalid maintenance journal")
 	}
 	switch m.Phase {

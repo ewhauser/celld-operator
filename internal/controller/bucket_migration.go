@@ -79,8 +79,7 @@ func (r *Reconciler) migrateBucket(ctx context.Context, f *fleet.CelldFleet, res
 	old.Spec.BucketWorkload = "Deployment"
 	old.Spec.Replicas = j.Applied
 	old.Spec.RuntimeImage = j.RuntimeImage
-	want := fleet.ReservationSpec{Bucket: f.Spec.Storage.Bucket, FleetNamespace: f.Namespace, FleetName: f.Name, FleetUID: string(f.UID)}
-	if len(res.OwnerReferences) != 0 || !res.DeletionTimestamp.IsZero() || !r.reservationMatches(ctx, old, res, want) || j.RuntimeImage != Image || ((m == nil || m.Phase == "Capture") && f.Spec.RuntimeImage != "" && f.Spec.RuntimeImage != j.RuntimeImage) || f.Spec.Profile != "Bucket" || f.Spec.BucketWorkload != "Ordered" || j.Loss != "" {
+	if !r.migrationAuthorityIntact(ctx, f, old, res, j, m) {
 		return block(errors.New("migration requires the unchanged v0.5.0 Bucket reservation and loss-free history"))
 	}
 	save := func() (ctrl.Result, bool, error) {
@@ -141,6 +140,27 @@ func (r *Reconciler) migrateBucket(ctx context.Context, f *fleet.CelldFleet, res
 	return block(errors.New("unknown migration phase"))
 }
 
+// migrationAuthorityIntact reports whether the retained reservation and journal
+// are still exactly the unowned, loss-free v0.5.0 Bucket authority a migration
+// may run against, and that the fleet still requests the Ordered layout. The
+// checks keep their original order: the reservation is only re-read once the
+// cheap identity checks have passed.
+func (r *Reconciler) migrationAuthorityIntact(ctx context.Context, f, old *fleet.CelldFleet, res *fleet.CelldStorageReservation, j *lifecycleJournal, m *bucketMigration) bool {
+	if len(res.OwnerReferences) != 0 || !res.DeletionTimestamp.IsZero() {
+		return false
+	}
+	want := fleet.ReservationSpec{Bucket: f.Spec.Storage.Bucket, FleetNamespace: f.Namespace, FleetName: f.Name, FleetUID: string(f.UID)}
+	if !r.reservationMatches(ctx, old, res, want) || j.RuntimeImage != Image {
+		return false
+	}
+	// Before capture, a runtime image the request changed underneath the
+	// migration withdraws it; afterwards the captured image stands.
+	if (m == nil || m.Phase == "Capture") && f.Spec.RuntimeImage != "" && f.Spec.RuntimeImage != j.RuntimeImage {
+		return false
+	}
+	return f.Spec.Profile == "Bucket" && f.Spec.BucketWorkload == "Ordered" && j.Loss == ""
+}
+
 // migrationPass is one reconcile pass over an admitted Bucket migration. old is
 // the source layout the reservation was admitted against, w the source
 // Deployment the pass revalidated, and save/block the two closures a phase ends
@@ -156,11 +176,38 @@ type migrationPass struct {
 	block func(error) (ctrl.Result, bool, error)
 }
 
+// migrationRequestChanged compares the freshly read fleet against the one this
+// pass was admitted against, immediately before the workload CAS. A deleting
+// fleet no longer needs to carry the request: deletion retires the source
+// through the same migration authority.
+func migrationRequestChanged(f, latest *fleet.CelldFleet, m *bucketMigration) bool {
+	if latest.UID != f.UID || latest.Generation != f.Generation || latest.Spec.BucketWorkload != "Ordered" {
+		return true
+	}
+	if !latest.DeletionTimestamp.IsZero() {
+		return false
+	}
+	return paused(latest) || latest.Spec.Maintenance == nil || !latest.Spec.Maintenance.AllowCoordinatedDowntime || latest.Spec.Maintenance.OrderedMigrationToken != m.Token
+}
+
+// migrationAdmissible reports whether the fleet still asks for this migration
+// as an explicit coordinated-downtime action, with no concurrent lifecycle
+// work of any kind and no runtime image other than the operator's own.
+func migrationAdmissible(f *fleet.CelldFleet, j *lifecycleJournal) bool {
+	if paused(f) || !f.DeletionTimestamp.IsZero() || !f.Spec.Maintenance.AllowCoordinatedDowntime {
+		return false
+	}
+	if j.Operation != nil || j.Maintenance != nil || j.Request != nil || len(j.Claims) != 0 {
+		return false
+	}
+	return f.Spec.RuntimeImage == "" || f.Spec.RuntimeImage == Image
+}
+
 // beginBucketMigration admits the migration itself. Nothing has moved yet: the
 // request must still be an explicit coordinated-downtime request with no
 // concurrent lifecycle work, and no target may already exist to adopt.
 func (r *Reconciler) beginBucketMigration(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal, save func() (ctrl.Result, bool, error), block func(error) (ctrl.Result, bool, error)) (ctrl.Result, bool, error) {
-	if paused(f) || !f.DeletionTimestamp.IsZero() || !f.Spec.Maintenance.AllowCoordinatedDowntime || j.Operation != nil || j.Maintenance != nil || j.Request != nil || len(j.Claims) != 0 || (f.Spec.RuntimeImage != "" && f.Spec.RuntimeImage != Image) {
+	if !migrationAdmissible(f, j) {
 		return block(errors.New("migration requires explicit coordinated downtime and no concurrent lifecycle request"))
 	}
 	target := &appsv1.StatefulSet{}
@@ -213,7 +260,7 @@ func (r *Reconciler) migrateBucketCapture(ctx context.Context, p *migrationPass)
 	if err := r.Get(ctx, client.ObjectKeyFromObject(f), latest); err != nil {
 		return ctrl.Result{}, true, err
 	}
-	if latest.UID != f.UID || latest.Generation != f.Generation || latest.Spec.BucketWorkload != "Ordered" || (latest.DeletionTimestamp.IsZero() && (paused(latest) || latest.Spec.Maintenance == nil || !latest.Spec.Maintenance.AllowCoordinatedDowntime || latest.Spec.Maintenance.OrderedMigrationToken != m.Token)) {
+	if migrationRequestChanged(f, latest, m) {
 		return block(errors.New("migration request changed before admission"))
 	}
 	inventory, loss := r.Evidence.Observe(ctx, old, j.Inventory)
