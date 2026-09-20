@@ -11,8 +11,12 @@ rules:
     resources: [serviceaccounts]
     verbs: [get]
   - apiGroups: ['']
-    resources: [services, persistentvolumeclaims]
+    resources: [services]
     verbs: [get, create]
+  # list covers the single retained-claim inventory the lifecycle reads per reconcile.
+  - apiGroups: ['']
+    resources: [persistentvolumeclaims]
+    verbs: [get, list, create]
   - apiGroups: ['']
     resources: [pods]
     verbs: [get, list, update, delete]

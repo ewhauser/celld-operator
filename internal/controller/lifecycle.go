@@ -15,6 +15,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/util/retry"
@@ -383,13 +384,46 @@ func (s *lifecycleRun) copyWorkloadLossFence(ctx context.Context) *lifecycleOutc
 	return nil
 }
 
+// retainedClaimLimit bounds the single retained-claim page. spec.replicas is
+// capped at 100 by API validation, so a fleet can never own more claims than
+// that; a full page means the inventory was truncated and cannot be trusted.
+const retainedClaimLimit = 101
+
+// retainedClaims reads this fleet's claims in one request instead of one Get per
+// journaled claim. Every name the journal can hold was created by initialClaims,
+// whose metadata() stamps labels(f), and the StatefulSet volumeClaimTemplate
+// carries the same labels, so the selector can never hide a journaled claim.
+func (s *lifecycleRun) retainedClaims(ctx context.Context) (map[string]*corev1.PersistentVolumeClaim, error) {
+	list := &corev1.PersistentVolumeClaimList{}
+	if err := s.r.List(ctx, list, client.InNamespace(s.f.Namespace), client.MatchingLabels(labels(s.f)), client.Limit(retainedClaimLimit)); err != nil {
+		return nil, err
+	}
+	if list.Continue != "" || len(list.Items) >= retainedClaimLimit {
+		return nil, errors.New("incomplete retained claim inventory")
+	}
+	by := make(map[string]*corev1.PersistentVolumeClaim, len(list.Items))
+	for i := range list.Items {
+		by[list.Items[i].Name] = &list.Items[i]
+	}
+	return by, nil
+}
+
 // verifyRetainedClaims establishes that every journaled PVC still has its exact
 // recorded identity, ownership and deletion state before any lifecycle action.
 func (s *lifecycleRun) verifyRetainedClaims(ctx context.Context) *lifecycleOutcome {
+	if len(s.j.Claims) == 0 {
+		return nil
+	}
+	live, err := s.retainedClaims(ctx)
+	if err != nil {
+		return s.block(ctx, "StorageIdentityConflict", err.Error())
+	}
 	for name, uid := range s.j.Claims {
-		got := &corev1.PersistentVolumeClaim{}
-		if err := s.r.Get(ctx, types.NamespacedName{Namespace: s.f.Namespace, Name: name}, got); err != nil {
-			return s.block(ctx, "StorageIdentityConflict", err.Error())
+		got, listed := live[name]
+		// A journaled claim absent from this fleet's own claims is exactly what a
+		// per-claim Get reported as NotFound: gone, or no longer labeled ours.
+		if !listed {
+			return s.block(ctx, "StorageIdentityConflict", apierrors.NewNotFound(corev1.Resource("persistentvolumeclaims"), name).Error())
 		}
 		if got.UID != uid || !got.DeletionTimestamp.IsZero() || len(got.OwnerReferences) != 0 || got.Labels[FleetLabel] != string(s.f.UID) || got.Annotations["celld.eric.dev/storage-reservation"] != s.res.Name {
 			return s.block(ctx, "StorageIdentityConflict", "Retained PVC identity, ownership or deletion state changed: "+name)
