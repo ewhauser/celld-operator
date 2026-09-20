@@ -63,11 +63,34 @@ func invalidateBucketExpiry(records [][]bucketSession, e *v050.BucketExpiryInval
 	return changed
 }
 
+// bucketAssessmentScope selects how much of the survivor capacity evidence an
+// assessment demands on top of the membership, lease and loss checks that every
+// scope performs.
+type bucketAssessmentScope uint8
+
+const (
+	// bucketScopeCapacity is the full assessment used by contraction and restart:
+	// survivors must also be healthy and, once the action is issued, the fleet
+	// must still be under low demand with fresh Metrics Server samples.
+	bucketScopeCapacity bucketAssessmentScope = iota
+	// bucketScopeAdmission only records an observed invocation, which has no
+	// replica effect, so it requires neither low demand nor Metrics Server.
+	bucketScopeAdmission
+	// bucketScopeShutdown authorizes RetainData deletion. Every member is going
+	// away, so there is no projected survivor to keep healthy or under demand;
+	// requiring a Collector here would block deletion on clusters without
+	// Metrics Server or on fleets that are simply busy.
+	bucketScopeShutdown
+)
+
+// needsCapacity reports whether the scope demands survivor capacity evidence.
+func (s bucketAssessmentScope) needsCapacity() bool { return s == bucketScopeCapacity }
+
 func (r *Reconciler) bucketAssessment(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal, count int32, issued bool) ([]bucketSession, time.Time, error) {
-	return r.bucketAssessmentMode(ctx, f, j, count, issued, false)
+	return r.bucketAssessmentMode(ctx, f, j, count, issued, bucketScopeCapacity)
 }
 
-func (r *Reconciler) bucketAssessmentMode(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal, count int32, issued, admissionOnly bool) ([]bucketSession, time.Time, error) {
+func (r *Reconciler) bucketAssessmentMode(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal, count int32, issued bool, scope bucketAssessmentScope) ([]bucketSession, time.Time, error) {
 	view := *j
 	op := *j.Operation
 	op.From = count
@@ -76,7 +99,7 @@ func (r *Reconciler) bucketAssessmentMode(ctx context.Context, f *fleet.CelldFle
 	if err != nil {
 		return nil, time.Time{}, err
 	}
-	if err := validateBucketPlacement(f, candidates, !issued && !admissionOnly); err != nil {
+	if err := validateBucketPlacement(f, candidates, !issued && scope.needsCapacity()); err != nil {
 		return nil, time.Time{}, err
 	}
 	sessions := slices.Clone(j.BucketHistory)
@@ -166,7 +189,7 @@ func (r *Reconciler) bucketAssessmentMode(ctx context.Context, f *fleet.CelldFle
 	}
 	var observation capacity.Observation
 	var maxAge time.Duration
-	if !admissionOnly {
+	if scope.needsCapacity() {
 		policy := f.DeepCopy()
 		if policy.Spec.Capacity == nil {
 			policy.Spec.Capacity = &fleet.CapacityPolicy{}
@@ -197,7 +220,7 @@ func (r *Reconciler) bucketAssessmentMode(ctx context.Context, f *fleet.CelldFle
 	if err != nil {
 		return nil, time.Time{}, err
 	}
-	if !equality.Semantic.DeepEqual(candidates, after) || evidence.ObservedAt.After(r.capacityNow()) || r.capacityNow().Sub(evidence.ObservedAt) > 5*time.Second || (!admissionOnly && (observation.At.After(r.capacityNow()) || r.capacityNow().Sub(observation.At) > maxAge)) {
+	if !equality.Semantic.DeepEqual(candidates, after) || evidence.ObservedAt.After(r.capacityNow()) || r.capacityNow().Sub(evidence.ObservedAt) > 5*time.Second || (scope.needsCapacity() && (observation.At.After(r.capacityNow()) || r.capacityNow().Sub(observation.At) > maxAge)) {
 		return nil, time.Time{}, errors.New("bucket assessment expired or membership changed")
 	}
 	if issued {

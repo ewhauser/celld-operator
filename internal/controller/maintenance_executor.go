@@ -280,9 +280,11 @@ func (r *Reconciler) executeBucketDeletion(ctx context.Context, f *fleet.CelldFl
 	case "Capture":
 		view := *j
 		view.Operation = &lifecycleOperation{ID: m.ID, Phase: "Recovering", From: j.Applied, To: j.Applied, BucketCandidates: m.Sessions}
-		// Shutdown has no projected survivor placement/capacity requirement. Current
-		// membership and no-log S3 obligations must nevertheless be fully assessed.
-		sessions, _, err := r.bucketAssessment(ctx, f, &view, j.Applied, true)
+		// Shutdown has no projected survivor placement/capacity requirement, so it
+		// demands neither low demand nor a Metrics Server collector. Current
+		// membership, leases and no-log S3 obligations must nevertheless be fully
+		// assessed.
+		sessions, _, err := r.bucketAssessmentMode(ctx, f, &view, j.Applied, true, bucketScopeShutdown)
 		if err != nil {
 			return block(err)
 		}

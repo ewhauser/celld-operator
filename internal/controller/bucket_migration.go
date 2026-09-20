@@ -305,7 +305,7 @@ func (r *Reconciler) createMigratedBucket(ctx context.Context, f *fleet.CelldFle
 func (r *Reconciler) migrationBucketAssessment(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal) ([]bucketSession, time.Time, error) {
 	view := *j
 	view.Operation = &lifecycleOperation{ID: j.BucketMigration.ID, Phase: "Recovering", From: j.Applied, To: j.Applied}
-	return r.bucketAssessmentMode(ctx, f, &view, j.Applied, true, true)
+	return r.bucketAssessmentMode(ctx, f, &view, j.Applied, true, bucketScopeAdmission)
 }
 
 // Re-read loss declarations and every admitted retired generation at each compute

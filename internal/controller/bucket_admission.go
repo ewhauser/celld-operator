@@ -22,7 +22,7 @@ func (r *Reconciler) admitBucketHistory(ctx context.Context, f *fleet.CelldFleet
 	}
 	view := *j
 	view.Operation = &lifecycleOperation{ID: "observational-admission", Phase: "Recovering", From: j.Applied, To: j.Applied}
-	sessions, _, err := r.bucketAssessmentMode(ctx, f, &view, j.Applied, true, true)
+	sessions, _, err := r.bucketAssessmentMode(ctx, f, &view, j.Applied, true, bucketScopeAdmission)
 	if err != nil {
 		changed := false
 		if invalidated, ok := errors.AsType[*v050.BucketExpiryInvalidatedError](err); ok {
