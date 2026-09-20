@@ -56,7 +56,7 @@ have the runtime's necessary bucket permissions; the production evidence reader 
 | `execution.maxResidentCells` | Hard resident-cell admission cap (`CELLD_MAX_RESIDENT_CELLS`); unset keeps the runtime default; immutable |
 | `execution.idleEvictSeconds` | Idle hibernation age (`CELLD_IDLE_EVICT_S`); unset leaves only pressure and the cap to evict; immutable |
 | `lifecycle.shutdownSeconds` | celld total stop budget (`CELLD_SHUTDOWN_TOTAL_MS`); default 20; immutable |
-| `lifecycle.terminationGraceSeconds` | Pod termination grace; default 30; at least shutdown + 5; the launcher escalates 5 s before it; immutable |
+| `lifecycle.terminationGraceSeconds` | Pod termination grace; default 30; at least shutdown + 5; the launcher splits it into its SIGTERM wait and lock proof, keeping a 5 s margin; immutable |
 
 Fleet names must be DNS labels up to 40 characters. Only `replicas`, `capacity`, `runtimeImage`, `maintenance`, and an authorized Deployment-to-Ordered layout migration are mutable; `execution` and `lifecycle` tuning are fixed at creation because the operator never rolls out a changed pod template (see [ADR 0018](decisions/0018-per-fleet-tuning.md) and the [tuned example](../config/samples/tuned.yaml)).
 Invalid cross-field combinations fail admission; name/dependency errors also

@@ -35,7 +35,7 @@ func TestTuningDefaultsPreserveHistoricalTemplate(t *testing.T) {
 	if v, _ := envValue(c.Env, "CELLD_SHUTDOWN_TOTAL_MS"); v != "20000" {
 		t.Fatalf("default shutdown changed: %s", v)
 	}
-	for _, name := range []string{"CELLD_MAX_RESIDENT_CELLS", "CELLD_IDLE_EVICT_S", "LAUNCHER_STOP_GRACE_SECONDS"} {
+	for _, name := range []string{"CELLD_MAX_RESIDENT_CELLS", "CELLD_IDLE_EVICT_S", "LAUNCHER_TERMINATION_GRACE_SECONDS"} {
 		if _, has := envValue(c.Env, name); has {
 			t.Fatalf("%s must be absent when tuning is omitted", name)
 		}
@@ -55,7 +55,7 @@ func TestTuningIsAppliedToTheTemplate(t *testing.T) {
 	if c.Resources.Requests.Cpu().String() != "2" || c.Resources.Limits.Cpu().String() != "2" || c.Resources.Requests.Memory().String() != "4Gi" || c.Resources.Limits.Memory().String() != "4Gi" {
 		t.Fatalf("resources not applied: %+v", c.Resources)
 	}
-	want := map[string]string{"CELLD_MAX_RESIDENT_CELLS": "400", "CELLD_IDLE_EVICT_S": "60", "CELLD_SHUTDOWN_TOTAL_MS": "120000", "LAUNCHER_STOP_GRACE_SECONDS": "175"}
+	want := map[string]string{"CELLD_MAX_RESIDENT_CELLS": "400", "CELLD_IDLE_EVICT_S": "60", "CELLD_SHUTDOWN_TOTAL_MS": "120000", "LAUNCHER_TERMINATION_GRACE_SECONDS": "180"}
 	for name, value := range want {
 		if got, _ := envValue(c.Env, name); got != value {
 			t.Fatalf("%s=%q, want %q", name, got, value)
@@ -68,7 +68,7 @@ func TestTuningIsAppliedToTheTemplate(t *testing.T) {
 	b := fixture("beta", "bucket-beta", "Bucket")
 	b.Spec.Lifecycle = &fleet.LifecycleSpec{ShutdownSeconds: 60, TerminationGraceSeconds: 90}
 	bp := podTemplate(b, opts).Spec
-	if _, has := envValue(bp.Containers[0].Env, "LAUNCHER_STOP_GRACE_SECONDS"); has {
+	if _, has := envValue(bp.Containers[0].Env, "LAUNCHER_TERMINATION_GRACE_SECONDS"); has {
 		t.Fatal("Bucket template carries launcher settings")
 	}
 	if *bp.TerminationGracePeriodSeconds != 90 {
