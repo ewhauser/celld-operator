@@ -393,6 +393,13 @@ func (s *lifecycleRun) bootstrapJournal(ctx context.Context) *lifecycleOutcome {
 		}
 		j.Claims[got.Name] = got.UID
 	}
+	// This bootstrap is the only reader of the creation claim inventory, and it
+	// has just consumed it: from here the journal's own Claims map carries every
+	// identity. Remove the annotation in the same reservation write that first
+	// persists the journal, so no crash can leave the fleet with neither. While
+	// the journal is still absent the annotation stays exactly as creation wrote
+	// it, and a crash between PVC creation and bootstrap still blocks for review.
+	delete(res.Annotations, creationClaimsKey)
 	return s.persist(ctx)
 }
 
@@ -634,7 +641,8 @@ func (s *lifecycleRun) holdUnderMaintenanceFence(ctx context.Context) *lifecycle
 		return s.stop(ctrl.Result{}, false, nil)
 	}
 	if op.To > op.From {
-		j.History = append(j.History, completion(op, time.Time{}))
+		s.r.recordCompletion(f, j, completion(op, time.Time{}))
+		s.r.releaseInfrastructureFences(f, j, op.ID)
 		j.Applied, j.Operation = op.To, nil
 		return s.save(ctx)
 	}
@@ -838,7 +846,7 @@ func (s *lifecycleRun) finishCancellation(ctx context.Context) *lifecycleOutcome
 	if s.op.Phase != "Canceling" {
 		return nil
 	}
-	result, err := s.r.cancelRemoval(ctx, s.res, s.j, s.w)
+	result, err := s.r.cancelRemoval(ctx, s.f, s.res, s.j, s.w)
 	return s.stop(result, true, err)
 }
 
@@ -1162,7 +1170,8 @@ func (s *lifecycleRun) confirmRemovalRecovery(ctx context.Context) *lifecycleOut
 	if evidence.ObservedAt.Sub(op.SettledAt) < 10*time.Second {
 		return s.progress(ctx, "Recovery evidence revalidated; waiting for another full assessment after settling")
 	}
-	j.History = append(j.History, completion(op, evidence.ObservedAt))
+	s.r.recordCompletion(f, j, completion(op, evidence.ObservedAt))
+	s.r.releaseInfrastructureFences(f, j, op.ID)
 	j.Sessions, j.Applied, j.Operation = sessions, op.To, nil
 	return s.save(ctx)
 }
@@ -1267,7 +1276,8 @@ func (r *Reconciler) expand(ctx context.Context, f *fleet.CelldFleet, res *fleet
 		op.Phase = "Reactivating"
 		return ctrl.Result{RequeueAfter: time.Second}, true, r.saveJournal(ctx, res, j)
 	}
-	j.History = append(j.History, completion(op, time.Time{}))
+	r.recordCompletion(f, j, completion(op, time.Time{}))
+	r.releaseInfrastructureFences(f, j, op.ID)
 	j.Applied, j.Operation = op.To, nil
 	return ctrl.Result{RequeueAfter: time.Second}, true, r.saveJournal(ctx, res, j)
 }
@@ -1278,6 +1288,41 @@ func evidenceFresh(evidence v050.Evidence, now time.Time) bool {
 
 func completion(op *lifecycleOperation, evidenceAt time.Time) lifecycleCompletion {
 	return lifecycleCompletion{ID: op.ID, TargetPod: op.TargetPod, TargetUID: op.TargetUID, TargetGeneration: op.TargetGeneration, From: op.From, To: op.To, EvidenceAt: evidenceAt}
+}
+
+// recordCompletion is the single place a finished operation enters the journal.
+// The only reader of History is the status projection in report(), which reads
+// the last entry and nothing else, so only that entry is kept durably; the trail
+// itself becomes a Kubernetes Event, which is where ADR 0021 puts audit state
+// that no decision reads. Keeping the field and its type unchanged keeps the
+// journal readable by the current version 8 parser.
+func (r *Reconciler) recordCompletion(f *fleet.CelldFleet, j *lifecycleJournal, done lifecycleCompletion) {
+	j.History = []lifecycleCompletion{done}
+	if r.Recorder == nil {
+		return
+	}
+	reason := done.Outcome
+	if reason == "" {
+		reason = "LifecycleCompleted"
+	}
+	r.Recorder.Eventf(f, nil, corev1.EventTypeNormal, reason, "Complete", "Operation %s completed %d to %d; target %s uid %s generation %s; evidence %s",
+		orNone(done.ID), done.From, done.To, orNone(done.TargetPod), orNone(done.TargetUID), orNone(done.TargetGeneration), stamp(done.EvidenceAt))
+}
+
+// stamp renders an optional observation time for an event note.
+func stamp(at time.Time) string {
+	if at.IsZero() {
+		return "none"
+	}
+	return at.UTC().Format(time.RFC3339)
+}
+
+// orNone renders an optional identity for an event note.
+func orNone(value string) string {
+	if value == "" {
+		return "none"
+	}
+	return value
 }
 
 // recordLoss linearizes a negative recovery finding on the same Kubernetes object
