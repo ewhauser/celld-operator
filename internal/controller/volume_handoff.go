@@ -5,8 +5,6 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/ewhauser/celld-operator/internal/runtime/catalog"
-
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	"github.com/ewhauser/celld-operator/internal/launcher"
 	v050 "github.com/ewhauser/celld-operator/internal/runtime/v050"
@@ -20,15 +18,14 @@ import (
 // to the observed target node. It is storage handoff evidence, never evidence
 // that an old process died. That authority must already exist in the journal.
 func (r *Reconciler) verifyVolumeAttachment(ctx context.Context, f *fleet.CelldFleet, m persistentMember) error {
-	claim := &corev1.PersistentVolumeClaim{}
-	if err := r.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: "data-" + m.Node}, claim); err != nil {
-		return err
-	}
-	uid, handle, err := r.persistentVolumeIdentity(ctx, claim)
+	retained, err := r.retainedVolumeFor(ctx, f.Namespace, m.Node)
 	if err != nil {
 		return err
 	}
-	if string(claim.UID) != m.ClaimUID || uid != m.VolumeUID || handle != m.VolumeHandle || !slices.Equal(claim.Spec.AccessModes, []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOncePod}) {
+	claim := retained.Claim
+	// Handoff additionally demands ReadWriteOncePod; it does not re-check the
+	// journal claim binding or the deletion timestamp.
+	if !retained.sameDisk(m) || !slices.Equal(claim.Spec.AccessModes, []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOncePod}) {
 		return errors.New("RWOP retained disk binding changed")
 	}
 	pv := &corev1.PersistentVolume{}
@@ -47,7 +44,10 @@ func (r *Reconciler) verifyVolumeAttachment(ctx context.Context, f *fleet.CelldF
 	if err := r.Get(ctx, client.ObjectKey{Name: pv.Spec.StorageClassName}, class); err != nil {
 		return err
 	}
-	if class.Provisioner != "ebs.csi.aws.com" || (class.Parameters["type"] != "gp2" && class.Parameters["type"] != "gp3") || class.VolumeBindingMode == nil || *class.VolumeBindingMode != storagev1.VolumeBindingWaitForFirstConsumer || class.ReclaimPolicy == nil || *class.ReclaimPolicy != corev1.PersistentVolumeReclaimRetain {
+	singleAttachHardware := class.Provisioner == "ebs.csi.aws.com" && (class.Parameters["type"] == "gp2" || class.Parameters["type"] == "gp3")
+	delayedBinding := class.VolumeBindingMode != nil && *class.VolumeBindingMode == storagev1.VolumeBindingWaitForFirstConsumer
+	retainOnDelete := class.ReclaimPolicy != nil && *class.ReclaimPolicy == corev1.PersistentVolumeReclaimRetain
+	if !singleAttachHardware || !delayedBinding || !retainOnDelete {
 		return errors.New("handoff requires retained delayed-binding gp2/gp3 EBS; Multi-Attach capable or unknown storage is unsupported")
 	}
 	attachments := &storagev1.VolumeAttachmentList{}
@@ -143,15 +143,7 @@ func (r *Reconciler) authorizeVolumeHandoff(ctx context.Context, f *fleet.CelldF
 	if j.Loss != "" || r.Evidence == nil {
 		return errors.New("loss fence or missing live storage evidence blocks handoff")
 	}
-	reader, err := r.Evidence.reader(ctx, f)
-	if err != nil {
-		return err
-	}
-	adapter, err := catalog.New(runtimeImage(evidenceRuntime(f, j)))
-	if err != nil {
-		return err
-	}
-	inventory, err := adapter.Inventory(ctx, reader, r.capacityNow)
+	inventory, err := r.readInventory(ctx, f, runtimeImage(evidenceRuntime(f, j)))
 	if err != nil {
 		return err
 	}

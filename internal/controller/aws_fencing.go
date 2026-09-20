@@ -121,15 +121,17 @@ func (r *Reconciler) ensureInfrastructureFence(ctx context.Context, f *fleet.Cel
 		}
 		return false, errors.New("node hosts another workload; refusing whole-instance termination")
 	}
-	claim := &corev1.PersistentVolumeClaim{}
-	if err := r.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: "data-" + member.Node}, claim); err != nil {
-		return false, err
-	}
-	uid, handle, err := r.persistentVolumeIdentity(ctx, claim)
+	retained, err := r.retainedVolumeFor(ctx, f.Namespace, member.Node)
 	if err != nil {
 		return false, err
 	}
-	if string(claim.UID) != member.ClaimUID || uid != member.VolumeUID || handle != member.VolumeHandle || string(j.Claims[claim.Name]) != member.ClaimUID || !slices.Equal(claim.Spec.AccessModes, []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOncePod}) || !claim.DeletionTimestamp.IsZero() {
+	claim := retained.Claim
+	// Fencing is the strictest of the four revalidation sites: on top of the
+	// identity triple it re-asserts the journal's own claim binding, demands
+	// ReadWriteOncePod and refuses a claim that is already being deleted.
+	boundInJournal := string(j.Claims[claim.Name]) == member.ClaimUID
+	exclusive := slices.Equal(claim.Spec.AccessModes, []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOncePod})
+	if !retained.sameDisk(member) || !boundInJournal || !exclusive || !claim.DeletionTimestamp.IsZero() {
 		return false, errors.New("retained volume changed before fencing")
 	}
 	if index < 0 {
