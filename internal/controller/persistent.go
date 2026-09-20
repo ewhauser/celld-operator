@@ -229,168 +229,30 @@ func (r *Reconciler) persistentMembers(ctx context.Context, f *fleet.CelldFleet,
 	}
 	return members, nil
 }
+
+// assessPersistent runs one complete assessment pass in the order the evidence
+// must be gathered: capture the live membership, read and correlate the storage
+// inventory, then qualify survivor capacity and placement. Each step is a
+// method below; this function owns only the ordering and the final recheck.
 func (r *Reconciler) assessPersistent(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal, stopping, issued bool) ([]persistentMember, time.Time, error) {
 	op := j.Operation
 	count := op.From
 	if issued {
 		count = op.To
 	}
-	members, err := r.persistentMembers(ctx, f, j, count, stopping)
+	members, err := r.capturePersistentMembers(ctx, f, j, count, stopping, issued)
 	if err != nil {
 		return nil, time.Time{}, err
-	}
-	if stopping {
-		for _, old := range op.PersistentMembers {
-			if issued && old.Node == op.TargetPod {
-				if !old.Stopped || !old.RestartDenied {
-					return nil, time.Time{}, errors.New("missing durable termination receipt")
-				}
-				continue
-			}
-			if !slices.ContainsFunc(members, func(m persistentMember) bool { return sameInvocation(m, old) }) {
-				return nil, time.Time{}, errors.New("captured persistent invocation changed")
-			}
-		}
 	}
 	inventory, err := r.readInventory(ctx, f, runtimeImage(evidenceRuntime(f, j)))
 	if err != nil {
 		return nil, time.Time{}, err
 	}
-	history := slices.Clone(j.PersistentHistory)
-	for _, m := range op.PersistentMembers {
-		if !slices.ContainsFunc(history, func(old persistentMember) bool { return old.Node == m.Node && old.Generation == m.Generation }) {
-			history = append(history, m)
-		}
+	if err := r.correlatePersistentInventory(j, members, inventory, stopping, issued); err != nil {
+		return nil, time.Time{}, err
 	}
-	for _, s := range j.Inventory.Sessions {
-		if !slices.ContainsFunc(members, func(m persistentMember) bool { return m.Node == s.Node && m.Generation == s.Generation }) && !slices.ContainsFunc(history, func(m persistentMember) bool {
-			return m.Node == s.Node && m.Generation == s.Generation && (resolvedMember(m) || (stopping && m.Node == op.TargetPod))
-		}) {
-			return nil, time.Time{}, errors.New("unresolved historical persistent generation")
-		}
-	}
-	for _, n := range inventory.Nodes {
-		for _, prior := range j.Inventory.Sessions {
-			if prior.Node == n.Name && prior.Generation == n.Generation && prior.Epoch > n.Epoch {
-				return nil, time.Time{}, errors.New("persistent recovery epoch rewound or log disappeared")
-			}
-		}
-		for _, prior := range op.PersistentMembers {
-			if prior.Node == n.Name && prior.Generation == n.Generation && prior.Epoch > n.Epoch {
-				return nil, time.Time{}, errors.New("captured recovery epoch rewound or log disappeared")
-			}
-		}
-		index := slices.IndexFunc(members, func(m persistentMember) bool { return m.Node == n.Name })
-		donor := stopping && n.Name == op.TargetPod
-		if index < 0 && !donor {
-			if !slices.ContainsFunc(history, func(m persistentMember) bool {
-				return m.Node == n.Name && m.Generation == n.Generation && resolvedMember(m)
-			}) {
-				return nil, time.Time{}, errors.New("unknown persistent storage writer")
-			}
-			if n.ExpiresMS > uint64(r.capacityNow().UnixMilli()) || (n.LogState != "" && n.LogState != "sealed") {
-				return nil, time.Time{}, errors.New("retired persistent session revived or unsealed")
-			}
-			continue
-		}
-		var current persistentMember
-		if index >= 0 {
-			current = members[index]
-		} else {
-			ix := slices.IndexFunc(op.PersistentMembers, func(m persistentMember) bool { return m.Node == n.Name })
-			if ix < 0 {
-				return nil, time.Time{}, errors.New("missing donor capture")
-			}
-			current = op.PersistentMembers[ix]
-		}
-		if n.Generation != current.Generation {
-			return nil, time.Time{}, errors.New("persistent runtime generation differs from launcher")
-		}
-		if donor {
-			if !current.Stopped || n.ExpiresMS > uint64(r.capacityNow().UnixMilli()) || (n.LogState != "sealed" && n.LogState != "") {
-				return nil, time.Time{}, errors.New("stopped donor recovery or lease expiry incomplete")
-			}
-		} else if n.ExpiresMS <= uint64(r.capacityNow().UnixMilli()) {
-			return nil, time.Time{}, errors.New("persistent survivor lease expired")
-		}
-		if stopping && !donor && slices.Contains(n.Ensemble, op.TargetPod) {
-			return nil, time.Time{}, errors.New("survivor still references departing follower; wait for runtime tiering and ensemble replacement")
-		}
-		if index >= 0 {
-			members[index].Epoch = n.Epoch
-			members[index].Ensemble = slices.Clone(n.Ensemble)
-		}
-	}
-	// Positive direct metadata is required for every current invocation and donor.
-	for _, m := range members {
-		if !slices.ContainsFunc(inventory.Nodes, func(n v050.Node) bool { return n.Name == m.Node && n.Generation == m.Generation }) {
-			return nil, time.Time{}, errors.New("persistent node metadata missing")
-		}
-	}
-	if issued && !slices.ContainsFunc(inventory.Nodes, func(n v050.Node) bool { return n.Name == op.TargetPod && n.Generation == op.TargetGeneration }) {
-		return nil, time.Time{}, errors.New("retired donor metadata missing")
-	}
-	if stopping {
-		for _, old := range op.PersistentMembers {
-			if old.Node == op.TargetPod {
-				continue
-			}
-			n := inventory.Nodes[slices.IndexFunc(inventory.Nodes, func(n v050.Node) bool { return n.Name == old.Node })]
-			if n.Epoch < old.Epoch || (slices.Contains(old.Ensemble, op.TargetPod) && n.Epoch <= old.Epoch && n.LogState != "sealed") {
-				return nil, time.Time{}, errors.New("departing follower obligations lack a tiering barrier")
-			}
-		}
-	}
-	policy := f.DeepCopy()
-	if policy.Spec.Capacity == nil {
-		policy.Spec.Capacity = &fleet.CapacityPolicy{}
-		policy.Spec.Capacity.Default()
-	}
-	if r.Collector == nil {
-		return nil, time.Time{}, errors.New("survivor metrics unavailable")
-	}
-	observation := r.Collector.Collect(ctx, policy)
-	var ids []string
-	var donorID string
-	for _, m := range members {
-		if stopping && m.Node == op.TargetPod {
-			donorID = m.Container
-			continue
-		}
-		ids = append(ids, m.Container)
-	}
-	if stopping {
-		if donorID != "" {
-			observation.Samples = slices.DeleteFunc(observation.Samples, func(s capacity.Sample) bool { return s.Identity == donorID })
-		}
-		if !bucketObservationIdentities(observation, ids) || !capacity.LowDemand(*policy.Spec.Capacity, observation, op.To) {
-			return nil, time.Time{}, errors.New("persistent survivor health or capacity uncertain")
-		}
-	} else {
-		donor := op.TargetPod
-		if donor == "" {
-			donor = fmt.Sprintf("%s-%d", f.Name, op.To)
-		}
-		donorIndex := slices.IndexFunc(members, func(m persistentMember) bool { return m.Node == donor })
-		if donorIndex < 0 {
-			return nil, time.Time{}, errors.New("highest ordinal donor missing")
-		}
-		if err := ValidateSurvivors(*policy.Spec.Capacity, observation, ids, members[donorIndex].Container, r.capacityNow()); err != nil {
-			return nil, time.Time{}, err
-		}
-	}
-	placement := map[types.UID]bucketCandidate{}
-	for _, m := range members {
-		donor := op.TargetPod
-		if donor == "" {
-			donor = fmt.Sprintf("%s-%d", f.Name, op.To)
-		}
-		if m.Node == donor {
-			continue
-		}
-		placement[types.UID(m.PodUID)] = bucketCandidate{Host: m.Host, HostUID: m.HostUID, Hostname: m.Hostname, Zone: m.Zone}
-	}
-	if err := validateBucketPlacement(f, placement, false); err != nil {
+	observation, policy, err := r.qualifyPersistentCapacity(ctx, f, j, members, stopping)
+	if err != nil {
 		return nil, time.Time{}, err
 	}
 	after, err := r.persistentMembers(ctx, f, j, count, stopping)
@@ -407,6 +269,194 @@ func (r *Reconciler) assessPersistent(ctx context.Context, f *fleet.CelldFleet, 
 		return nil, time.Time{}, errors.New("persistent assessment expired")
 	}
 	return members, inventory.ObservedAt, nil
+}
+
+// capturePersistentMembers reads the live membership and, once a stop is in
+// flight, re-asserts that every captured invocation is still the running one.
+// Callers rely on this: after it returns, every captured non-donor member is
+// present in the returned slice under the same invocation.
+func (r *Reconciler) capturePersistentMembers(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal, count int32, stopping, issued bool) ([]persistentMember, error) {
+	op := j.Operation
+	members, err := r.persistentMembers(ctx, f, j, count, stopping)
+	if err != nil {
+		return nil, err
+	}
+	if stopping {
+		for _, old := range op.PersistentMembers {
+			if issued && old.Node == op.TargetPod {
+				if !old.Stopped || !old.RestartDenied {
+					return nil, errors.New("missing durable termination receipt")
+				}
+				continue
+			}
+			if !slices.ContainsFunc(members, func(m persistentMember) bool { return sameInvocation(m, old) }) {
+				return nil, errors.New("captured persistent invocation changed")
+			}
+		}
+	}
+	return members, nil
+}
+
+// correlatePersistentInventory reconciles the captured membership against the
+// runtime's own storage records: no unknown or revived writer, no rewound
+// recovery epoch, a live lease for every survivor and a sealed, expired one for
+// the donor. It fills each member's Epoch and Ensemble in place.
+func (r *Reconciler) correlatePersistentInventory(j *lifecycleJournal, members []persistentMember, inventory v050.Inventory, stopping, issued bool) error {
+	op := j.Operation
+	history := slices.Clone(j.PersistentHistory)
+	for _, m := range op.PersistentMembers {
+		if !slices.ContainsFunc(history, func(old persistentMember) bool { return old.Node == m.Node && old.Generation == m.Generation }) {
+			history = append(history, m)
+		}
+	}
+	for _, s := range j.Inventory.Sessions {
+		if !slices.ContainsFunc(members, func(m persistentMember) bool { return m.Node == s.Node && m.Generation == s.Generation }) && !slices.ContainsFunc(history, func(m persistentMember) bool {
+			return m.Node == s.Node && m.Generation == s.Generation && (resolvedMember(m) || (stopping && m.Node == op.TargetPod))
+		}) {
+			return errors.New("unresolved historical persistent generation")
+		}
+	}
+	for _, n := range inventory.Nodes {
+		for _, prior := range j.Inventory.Sessions {
+			if prior.Node == n.Name && prior.Generation == n.Generation && prior.Epoch > n.Epoch {
+				return errors.New("persistent recovery epoch rewound or log disappeared")
+			}
+		}
+		for _, prior := range op.PersistentMembers {
+			if prior.Node == n.Name && prior.Generation == n.Generation && prior.Epoch > n.Epoch {
+				return errors.New("captured recovery epoch rewound or log disappeared")
+			}
+		}
+		index := slices.IndexFunc(members, func(m persistentMember) bool { return m.Node == n.Name })
+		donor := stopping && n.Name == op.TargetPod
+		if index < 0 && !donor {
+			if !slices.ContainsFunc(history, func(m persistentMember) bool {
+				return m.Node == n.Name && m.Generation == n.Generation && resolvedMember(m)
+			}) {
+				return errors.New("unknown persistent storage writer")
+			}
+			if n.ExpiresMS > uint64(r.capacityNow().UnixMilli()) || (n.LogState != "" && n.LogState != "sealed") {
+				return errors.New("retired persistent session revived or unsealed")
+			}
+			continue
+		}
+		var current persistentMember
+		if index >= 0 {
+			current = members[index]
+		} else {
+			ix := slices.IndexFunc(op.PersistentMembers, func(m persistentMember) bool { return m.Node == n.Name })
+			if ix < 0 {
+				return errors.New("missing donor capture")
+			}
+			current = op.PersistentMembers[ix]
+		}
+		if n.Generation != current.Generation {
+			return errors.New("persistent runtime generation differs from launcher")
+		}
+		if donor {
+			if !current.Stopped || n.ExpiresMS > uint64(r.capacityNow().UnixMilli()) || (n.LogState != "sealed" && n.LogState != "") {
+				return errors.New("stopped donor recovery or lease expiry incomplete")
+			}
+		} else if n.ExpiresMS <= uint64(r.capacityNow().UnixMilli()) {
+			return errors.New("persistent survivor lease expired")
+		}
+		if stopping && !donor && slices.Contains(n.Ensemble, op.TargetPod) {
+			return errors.New("survivor still references departing follower; wait for runtime tiering and ensemble replacement")
+		}
+		if index >= 0 {
+			members[index].Epoch = n.Epoch
+			members[index].Ensemble = slices.Clone(n.Ensemble)
+		}
+	}
+	// Positive direct metadata is required for every current invocation and donor.
+	for _, m := range members {
+		if !slices.ContainsFunc(inventory.Nodes, func(n v050.Node) bool { return n.Name == m.Node && n.Generation == m.Generation }) {
+			return errors.New("persistent node metadata missing")
+		}
+	}
+	if issued && !slices.ContainsFunc(inventory.Nodes, func(n v050.Node) bool { return n.Name == op.TargetPod && n.Generation == op.TargetGeneration }) {
+		return errors.New("retired donor metadata missing")
+	}
+	if stopping {
+		for _, old := range op.PersistentMembers {
+			if old.Node == op.TargetPod {
+				continue
+			}
+			// Non-negative by construction: capturePersistentMembers proved this
+			// captured survivor is still in members, and the loop above proved
+			// every member has a node record. Guard it anyway so the invariant
+			// is checkable here instead of a hundred lines away.
+			ix := slices.IndexFunc(inventory.Nodes, func(n v050.Node) bool { return n.Name == old.Node })
+			if ix < 0 {
+				return errors.New("persistent node metadata missing")
+			}
+			n := inventory.Nodes[ix]
+			if n.Epoch < old.Epoch || (slices.Contains(old.Ensemble, op.TargetPod) && n.Epoch <= old.Epoch && n.LogState != "sealed") {
+				return errors.New("departing follower obligations lack a tiering barrier")
+			}
+		}
+	}
+	return nil
+}
+
+// qualifyPersistentCapacity admits the survivors that remain after the donor
+// leaves: fresh collector samples for exactly those identities, enough headroom
+// under the effective capacity policy, and a legal bucket placement. It returns
+// the observation and the effective policy so the caller can bound their age.
+func (r *Reconciler) qualifyPersistentCapacity(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal, members []persistentMember, stopping bool) (capacity.Observation, *fleet.CelldFleet, error) {
+	op := j.Operation
+	policy := f.DeepCopy()
+	if policy.Spec.Capacity == nil {
+		policy.Spec.Capacity = &fleet.CapacityPolicy{}
+		policy.Spec.Capacity.Default()
+	}
+	if r.Collector == nil {
+		return capacity.Observation{}, nil, errors.New("survivor metrics unavailable")
+	}
+	observation := r.Collector.Collect(ctx, policy)
+	var ids []string
+	var donorID string
+	for _, m := range members {
+		if stopping && m.Node == op.TargetPod {
+			donorID = m.Container
+			continue
+		}
+		ids = append(ids, m.Container)
+	}
+	// The node leaving the fleet: the admitted target once one exists, otherwise
+	// the highest ordinal this contraction would drop. Both the capacity check
+	// and the placement map below mean the same node by it.
+	donorNode := op.TargetPod
+	if donorNode == "" {
+		donorNode = fmt.Sprintf("%s-%d", f.Name, op.To)
+	}
+	if stopping {
+		if donorID != "" {
+			observation.Samples = slices.DeleteFunc(observation.Samples, func(s capacity.Sample) bool { return s.Identity == donorID })
+		}
+		if !bucketObservationIdentities(observation, ids) || !capacity.LowDemand(*policy.Spec.Capacity, observation, op.To) {
+			return capacity.Observation{}, nil, errors.New("persistent survivor health or capacity uncertain")
+		}
+	} else {
+		donorIndex := slices.IndexFunc(members, func(m persistentMember) bool { return m.Node == donorNode })
+		if donorIndex < 0 {
+			return capacity.Observation{}, nil, errors.New("highest ordinal donor missing")
+		}
+		if err := ValidateSurvivors(*policy.Spec.Capacity, observation, ids, members[donorIndex].Container, r.capacityNow()); err != nil {
+			return capacity.Observation{}, nil, err
+		}
+	}
+	placement := map[types.UID]bucketCandidate{}
+	for _, m := range members {
+		if m.Node == donorNode {
+			continue
+		}
+		placement[types.UID(m.PodUID)] = bucketCandidate{Host: m.Host, HostUID: m.HostUID, Hostname: m.Hostname, Zone: m.Zone}
+	}
+	if err := validateBucketPlacement(f, placement, false); err != nil {
+		return capacity.Observation{}, nil, err
+	}
+	return observation, policy, nil
 }
 
 func (r *Reconciler) contractPersistent(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, j *lifecycleJournal, w client.Object) (ctrl.Result, bool, error) {
