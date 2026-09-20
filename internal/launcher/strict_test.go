@@ -68,6 +68,19 @@ func newStrictRuntime(t *testing.T, c Config) *strictRuntime {
 			http.Error(w, "unavailable", http.StatusServiceUnavailable)
 			return
 		}
+		if (f.fault == "transport" && f.operation != "" && r.Method == "GET") || (f.fault == "post-transport" && r.Method == "POST") {
+			connection, _, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			_ = connection.Close()
+			return
+		}
+		if f.fault == "malformed" && f.operation != "" && r.Method == "GET" {
+			_, _ = w.Write([]byte(`{"shutdown":`))
+			return
+		}
 		generation, operation, mode := state.Generation, f.operation, "remove-disk"
 		if r.Method == "GET" && f.operation != "" {
 			switch f.fault {
@@ -184,7 +197,7 @@ func TestAcceptanceDoesNotTerminateAndControlOnlyCompletionDoes(t *testing.T) {
 }
 
 func TestStrictFailureOrLostResultCannotBecomeSuccessAfterExit(t *testing.T) {
-	for _, fault := range []string{"failed", "generation", "operation", "mode", "outage", "lost-result"} {
+	for _, fault := range []string{"failed", "generation", "operation", "mode", "outage", "lost-result", "malformed", "post-transport"} {
 		t.Run(fault, func(t *testing.T) {
 			c := config(t)
 			f := newStrictRuntime(t, c)
@@ -218,6 +231,9 @@ func TestStrictFailureOrLostResultCannotBecomeSuccessAfterExit(t *testing.T) {
 					t.Fatalf("failure became success after exit: %+v", state)
 				}
 				if state.RestartDenied && state.ChildExited {
+					if posts, _ := f.counts(); posts > 1 {
+						t.Fatalf("failed request replayed mutation: %d", posts)
+					}
 					if state.Error != failed.Error || state.Removal != failed.Removal {
 						t.Fatal("lost terminal failure")
 					}
@@ -230,80 +246,133 @@ func TestStrictFailureOrLostResultCannotBecomeSuccessAfterExit(t *testing.T) {
 	}
 }
 
+func TestRemovalObservationRetriesConnectionDrain(t *testing.T) {
+	for _, resumedFault := range []string{"", "generation", "operation", "malformed"} {
+		t.Run("resume-"+resumedFault, func(t *testing.T) {
+			c := config(t)
+			f := newStrictRuntime(t, c)
+			f.update("data_safe", "transport")
+			c.Control = f.client
+			ready, command := shellFixture(t)
+			c.Command = command("trap 'exit 0' TERM")
+			startSupervisor(t, c)
+			awaitReady(t, ready)
+			running := awaitPhase(t, c.Address, c.Key, "Running")
+			if _, err := query(t, c.Address, c.Key, "remove", running.Generation); err != nil {
+				t.Fatal(err)
+			}
+			until := time.Now().Add(5 * time.Second)
+			for {
+				state, err := query(t, c.Address, c.Key, "", "")
+				if err != nil || state.Phase != "Draining" || state.ChildExited || state.RuntimeDataSafe() {
+					t.Fatalf("connection closure ended drain or certified safety: %+v %v", state, err)
+				}
+				if _, polls := f.counts(); polls >= 3 {
+					break
+				}
+				if time.Now().After(until) {
+					t.Fatal("status observation was not retried")
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+			f.update("data_safe", resumedFault)
+			phase := "Stopped"
+			if resumedFault != "" {
+				phase = "Failed"
+			}
+			state := awaitPhase(t, c.Address, c.Key, phase)
+			if state.RemovalReady() != (resumedFault == "") {
+				t.Fatalf("reconnected observation incorrectly certified: %+v", state)
+			}
+			if posts, _ := f.counts(); posts != 1 {
+				t.Fatalf("connection drain replayed mutation: %d", posts)
+			}
+		})
+	}
+}
+
 func TestRemovalDeadlineCannotBeExtendedOrManufactureDataSafety(t *testing.T) {
-	c := config(t)
-	f := newStrictRuntime(t, c)
-	f.update("draining", "")
-	c.Control = f.client
-	c.StopGrace = 50 * time.Millisecond
-	ready, command := shellFixture(t)
-	c.Command = command("trap '' TERM")
-	startSupervisor(t, c)
-	awaitReady(t, ready)
-	running := awaitPhase(t, c.Address, c.Key, "Running")
-	deadline := time.Now().Add(400 * time.Millisecond).UnixMilli()
-	req := Request{Nonce: Nonce(), Operation: "remove", Generation: running.Generation, NotAfterMS: time.Now().Add(time.Second).UnixMilli(), DeadlineMS: deadline}
-	if _, err := sendRequest(t, c.Address, c.Key, req); err != nil {
-		t.Fatal(err)
+	for _, fault := range []string{"", "transport"} {
+		t.Run("fault-"+fault, func(t *testing.T) {
+			c := config(t)
+			f := newStrictRuntime(t, c)
+			f.update("draining", fault)
+			c.Control = f.client
+			c.StopGrace = 50 * time.Millisecond
+			ready, command := shellFixture(t)
+			c.Command = command("trap '' TERM")
+			startSupervisor(t, c)
+			awaitReady(t, ready)
+			running := awaitPhase(t, c.Address, c.Key, "Running")
+			deadline := time.Now().Add(400 * time.Millisecond).UnixMilli()
+			req := Request{Nonce: Nonce(), Operation: "remove", Generation: running.Generation, NotAfterMS: time.Now().Add(time.Second).UnixMilli(), DeadlineMS: deadline}
+			if _, err := sendRequest(t, c.Address, c.Key, req); err != nil {
+				t.Fatal(err)
+			}
+			req.DeadlineMS = time.Now().Add(time.Hour).UnixMilli()
+			state, err := sendRequest(t, c.Address, c.Key, req)
+			if err != nil || state.DeadlineMS != deadline {
+				t.Fatalf("retry extended deadline: %+v %v", state, err)
+			}
+			until := time.Now().Add(5 * time.Second)
+			for time.Now().Before(until) {
+				state, err = query(t, c.Address, c.Key, "", "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if state.Phase == "Stopped" || state.RuntimeDataSafe() {
+					t.Fatalf("deadline kill certified: %+v", state)
+				}
+				if state.ChildExited && state.RestartDenied && state.Phase == "Failed" {
+					return
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+			t.Fatalf("deadline failed to stop exact child: %+v", state)
+		})
 	}
-	req.DeadlineMS = time.Now().Add(time.Hour).UnixMilli()
-	state, err := sendRequest(t, c.Address, c.Key, req)
-	if err != nil || state.DeadlineMS != deadline {
-		t.Fatalf("retry extended deadline: %+v %v", state, err)
-	}
-	until := time.Now().Add(5 * time.Second)
-	for time.Now().Before(until) {
-		state, err = query(t, c.Address, c.Key, "", "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if state.Phase == "Stopped" || state.RuntimeDataSafe() {
-			t.Fatalf("deadline kill certified: %+v", state)
-		}
-		if state.ChildExited && state.RestartDenied && state.Phase == "Failed" {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("deadline failed to stop exact child: %+v", state)
 }
 
 func TestChildExitDuringDrainLosesRemovalAuthority(t *testing.T) {
-	c := config(t)
-	f := newStrictRuntime(t, c)
-	f.update("draining", "")
-	c.Control = f.client
-	exitFile := filepath.Join(c.Root, "exit")
-	c.Command = []string{"/bin/sh", "-c", `while [ ! -f "$1" ]; do sleep 0.05; done; exit 0`, "child", exitFile}
-	startSupervisor(t, c)
-	running := awaitPhase(t, c.Address, c.Key, "Running")
-	if _, err := query(t, c.Address, c.Key, "remove", running.Generation); err != nil {
-		t.Fatal(err)
-	}
-	until := time.Now().Add(5 * time.Second)
-	for {
-		if _, polls := f.counts(); polls > 0 {
-			break
-		}
-		if time.Now().After(until) {
-			t.Fatal("never polled strict result")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if err := os.WriteFile(exitFile, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	state := awaitPhase(t, c.Address, c.Key, "Failed")
-	if state.RuntimeDataSafe() || state.RemovalReady() {
-		t.Fatalf("exit while draining certified: %+v", state)
-	}
-	// Once result capture failed, even a subsequently reachable status cannot
-	// revive it. This supervisor holds only the failure for its bound operation.
-	f.update("data_safe", "")
-	time.Sleep(150 * time.Millisecond)
-	state, err := query(t, c.Address, c.Key, "remove", running.Generation)
-	if err != nil || state.RuntimeDataSafe() || state.RemovalReady() {
-		t.Fatalf("late result revived exit: %+v %v", state, err)
+	for _, fault := range []string{"", "transport"} {
+		t.Run("fault-"+fault, func(t *testing.T) {
+			c := config(t)
+			f := newStrictRuntime(t, c)
+			f.update("draining", fault)
+			c.Control = f.client
+			exitFile := filepath.Join(c.Root, "exit")
+			c.Command = []string{"/bin/sh", "-c", `while [ ! -f "$1" ]; do sleep 0.05; done; exit 0`, "child", exitFile}
+			startSupervisor(t, c)
+			running := awaitPhase(t, c.Address, c.Key, "Running")
+			if _, err := query(t, c.Address, c.Key, "remove", running.Generation); err != nil {
+				t.Fatal(err)
+			}
+			until := time.Now().Add(5 * time.Second)
+			for {
+				if _, polls := f.counts(); polls > 0 {
+					break
+				}
+				if time.Now().After(until) {
+					t.Fatal("never polled strict result")
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			if err := os.WriteFile(exitFile, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			state := awaitPhase(t, c.Address, c.Key, "Failed")
+			if state.RuntimeDataSafe() || state.RemovalReady() {
+				t.Fatalf("exit while draining certified: %+v", state)
+			}
+			// Once result capture failed, even a subsequently reachable status cannot
+			// revive it. This supervisor holds only the failure for its bound operation.
+			f.update("data_safe", "")
+			time.Sleep(150 * time.Millisecond)
+			state, err := query(t, c.Address, c.Key, "remove", running.Generation)
+			if err != nil || state.RuntimeDataSafe() || state.RemovalReady() {
+				t.Fatalf("late result revived exit: %+v %v", state, err)
+			}
+		})
 	}
 }
 

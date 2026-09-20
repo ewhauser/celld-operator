@@ -552,7 +552,20 @@ func (s *supervisor) captureRemoval(ctx context.Context, client *controlplane.Cl
 	for {
 		status, err := client.RemovalStatus(ctx, target, operation)
 		if err != nil {
-			return fmt.Errorf("strict shutdown result unavailable: %w", err)
+			if _, transport := errors.AsType[*controlplane.TransportError](err); !transport {
+				return fmt.Errorf("strict shutdown result unavailable: %w", err)
+			}
+			// celld drains existing HTTP connections before serving its terminal
+			// control-only state. Retry only observation, retaining the original
+			// deadline and child identity; an unavailable result is never proof.
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-exited:
+				return errors.New("child exited before strict result capture")
+			case <-time.After(100 * time.Millisecond):
+				continue
+			}
 		}
 		// A deadline or child exit racing the HTTP response invalidates capture.
 		if err := ctx.Err(); err != nil {

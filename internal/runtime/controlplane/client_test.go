@@ -221,7 +221,7 @@ func TestOrdinaryOperations(t *testing.T) {
 }
 
 func TestHTTPBoundaries(t *testing.T) {
-	for _, scenario := range []string{"malformed", "oversized", "redirect", "duplicate", "nested duplicate", "trailing", "array", "null", "too deep", "canceled", "deadline", "timeout", "http failure"} {
+	for _, scenario := range []string{"malformed", "oversized", "redirect", "duplicate", "nested duplicate", "trailing", "array", "null", "too deep", "canceled", "deadline", "timeout", "http failure", "connection closed", "truncated body", "truncated rejection"} {
 		t.Run(scenario, func(t *testing.T) {
 			c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
 				switch scenario {
@@ -248,6 +248,19 @@ func TestHTTPBoundaries(t *testing.T) {
 					<-r.Context().Done()
 				case "http failure":
 					w.WriteHeader(503)
+				case "connection closed":
+					connection, _, err := w.(http.Hijacker).Hijack()
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					_ = connection.Close()
+				case "truncated body", "truncated rejection":
+					w.Header().Set("Content-Length", "1000")
+					if scenario == "truncated rejection" {
+						w.WriteHeader(503)
+					}
+					writeJSON(w, `{}`)
 				default:
 					writeJSON(w, `{}`)
 				}
@@ -267,6 +280,10 @@ func TestHTTPBoundaries(t *testing.T) {
 			_, err := c.State(ctx, Target{IP: target.IP})
 			if err == nil {
 				t.Fatal("invalid response accepted")
+			}
+			wantTransport := scenario == "connection closed" || scenario == "truncated body" || scenario == "canceled" || scenario == "deadline" || scenario == "timeout"
+			if _, transport := errors.AsType[*TransportError](err); transport != wantTransport {
+				t.Fatalf("wrong transport error classification: %T %v", err, err)
 			}
 			if time.Since(before) > callTimeout+time.Second {
 				t.Fatal("call not bounded")

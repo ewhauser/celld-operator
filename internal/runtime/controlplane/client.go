@@ -20,6 +20,14 @@ const callTimeout = 2 * time.Second
 var ErrUnsupported = errors.New("runtime capability unsupported")
 var ErrIdentity = errors.New("runtime identity mismatch or unavailable")
 
+// TransportError means no complete response was observed. Callers may retry
+// reads within their existing deadline; this never makes a mutation safe to
+// replay or supplies evidence of runtime completion.
+type TransportError struct{ Err error }
+
+func (e *TransportError) Error() string { return e.Err.Error() }
+func (e *TransportError) Unwrap() error { return e.Err }
+
 // HTTPError preserves protocol rejection codes without exposing response bodies.
 type HTTPError struct{ StatusCode int }
 
@@ -73,21 +81,21 @@ func (c *Client) call(ctx context.Context, target Target, method, path string, b
 	}
 	response, err := c.http.Do(req)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, &TransportError{Err: err}
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxResponse+1))
 	closeErr := response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, response.StatusCode, &HTTPError{StatusCode: response.StatusCode}
+	}
 	if err != nil {
-		return nil, response.StatusCode, err
+		return nil, response.StatusCode, &TransportError{Err: err}
 	}
 	if closeErr != nil {
-		return nil, response.StatusCode, closeErr
+		return nil, response.StatusCode, &TransportError{Err: closeErr}
 	}
 	if len(data) > maxResponse {
 		return nil, response.StatusCode, errors.New("runtime response exceeds budget")
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, response.StatusCode, &HTTPError{StatusCode: response.StatusCode}
 	}
 	if err := validObject(data); err != nil {
 		return nil, response.StatusCode, err
