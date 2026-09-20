@@ -501,12 +501,13 @@ func (h *harness) app(pod, fleetName, method, path string) object {
 	return decode(h.curl(request{pod: pod, address: fleetName, path: path, port: 8080, method: method}))
 }
 
-func stored(response object) bool {
+func stored(response object, expectedID string) bool {
+	assert(expectedID != "" && str(response, "id") == expectedID, "response is not for requested ID %s: %v", expectedID, response)
 	value, ok := field(response, "stored").(bool)
 	assert(ok, "response lacks a boolean stored field: %v", response)
 	return value
 }
 
 func (h *harness) ackStored(pod, fleetName string) bool {
-	return stored(h.app(pod, fleetName, "GET", "/?cell=integration&id=ack"))
+	return stored(h.app(pod, fleetName, "GET", "/?cell=integration&id=ack"), "ack")
 }

@@ -104,7 +104,7 @@ func (h *harness) exerciseIsolation() {
 	h.curl(request{pod: "operator", address: addresses["alpha"], ns: operatorNS})
 	h.curl(request{pod: "client", address: "alpha", path: "/.well-known/celld/health", port: 8080})
 	h.curl(request{pod: "client", address: "beta", path: "/.well-known/celld/health", port: 8080, denied: true})
-	assert(stored(h.app("client", "alpha", "PUT", "/?cell=integration&id=ack")), "write not acknowledged")
+	assert(stored(h.app("client", "alpha", "PUT", "/?cell=integration&id=ack"), "ack"), "write not acknowledged")
 	assert(h.ackStored("client", "alpha"), "acknowledged write unreadable")
 	assert(!h.ackStored("client-beta", "beta"), "write visible from another fleet's storage scope")
 	fmt.Println("PASS: application writes readable only in their own fleet storage scope")

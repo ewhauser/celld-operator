@@ -18,3 +18,26 @@ func TestInterruptedCommandCanBeCollectedBeforeCleanup(t *testing.T) {
 		t.Fatalf("error = %v; want context cancellation", err)
 	}
 }
+
+func TestStoredResponseIsBoundToRequestedID(t *testing.T) {
+	for _, value := range []bool{false, true} {
+		if got := stored(object{"id": "expected", "stored": value}, "expected"); got != value {
+			t.Fatalf("stored = %v; want %v", got, value)
+		}
+	}
+	for name, response := range map[string]object{
+		"foreign ID":        {"id": "foreign", "stored": true},
+		"missing ID":        {"stored": true},
+		"missing stored":    {"id": "expected"},
+		"nonboolean stored": {"id": "expected", "stored": "true"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("malformed or foreign response was accepted")
+				}
+			}()
+			stored(response, "expected")
+		})
+	}
+}

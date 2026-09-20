@@ -7,6 +7,7 @@ import (
 )
 
 type claimIdentity struct{ UID, Volume, VolumeUID, Handle string }
+type ledgerEntry struct{ path, id string }
 
 func (h *harness) settled(fleetName string, count int64) bool {
 	return h.ready(fleetName) && specReplicas(h.get(h.workloadKind(fleetName), fleetName)) == count && len(sub(h.currentState(fleetName), "Operation")) == 0 && num(h.currentState(fleetName), "Applied") == count
@@ -41,22 +42,23 @@ func (h *harness) goneVolumes(claims map[string]claimIdentity) {
 
 func (h *harness) writeLedger(probe, fleetName string) {
 	if h.ledgers == nil {
-		h.ledgers = map[string][]string{}
+		h.ledgers = map[string][]ledgerEntry{}
 	}
 	batch := fmt.Sprintf("ack-%d", time.Now().UnixNano())
 	for i := range 12 {
-		path := fmt.Sprintf("/?cell=integration-%d&id=%s-%d", i, batch, i)
-		assert(stored(h.app(probe, fleetName, "PUT", path)), "write %s not acknowledged", path)
-		h.ledgers[fleetName] = append(h.ledgers[fleetName], path)
+		id := fmt.Sprintf("%s-%d", batch, i)
+		path := fmt.Sprintf("/?cell=integration-%d&id=%s", i, id)
+		assert(stored(h.app(probe, fleetName, "PUT", path), id), "write %s not acknowledged", path)
+		h.ledgers[fleetName] = append(h.ledgers[fleetName], ledgerEntry{path: path, id: id})
 	}
 }
 func (h *harness) readLedger(probe, fleetName string) {
-	paths := h.ledgers[fleetName]
-	assert(len(paths) > 0, "no acknowledged ledger writes for %s", fleetName)
-	for _, path := range paths {
-		assert(stored(h.app(probe, fleetName, "GET", path)), "acknowledged write lost: %s %s", fleetName, path)
+	entries := h.ledgers[fleetName]
+	assert(len(entries) > 0, "no acknowledged ledger writes for %s", fleetName)
+	for _, entry := range entries {
+		assert(stored(h.app(probe, fleetName, "GET", entry.path), entry.id), "acknowledged write lost: %s %s", fleetName, entry.path)
 	}
-	fmt.Printf("PASS: %s %d/%d acknowledged writes readable\n", fleetName, len(paths), len(paths))
+	fmt.Printf("PASS: %s %d/%d acknowledged writes readable\n", fleetName, len(entries), len(entries))
 }
 
 func (h *harness) exerciseLifecycle() {
