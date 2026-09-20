@@ -146,8 +146,26 @@ record has already disappeared cannot manufacture that evidence. Supporting
 that ordering needs another durable runtime evidence contract or authenticated
 transport history; higher polling frequency is not a proof.
 
+Because that window is roughly a second wide -- `CELLD_TTL_MS` is 10s and
+`dead_node_gc` deletes a no-log record about a second after the lease elapses --
+a post-effect pass reads the retired writer's record **first** and persists the
+observation immediately, ahead of the candidate sweep, placement validation,
+Collector fan-out and freshness checks that can each abort the pass while the
+record is still readable. Until that reading is taken the phase repolls every
+second instead of waiting out the 5-7s reconcile delay; afterwards the ordinary
+cadence returns. This is ordering and cadence, not evidence: the reading applies
+the same per-record predicate the full assessment applies to a retired member
+(exact generation, no epoch, no peer-log state, lease already elapsed against a
+single clock read), reports positives only, and is refused for a superseded or
+unknown generation. An absent or unreadable record still yields nothing, and the
+observation only ever lets a later assessment tolerate that exact record's
+disappearance -- complete membership, survivor health, peer-log obligations and
+settling are still established independently on that pass and on every later
+one, and contrary lease evidence still durably sets `ExpiryInvalidated`. Faster
+polling widens the chance of taking the reading; it never substitutes for it.
+
 The journal distinguishes `ExpiryObserved` (positive expiry authority from a
-complete membership assessment, not full settling) from `Retired` (membership state). A typed renewed-lease or generation-replacement
+positively read expired record, not full settling) from `Retired` (membership state). A typed renewed-lease or generation-replacement
 observation durably sets `ExpiryInvalidated` for the exact generation in both
 operation candidates and fully settled history. A subsequent missing record
 cannot reuse that superseded proof. Only another successful complete assessment

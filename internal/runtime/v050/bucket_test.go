@@ -157,3 +157,85 @@ func TestBucketExactSuccessorResolvesOnlyAdmittedHistory(t *testing.T) {
 		})
 	}
 }
+
+// The retirement probe is a narrowing of the full assessment, so it must accept
+// exactly what InspectBucketMembership accepts about a single retired record --
+// and nothing else. It reports positives only: a record that is absent,
+// unreadable, superseded, replaced, still live, or carrying peer-recovery state
+// yields no observation, so the probe can neither manufacture authority nor
+// revoke it.
+func TestObserveBucketRetirementReportsOnlyPositiveExpiry(t *testing.T) {
+	a, _ := New(Image)
+	raw := fixture(t, "node-bucket")
+	n, err := a.ParseNode("nodes/a.json", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.UnixMilli(n.SampledMS)
+	for _, name := range []string{"expired", "elapsed exactly", "live lease", "missing record", "unreadable", "replaced generation", "peer session", "unknown writer"} {
+		t.Run(name, func(t *testing.T) {
+			r := &reader{data: raw, pages: map[string]Page{"nodes/": {Keys: []string{"nodes/a.json"}, Complete: true}, "log/": {Complete: true}}}
+			members := []BucketMember{{Node: n.Name, Generation: n.Generation, Retired: true}}
+			// The lease elapsed a second ago: this is the window the probe exists
+			// to catch, and every other case must come back empty.
+			r.data = mutate(t, raw, func(m map[string]any) { m["expires_ms"] = now.Add(-time.Second).UnixMilli() })
+			switch name {
+			case "elapsed exactly":
+				r.data = mutate(t, raw, func(m map[string]any) { m["expires_ms"] = now.UnixMilli() })
+			case "live lease":
+				r.data = mutate(t, raw, func(m map[string]any) { m["expires_ms"] = now.Add(time.Minute).UnixMilli() })
+			case "missing record":
+				r.pages["nodes/"] = Page{Complete: true}
+			case "unreadable":
+				r.fail = "get"
+			case "replaced generation":
+				members[0].Generation = "different"
+			case "peer session":
+				r.data = fixture(t, "node-open")
+			case "unknown writer":
+				members[0].Node = "b"
+			}
+			observed, err := a.ObserveBucketRetirement(t.Context(), r, members, func() time.Time { return now })
+			if name == "unreadable" {
+				if err == nil {
+					t.Fatal("an unreadable record was not reported as a transport failure")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("probe failed: %v", err)
+			}
+			want := 0
+			if name == "expired" || name == "elapsed exactly" {
+				want = 1
+			}
+			if len(observed) != want {
+				t.Fatalf("observed %d expired records, want %d: %+v", len(observed), want, observed)
+			}
+			if want == 1 && (observed[0].Node != n.Name || observed[0].Generation != n.Generation) {
+				t.Fatalf("observation names the wrong writer: %+v", observed[0])
+			}
+		})
+	}
+}
+
+// A superseded predecessor is resolved through succession, never through its own
+// record, which the successor has overwritten. Offering one is a programming
+// error rather than a silent no-op.
+func TestObserveBucketRetirementRefusesAmbiguousProbes(t *testing.T) {
+	a, _ := New(Image)
+	r := &reader{data: fixture(t, "node-bucket"), pages: map[string]Page{"nodes/": {Complete: true}, "log/": {Complete: true}}}
+	now := time.Unix(10000, 0)
+	for _, members := range [][]BucketMember{
+		{{Node: "a", Generation: "one", SupersededBy: "two", Retired: true}},
+		{{Node: "a", Generation: "one", Retired: true}, {Node: "a", Generation: "two", Retired: true}},
+		{{Node: "", Generation: "one", Retired: true}},
+	} {
+		if _, err := a.ObserveBucketRetirement(t.Context(), r, members, func() time.Time { return now }); err == nil {
+			t.Fatalf("ambiguous probe accepted: %+v", members)
+		}
+	}
+	if observed, err := a.ObserveBucketRetirement(t.Context(), r, nil, func() time.Time { return now }); err != nil || observed != nil {
+		t.Fatalf("empty probe read anything: %+v %v", observed, err)
+	}
+}

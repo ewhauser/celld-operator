@@ -64,6 +64,120 @@ func invalidateBucketExpiry(records [][]bucketSession, e *v050.BucketExpiryInval
 	return changed
 }
 
+// retirementWindow is how often a post-effect pass repolls while an admitted
+// generation that has left the workload still has no positive expiry
+// observation. The pinned runtime deletes a no-log record about a second after
+// its lease elapses, so the ordinary 5-7s reconcile delay can step straight
+// over the whole readable-expired window. Higher frequency is not proof and
+// buys nothing once the reading is taken, so the tight cadence lasts only while
+// one is still possible.
+const retirementWindow = time.Second
+
+// bucketRetirementProbe is what one pre-assessment expiry reading found.
+type bucketRetirementProbe struct {
+	// Changed reports that a record was positively read expired, so the caller
+	// must persist the journal before doing anything that can fail.
+	Changed bool
+	// Pending reports that some admitted generation has left the workload and
+	// still carries no positive expiry authority, so the readable-expired window
+	// may still be open and this pass should repoll inside it.
+	Pending bool
+}
+
+// tighten replaces the ordinary reconcile delay with the retirement window
+// while a readable-expired record may still be waiting to be read.
+func tighten(result ctrl.Result, pending bool) ctrl.Result {
+	if pending && result.RequeueAfter > retirementWindow {
+		result.RequeueAfter = retirementWindow
+	}
+	return result
+}
+
+// observeRetirementExpiry reads the records of admitted generations that have
+// left the workload and records positive expiry for any read with an already
+// elapsed lease. Post-effect passes call it first, ahead of the candidate
+// sweep, placement validation, Collector fan-out and freshness checks that can
+// each abort a pass: the pinned dead_node_gc deletes a no-log record about a
+// second after the lease elapses, ADR 0016 forbids reconstructing that proof
+// afterwards, and a pass that fails on something else first can therefore wedge
+// Bucket contraction for the fleet permanently.
+//
+// This changes ordering and cadence only, never what counts as evidence. The
+// predicate is the one InspectBucketMembership applies to a retired record --
+// exact generation, no epoch, no peer-log state, lease already elapsed against a
+// single clock read -- and an observation only ever lets that function tolerate
+// the exact record's later disappearance. Every other check, the peer-log scan
+// and survivor freshness included, still runs on this pass and on every later
+// one. Membership comes from the plain Pod list rather than full candidate
+// admission because that sweep is precisely what fails while a replacement is
+// still unscheduled.
+//
+// A probe failure is never reported as a blocker. The assessment that follows
+// reports the real one, and a transport error here leaves the pass exactly
+// where it stood before this existed; it only keeps the tight cadence, because
+// an unread record may still be readable.
+func (r *Reconciler) observeRetirementExpiry(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal, records [][]bucketSession) bucketRetirementProbe {
+	if r.Evidence == nil {
+		return bucketRetirementProbe{Pending: true}
+	}
+	pods, err := r.Evidence.pods(ctx, f)
+	if err != nil {
+		return bucketRetirementProbe{Pending: true}
+	}
+	present := map[string]bool{}
+	for i := range pods {
+		present[string(pods[i].UID)] = true
+	}
+	var members []v050.BucketMember
+	unresolved := map[string]bool{}
+	for _, sessions := range records {
+		for _, s := range sessions {
+			// A superseded predecessor can never be read expired through its own
+			// record, which the successor has overwritten; the full assessment
+			// resolves those through succession instead.
+			if s.SupersededBy != "" || present[s.Node] || resolvedBucketSession(s) || unresolved[s.Node] {
+				continue
+			}
+			unresolved[s.Node] = true
+			members = append(members, v050.BucketMember{Node: s.Node, Generation: s.Generation, Retired: true})
+		}
+	}
+	if len(members) == 0 {
+		return bucketRetirementProbe{}
+	}
+	reader, err := r.Evidence.reader(ctx, f)
+	if err != nil {
+		return bucketRetirementProbe{Pending: true}
+	}
+	adapter, err := catalog.New(runtimeImage(evidenceRuntime(f, j)))
+	if err != nil {
+		return bucketRetirementProbe{Pending: true}
+	}
+	observed, err := adapter.ObserveBucketRetirement(ctx, reader, members, r.capacityNow)
+	if err != nil {
+		return bucketRetirementProbe{Pending: true}
+	}
+	probe := bucketRetirementProbe{}
+	for _, o := range observed {
+		for _, sessions := range records {
+			for i := range sessions {
+				s := &sessions[i]
+				if s.Node != o.Node || s.Generation != o.Generation || s.SupersededBy != "" {
+					continue
+				}
+				if !s.ExpiryObserved || s.ExpiryInvalidated {
+					probe.Changed = true
+				}
+				s.ExpiryObserved = true
+				s.ExpiryInvalidated = false
+			}
+		}
+		delete(unresolved, o.Node)
+	}
+	probe.Pending = len(unresolved) > 0
+	return probe
+}
+
 // bucketAssessmentScope selects how much of the survivor capacity evidence an
 // assessment demands on top of the membership, lease and loss checks that every
 // scope performs.
@@ -370,6 +484,9 @@ func (r *Reconciler) contractBucket(ctx context.Context, f *fleet.CelldFleet, re
 	save := func() (ctrl.Result, bool, error) {
 		return ctrl.Result{RequeueAfter: time.Second}, true, r.saveJournal(ctx, res, j)
 	}
+	// Set once the post-effect probe below runs; a blocked pass keeps polling
+	// inside the readable-expired window instead of waiting out reconcileDelay.
+	window := false
 	fail := func(err error) (ctrl.Result, bool, error) {
 		if _, ok := errors.AsType[*v050.LossError](err); ok {
 			return r.recordLoss(ctx, f, w, res, j, err.Error())
@@ -389,7 +506,8 @@ func (r *Reconciler) contractBucket(ctx context.Context, f *fleet.CelldFleet, re
 				return ctrl.Result{}, true, err
 			}
 		}
-		return report("BucketRecoveryBlocked", err.Error())
+		result, handled, err := report("BucketRecoveryBlocked", err.Error())
+		return tighten(result, window), handled, err
 	}
 	issued := w.GetAnnotations()[operationKey] == op.ID && replicas(w) == op.To
 	if j.Loss != "" {
@@ -467,6 +585,16 @@ func (r *Reconciler) contractBucket(ctx context.Context, f *fleet.CelldFleet, re
 	if op.Phase != "Recovering" {
 		op.Phase = "Recovering"
 		return save()
+	}
+	// Take the expiry reading before the assessment below, whose candidate
+	// sweep, placement validation and survivor collection can each fail this
+	// pass while the record is still readable and then gone by the next one.
+	probe := r.observeRetirementExpiry(ctx, f, j, [][]bucketSession{op.BucketCandidates, j.BucketHistory})
+	window = probe.Pending
+	if probe.Changed {
+		if err := r.saveJournal(ctx, res, j); err != nil {
+			return ctrl.Result{}, true, err
+		}
 	}
 	sessions, at, err := r.bucketAssessment(ctx, f, j, op.To, true)
 	if err != nil {

@@ -13,6 +13,7 @@ import (
 	v050 "github.com/ewhauser/celld-operator/internal/runtime/v050"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -470,5 +471,144 @@ func TestBucketRetiredHistoryWithoutPositiveExpiryIsNotResolved(t *testing.T) {
 				t.Fatalf("retirement alone resolved a missing writer record: %v", err)
 			}
 		})
+	}
+}
+
+// retiredBucketFleet admits three writers, then removes pod-1 and leaves an
+// issued contraction in Recovering whose candidate sweep can no longer succeed:
+// the surviving Pod count no longer matches the count the operation was issued
+// against, which is what a replacement stuck Pending on a cordoned node does to
+// a real pass.
+func retiredBucketFleet(t *testing.T) (*Reconciler, *fleet.CelldFleet, *lifecycleJournal, *bucketReader) {
+	t.Helper()
+	p, f, j, opts, reader := bucketPreflightSetup(t)
+	j.Operation = nil
+	j.Applied = 3
+	r := &Reconciler{Client: p.client, Evidence: p, Options: opts, now: p.now}
+	if _, err := r.admitBucketHistory(t.Context(), f, j); err != nil {
+		t.Fatal(err)
+	}
+	pod := &corev1.Pod{}
+	if err := r.Get(t.Context(), client.ObjectKey{Namespace: f.Namespace, Name: "pod-1"}, pod); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Delete(t.Context(), pod); err != nil {
+		t.Fatal(err)
+	}
+	for i := range j.BucketHistory {
+		if j.BucketHistory[i].Node == "pod-1" {
+			j.BucketHistory[i].Retired = true
+			j.BucketHistory[i].ExpiryObserved = false
+			j.BucketHistory[i].ExpiryInvalidated = false
+		}
+	}
+	j.Operation = &lifecycleOperation{ID: "op", From: 3, To: 2, Phase: "Recovering", BucketCandidates: slices.Clone(j.BucketHistory)}
+	if _, _, err := r.bucketAssessment(t.Context(), f, j, 2, true); err == nil {
+		t.Fatal("expected this pass to fail before reading the retired writer's record")
+	}
+	return r, f, j, reader
+}
+
+// observed reports the expiry state recorded for one node across both record
+// sets a post-effect pass carries.
+func observedExpiry(j *lifecycleJournal, node string) (int, int) {
+	proofs, records := 0, 0
+	for _, sessions := range [][]bucketSession{j.Operation.BucketCandidates, j.BucketHistory} {
+		for _, s := range sessions {
+			if s.Node != node {
+				continue
+			}
+			records++
+			if resolvedBucketSession(s) {
+				proofs++
+			}
+		}
+	}
+	return proofs, records
+}
+
+// The readable-expired window is about a second wide, and the proof is
+// unrecoverable once the pinned runtime deletes the record. A pass must
+// therefore take the reading before the candidate sweep, placement validation
+// and survivor collection that can each abort it -- and must persist what it
+// read even though the rest of that same pass fails.
+func TestBucketRetirementExpiryRecordedBeforeAFailingSweep(t *testing.T) {
+	r, f, j, reader := retiredBucketFleet(t)
+	reader.expired = map[string]bool{"pod-1": true}
+	probe := r.observeRetirementExpiry(t.Context(), f, j, [][]bucketSession{j.Operation.BucketCandidates, j.BucketHistory})
+	if !probe.Changed || probe.Pending {
+		t.Fatalf("expired record was not recorded on the pass that failed: %+v", probe)
+	}
+	proofs, records := observedExpiry(j, "pod-1")
+	if records == 0 || proofs != records {
+		t.Fatalf("expiry proof recorded in %d of %d records", proofs, records)
+	}
+	// The runtime now garbage-collects the record. The proof taken before the
+	// sweep failed must carry the operation instead of wedging it forever.
+	reader.nodes = slices.DeleteFunc(reader.nodes, func(node string) bool { return node == "pod-1" })
+	_, _, err := r.bucketAssessment(t.Context(), f, j, 2, true)
+	if err != nil && strings.Contains(err.Error(), "unresolved bucket writer record missing") {
+		t.Fatalf("recorded expiry did not survive the record's deletion: %v", err)
+	}
+}
+
+// Absence is never expiry: a record already gone before anything read it must
+// leave the operation blocked, however fast the controller polls.
+func TestBucketRetirementProbeNeverInventsExpiry(t *testing.T) {
+	r, f, j, reader := retiredBucketFleet(t)
+	reader.expired = map[string]bool{"pod-1": true}
+	reader.nodes = slices.DeleteFunc(reader.nodes, func(node string) bool { return node == "pod-1" })
+	probe := r.observeRetirementExpiry(t.Context(), f, j, [][]bucketSession{j.Operation.BucketCandidates, j.BucketHistory})
+	if probe.Changed {
+		t.Fatal("a missing record was promoted into positive expiry proof")
+	}
+	if !probe.Pending {
+		t.Fatal("a writer with no expiry proof was reported resolved")
+	}
+	if proofs, _ := observedExpiry(j, "pod-1"); proofs != 0 {
+		t.Fatalf("%d expiry proofs recorded for a record nothing read", proofs)
+	}
+	_, _, err := r.bucketAssessment(t.Context(), f, j, 2, true)
+	if err == nil || !strings.Contains(err.Error(), "unresolved bucket writer record missing") {
+		t.Fatalf("missing record did not block the assessment: %v", err)
+	}
+}
+
+// Cadence follows the window, not the phase: poll every second while a retired
+// writer's record may still be readable, and hand the ordinary reconcile delay
+// back as soon as the reading is taken.
+func TestBucketRetirementWindowCadence(t *testing.T) {
+	r, f, j, reader := retiredBucketFleet(t)
+	ordinary := ctrl.Result{RequeueAfter: reconcileDelay(f)}
+	if ordinary.RequeueAfter <= retirementWindow {
+		t.Fatalf("ordinary cadence %s does not exceed the retirement window", ordinary.RequeueAfter)
+	}
+	// The writer is gone but its lease has not elapsed yet: nothing to record,
+	// and the window is still ahead, so keep polling inside it.
+	records := [][]bucketSession{j.Operation.BucketCandidates, j.BucketHistory}
+	probe := r.observeRetirementExpiry(t.Context(), f, j, records)
+	if probe.Changed {
+		t.Fatal("a live lease was recorded as expiry")
+	}
+	if !probe.Pending {
+		t.Fatal("an unresolved retirement did not hold the tight cadence")
+	}
+	if got := tighten(ordinary, probe.Pending); got.RequeueAfter != retirementWindow {
+		t.Fatalf("requeue %s, want %s while the window may be open", got.RequeueAfter, retirementWindow)
+	}
+	// The lease elapses and the record is read. The proof is durable now, so the
+	// fleet goes back to its ordinary cadence.
+	reader.expired = map[string]bool{"pod-1": true}
+	probe = r.observeRetirementExpiry(t.Context(), f, j, records)
+	if !probe.Changed || probe.Pending {
+		t.Fatalf("expired record was not recorded: %+v", probe)
+	}
+	if got := tighten(ordinary, probe.Pending); got.RequeueAfter != ordinary.RequeueAfter {
+		t.Fatalf("requeue %s, want the ordinary %s once expiry is observed", got.RequeueAfter, ordinary.RequeueAfter)
+	}
+	// A second pass has nothing left to read and must not re-poll tightly.
+	probe = r.observeRetirementExpiry(t.Context(), f, j, records)
+	if probe.Changed || probe.Pending {
+		t.Fatalf("resolved retirement kept the tight cadence: %+v", probe)
 	}
 }

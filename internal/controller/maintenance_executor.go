@@ -139,6 +139,10 @@ type maintenancePass struct {
 	view  lifecycleJournal
 	save  func() (ctrl.Result, bool, error)
 	block func(error) (ctrl.Result, bool, error)
+	// window is set while a retired writer's record may still be readable, so a
+	// blocked pass repolls inside that window rather than waiting out the
+	// ordinary reconcile delay.
+	window bool
 }
 
 func (r *Reconciler) executeMaintenance(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, j *lifecycleJournal, w client.Object) (ctrl.Result, bool, error) {
@@ -159,7 +163,7 @@ func (r *Reconciler) executeMaintenance(ctx context.Context, f *fleet.CelldFleet
 			return ctrl.Result{}, true, saveErr
 		}
 		result, reportErr := r.report(ctx, f, hydrated(res, j), "MaintenanceRecoveryBlocked", err.Error(), false)
-		return result, true, reportErr
+		return tighten(result, p.window), true, reportErr
 	}
 	expected, denied := r.admitMaintenancePass(ctx, p)
 	if denied != nil {
@@ -175,6 +179,18 @@ func (r *Reconciler) executeMaintenance(ctx context.Context, f *fleet.CelldFleet
 	}
 	p.view = *j
 	p.view.Operation = &lifecycleOperation{ID: m.ID, Phase: "Recovering", From: j.Applied, To: j.Applied, BucketCandidates: m.Sessions}
+	// Post-effect: the target is gone and its record is on the pinned runtime's
+	// short deletion clock. Read it before the assessments below, which can fail
+	// on survivors, placement or collection while the reading is still possible.
+	if m.Phase == "Recovering" {
+		probe := r.observeRetirementExpiry(ctx, f, j, [][]bucketSession{m.Sessions, j.BucketHistory})
+		p.window = probe.Pending
+		if probe.Changed {
+			if err := r.saveJournal(ctx, res, j); err != nil {
+				return ctrl.Result{}, true, err
+			}
+		}
+	}
 	if m.Kind == "Delete" {
 		return r.executeBucketDeletion(ctx, f, res, j, w, p.block)
 	}

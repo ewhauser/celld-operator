@@ -315,9 +315,20 @@ func (r *Reconciler) migrateBucketAuthorized(ctx context.Context, p *migrationPa
 
 func (r *Reconciler) migrateBucketRecovering(ctx context.Context, p *migrationPass) (ctrl.Result, bool, error) {
 	f, res, j, m, old, w, save := p.f, p.res, p.j, p.m, p.old, p.w, p.save
+	// Every source Pod is already gone by this phase, so the source records are
+	// on the pinned runtime's deletion clock. Read them before the evidence
+	// gathering below, which can fail on the Pod gate, the loss scan or an
+	// unadmitted writer while the records are still readable.
+	probe := r.observeRetirementExpiry(ctx, f, j, [][]bucketSession{j.BucketHistory})
+	if probe.Changed {
+		if err := r.saveJournal(ctx, res, j); err != nil {
+			return ctrl.Result{}, true, err
+		}
+	}
 	evidence, err := r.migrationRetirementEvidence(ctx, old, j)
 	if err != nil {
-		return r.migrationFailure(ctx, f, res, j, w, err)
+		result, handled, failErr := r.migrationFailure(ctx, f, res, j, w, err)
+		return tighten(result, probe.Pending), handled, failErr
 	}
 	for i := range j.BucketHistory {
 		j.BucketHistory[i].Retired = true
