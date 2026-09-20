@@ -55,8 +55,8 @@ func (h *harness) try(c command) (string, error) {
 	base := h.ctx
 	if c.background {
 		base = context.Background()
-	} else if h.ctx.Err() != nil {
-		fail("integration interrupted")
+	} else if err := h.ctx.Err(); err != nil {
+		return "", fmt.Errorf("integration interrupted: %w", err)
 	}
 	ctx, cancel := context.WithTimeout(base, c.timeout)
 	defer cancel()
@@ -74,7 +74,7 @@ func (h *harness) try(c command) (string, error) {
 	cmd.Stderr = &out
 	err := cmd.Run()
 	if !c.background && h.ctx.Err() != nil {
-		fail("integration interrupted")
+		return out.String(), fmt.Errorf("integration interrupted: %w", h.ctx.Err())
 	}
 	switch {
 	case err == nil:

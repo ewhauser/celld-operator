@@ -9,6 +9,7 @@ import (
 	"crypto/sha512"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -142,22 +143,41 @@ func (h *harness) loadImages() {
 			continue
 
 		}
-		fmt.Println("Pulling into disposable node:", image)
-		for _, node := range h.nodes {
-			// Registry throughput varies; a slow pull must not abort a long run.
+		h.pullImage(image)
+	}
+}
+
+// Each node owns a separate containerd store. Bound concurrency at the three
+// disposable nodes; a failure is collected before the parent performs cleanup.
+func (h *harness) pullImage(image string) {
+	fmt.Println("Pulling into disposable nodes:", image)
+	results := make(chan error, len(h.nodes))
+	for _, node := range h.nodes {
+		go func() {
+			var err error
 			for attempt := range 3 {
-				_, err := h.try(command{args: []string{"docker", "exec", node, "crictl", "pull", image}, timeout: 10 * time.Minute})
+				_, err = h.try(command{args: []string{"docker", "exec", node, "crictl", "pull", image}, timeout: 10 * time.Minute})
 				if err == nil {
 					fmt.Println("Pulled image:", image, "on", node)
 					break
 				}
-				if attempt == 2 {
-					must(err)
+				if h.ctx.Err() != nil {
+					break
 				}
-				fmt.Println("Retrying image pull on", node, "after:", truncate(err.Error(), 200))
+				if attempt < 2 {
+					fmt.Println("Retrying image pull on", node, "after:", truncate(err.Error(), 200))
+				}
 			}
+			results <- err
+		}()
+	}
+	var failures []error
+	for range h.nodes {
+		if err := <-results; err != nil {
+			failures = append(failures, err)
 		}
 	}
+	must(errors.Join(failures...))
 }
 
 func truncate(s string, n int) string {
