@@ -18,7 +18,7 @@ const operationBudget = 30 * time.Minute
 // cancelRemoval first persists cancellation intent, then fences the old issuer on
 // its CAS object, then retires authority. Crashes at any boundary are replayable.
 // No second replica effect is created until the old CAS can no longer succeed.
-func (r *Reconciler) cancelRemoval(ctx context.Context, res *fleet.CelldStorageReservation, j *lifecycleJournal, w client.Object) (ctrl.Result, error) {
+func (r *Reconciler) cancelRemoval(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, j *lifecycleJournal, w client.Object) (ctrl.Result, error) {
 	op := j.Operation
 	if w.GetAnnotations()[operationKey] == op.ID && replicas(w) == op.To {
 		// Issuance won before cancellation. Preserve its recovery authority forever
@@ -43,7 +43,7 @@ func (r *Reconciler) cancelRemoval(ctx context.Context, res *fleet.CelldStorageR
 	}
 	done := completion(op, time.Time{})
 	done.Outcome = "CanceledBeforeIssue"
-	j.History = append(j.History, done)
+	r.recordCompletion(f, j, done)
 	for _, candidate := range op.BucketCandidates {
 		// Cancellation preserves every admitted generation and its positively
 		// observed succession chain, but never invents completed retirement.

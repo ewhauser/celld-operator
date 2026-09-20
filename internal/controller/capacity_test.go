@@ -149,7 +149,7 @@ func TestCapacityManualOverrideAndRestart(t *testing.T) {
 	f = desiredCount(t, r, f, 5)
 	advancePolicy(t, r, f, c, 6)
 	j := getJournal(t, r, f)
-	if j.Applied != 5 || len(j.History) != 2 {
+	if j.Applied != 5 || len(j.History) != 1 {
 		t.Fatal(j)
 	}
 	// A manual request persisted before a crash but before intent must not be lost.

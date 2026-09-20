@@ -210,7 +210,7 @@ func (r *Reconciler) executeCoordinatedPersistent(ctx context.Context, f *fleet.
 			j.RuntimeImage = m.TargetImage
 			outcome = "StoppedUpgradeComplete"
 		}
-		j.History = append(j.History, lifecycleCompletion{ID: m.ID, From: j.Applied, To: m.TargetReplicas, EvidenceAt: inventory.ObservedAt, Outcome: outcome})
+		r.recordCompletion(f, j, lifecycleCompletion{ID: m.ID, From: j.Applied, To: m.TargetReplicas, EvidenceAt: inventory.ObservedAt, Outcome: outcome})
 		j.Applied = m.TargetReplicas
 		j.Maintenance = nil
 		j.Request = nil

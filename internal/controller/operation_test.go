@@ -8,6 +8,7 @@ import (
 	"time"
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -15,6 +16,8 @@ func TestBlockedRemovalAdditionCancellationRestartBoundaries(t *testing.T) {
 	for _, profile := range []string{"Bucket", "PersistentFleet"} {
 		t.Run(profile, func(t *testing.T) {
 			r, f := lifecycleSetup(t, profile)
+			recorder := events.NewFakeRecorder(64)
+			r.Recorder = recorder
 			f = desiredCount(t, r, f, 2)
 			reconcile(t, r, f)
 			op := *getJournal(t, r, f).Operation
@@ -36,14 +39,16 @@ func TestBlockedRemovalAdditionCancellationRestartBoundaries(t *testing.T) {
 			}
 			for range 7 {
 				// Every remaining boundary loses the old process and status authority.
-				r = &Reconciler{Client: r.Client, Options: r.Options, NetworkPolicyEnforced: true}
+				r = &Reconciler{Client: r.Client, Options: r.Options, NetworkPolicyEnforced: true, Recorder: recorder}
 				reconcile(t, r, f)
 			}
 			j := getJournal(t, r, f)
-			if j.Applied != 4 || j.Operation != nil || len(j.History) != 2 || j.History[0].Outcome != "CanceledBeforeIssue" {
+			// The later addition is the only completion the journal keeps; the
+			// cancellation of the old authority is audited as an event instead.
+			if j.Applied != 4 || j.Operation != nil || len(j.History) != 1 || j.History[0].From != 3 || j.History[0].To != 4 {
 				t.Fatalf("%+v", j)
 			}
-			if j.History[0].ID != op.ID {
+			if !recordedEvent(recorder, "CanceledBeforeIssue", op.ID) {
 				t.Fatal("old authority lost")
 			}
 		})

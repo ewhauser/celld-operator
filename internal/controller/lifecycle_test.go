@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -94,6 +97,39 @@ func getJournal(t *testing.T, r *Reconciler, f *fleet.CelldFleet) *lifecycleJour
 	}
 	return j
 }
+
+// recordedEvents drains everything a fake recorder has collected so far. The
+// audit trail that History no longer keeps is emitted as events instead, so
+// tests assert on this rather than on a growing journal field.
+func recordedEvents(recorder *events.FakeRecorder) []string {
+	notes := []string{}
+	for {
+		select {
+		case note := <-recorder.Events:
+			notes = append(notes, note)
+		default:
+			return notes
+		}
+	}
+}
+
+// recordedEvent reports whether any drained event mentions every given fragment.
+func recordedEvent(recorder *events.FakeRecorder, fragments ...string) bool {
+	for _, note := range recordedEvents(recorder) {
+		found := true
+		for _, fragment := range fragments {
+			if !strings.Contains(note, fragment) {
+				found = false
+				break
+			}
+		}
+		if found {
+			return true
+		}
+	}
+	return false
+}
+
 func desiredCount(t *testing.T, r *Reconciler, f *fleet.CelldFleet, n int32) *fleet.CelldFleet {
 	t.Helper()
 	got := &fleet.CelldFleet{}
@@ -116,6 +152,39 @@ func lifecycleSetup(t *testing.T, profile string) (*Reconciler, *fleet.CelldFlee
 	reconcile(t, r, f)
 	return r, f
 }
+
+// TestCompletionHistoryKeepsOnlyTheLastEntry pins the ADR 0021 phase 1 boundary
+// for History: the journal retains exactly the entry the status projection
+// reads, and the trail that used to grow beside it is emitted as events.
+func TestCompletionHistoryKeepsOnlyTheLastEntry(t *testing.T) {
+	r, f := lifecycleSetup(t, "Bucket")
+	recorder := events.NewFakeRecorder(64)
+	r.Recorder = recorder
+	f = desiredCount(t, r, f, 4)
+	for range 3 {
+		reconcile(t, r, f)
+	}
+	j := getJournal(t, r, f)
+	if j.Applied != 4 || len(j.History) != 1 || j.History[0].From != 3 || j.History[0].To != 4 {
+		t.Fatalf("first expansion: %+v", j)
+	}
+	first := j.History[0].ID
+	f = desiredCount(t, r, f, 5)
+	for range 3 {
+		reconcile(t, r, f)
+	}
+	j = getJournal(t, r, f)
+	if j.Applied != 5 || len(j.History) != 1 || j.History[0].From != 4 || j.History[0].To != 5 || j.History[0].ID == first {
+		t.Fatalf("second expansion did not replace the retained entry: %+v", j)
+	}
+	notes := recordedEvents(recorder)
+	for _, id := range []string{first, j.History[0].ID} {
+		if !slices.ContainsFunc(notes, func(note string) bool { return strings.Contains(note, id) }) {
+			t.Fatalf("completion %s never reached the event stream: %v", id, notes)
+		}
+	}
+}
+
 func TestLifecycleScaleOutRestartsAndStatusLoss(t *testing.T) {
 	for _, profile := range []string{"Bucket", "PersistentFleet"} {
 		t.Run(profile, func(t *testing.T) {
@@ -208,7 +277,8 @@ func TestLifecycleRepeatedContractionAndCrashAfterEffect(t *testing.T) {
 	e.now = e.now.Add(11 * time.Second)
 	reconcile(t, r, f)
 	j := getJournal(t, r, f)
-	if j.Applied != 1 || len(j.Claims) != 3 || len(j.Sessions) != 3 || len(j.History) != 2 || j.History[0].EvidenceAt.IsZero() || j.History[0].TargetPod != "alpha-2" {
+	// History keeps the last completion only; the earlier one is an event.
+	if j.Applied != 1 || len(j.Claims) != 3 || len(j.Sessions) != 3 || len(j.History) != 1 || j.History[0].EvidenceAt.IsZero() || j.History[0].TargetPod != "alpha-1" {
 		t.Fatalf("history lost: %+v", j)
 	}
 	if err := r.applyReplicas(t.Context(), old, &oldOp); !apierrors.IsConflict(err) {

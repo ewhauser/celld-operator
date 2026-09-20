@@ -323,7 +323,7 @@ func (r *Reconciler) executeMaintenanceCapture(ctx context.Context, p *maintenan
 	m.Sessions = sessions
 	if m.Index == len(m.Targets) {
 		j.CompletedRestarts = append(j.CompletedRestarts, m.Token)
-		j.History = append(j.History, lifecycleCompletion{ID: m.ID, From: j.Applied, To: j.Applied, EvidenceAt: r.capacityNow(), Outcome: "RestartComplete"})
+		r.recordCompletion(f, j, lifecycleCompletion{ID: m.ID, From: j.Applied, To: j.Applied, EvidenceAt: r.capacityNow(), Outcome: "RestartComplete"})
 		j.Maintenance = nil
 		j.Request = nil
 		return save()

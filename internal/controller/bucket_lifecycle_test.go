@@ -278,7 +278,7 @@ func testBucketManualContractionCrashReplay(t *testing.T, contrary string, order
 	step()
 	reader.now = reader.now.Add(11 * time.Second)
 	step()
-	if j.Operation != nil || j.Applied != 2 || len(j.BucketHistory) != 4 || len(j.History) != 2 {
+	if j.Operation != nil || j.Applied != 2 || len(j.BucketHistory) != 4 || len(j.History) != 1 {
 		t.Fatal("repeated shrink/grow lost authority")
 	}
 }
