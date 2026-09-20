@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -170,5 +171,41 @@ func TestJournalBudgetNeverPrunesHistory(t *testing.T) {
 	}
 	if res.Annotations[journalKey] != before {
 		t.Fatal("failed save changed durable authority")
+	}
+}
+
+func TestJournalRejectsInvalidDeadlineAndRequest(t *testing.T) {
+	now := time.Now().UTC()
+	for _, tc := range []struct {
+		name, want string
+		mutate     func(*lifecycleJournal)
+	}{
+		{"equal-deadline", "invalid operation deadline", func(j *lifecycleJournal) { j.Operation.Deadline = now }},
+		{"backwards-deadline", "invalid operation deadline", func(j *lifecycleJournal) { j.Operation.Deadline = now.Add(-time.Second) }},
+		{"missing-request-id", "invalid disruption request", func(j *lifecycleJournal) { j.Request.ID = "" }},
+		{"wrong-source", "invalid disruption request", func(j *lifecycleJournal) { j.Request.SourceImage = "other" }},
+		{"wrong-workload", "invalid disruption request", func(j *lifecycleJournal) { j.Request.WorkloadUID = "other" }},
+		{"unknown-kind", "invalid disruption request", func(j *lifecycleJournal) { j.Request.Kind = "Unknown" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			j := &lifecycleJournal{Version: 8, RuntimeImage: Image, Initial: 3, Applied: 3, WorkloadUID: "workload",
+				Operation: &lifecycleOperation{ID: "op", From: 3, To: 2, Phase: "Intent", StartedAt: now, Deadline: now.Add(time.Minute)},
+				Request:   &disruptionRequest{ID: "request", Kind: "Restart", SourceImage: Image, WorkloadUID: "workload"}}
+			read := func() error {
+				b, err := json.Marshal(j)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = readJournal(&fleet.CelldStorageReservation{Annotations: map[string]string{journalKey: string(b)}})
+				return err
+			}
+			if err := read(); err != nil {
+				t.Fatalf("valid control rejected: %v", err)
+			}
+			tc.mutate(j)
+			if err := read(); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want %q, got %v", tc.want, err)
+			}
+		})
 	}
 }

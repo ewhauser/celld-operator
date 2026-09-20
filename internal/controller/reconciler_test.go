@@ -75,6 +75,9 @@ func setup(t *testing.T, objects ...client.Object) *Reconciler {
 func reconcile(t *testing.T, r *Reconciler, f *fleet.CelldFleet) *fleet.CelldFleet {
 	t.Helper()
 	ctx := t.Context()
+	original := r.Client
+	r.Client = auditManifestClient(t, original)
+	defer func() { r.Client = original }()
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(f)}); err != nil {
 		t.Fatal(err)
 	}
