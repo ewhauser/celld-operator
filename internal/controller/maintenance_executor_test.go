@@ -440,6 +440,100 @@ func TestBucketRetainDataShutdownCompletesOnlyAfterAllLeasesExpire(t *testing.T)
 	}
 }
 
+// RetainData deletion removes every member, so it has no projected survivor to
+// keep healthy or under low demand. A busy fleet, or a cluster with no Metrics
+// Server at all, must still be able to finish shutdown and drop the finalizer.
+func TestBucketRetainDataShutdownIgnoresSurvivorCapacity(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		collect func(now time.Time, pods *corev1.PodList) capacityCollector
+	}{
+		{name: "NoMetricsServer", collect: func(time.Time, *corev1.PodList) capacityCollector { return nil }},
+		{name: "BusyFleet", collect: func(now time.Time, pods *corev1.PodList) capacityCollector {
+			o := capacity.Observation{At: now, Complete: true}
+			for i := range pods.Items {
+				id, _ := podIdentity(&pods.Items[i])
+				o.Samples = append(o.Samples, capacity.Sample{Identity: id, Ready: true, CPU: 500, MemoryMiB: 900, RuntimeAt: now, RuntimeReceived: now, MetricsAt: now, MetricsReceived: now, Window: 15 * time.Second})
+			}
+			return bucketCapacityCollector{o}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, f, j, opts, reader := bucketPreflightSetup(t)
+			p.now = func() time.Time { return reader.now }
+			f.Spec.Replicas = 3
+			f.Finalizers = []string{Finalizer}
+			if err := p.client.Update(t.Context(), f); err != nil {
+				t.Fatal(err)
+			}
+			if err := p.client.Delete(t.Context(), f); err != nil {
+				t.Fatal(err)
+			}
+			if err := p.client.Get(t.Context(), client.ObjectKeyFromObject(f), f); err != nil {
+				t.Fatal(err)
+			}
+			j.Version = 6
+			j.RuntimeImage = Image
+			j.Initial = 3
+			j.Applied = 3
+			j.Operation = nil
+			j.Maintenance = &maintenanceOperation{ID: "delete", Kind: "Delete", Phase: "Capture", Deadline: reader.now.Add(time.Hour)}
+			w := workload(f, opts).(*appsv1.Deployment)
+			w.UID = j.WorkloadUID
+			w.Annotations = map[string]string{maintenanceFenceKey: "deleting"}
+			res := &fleet.CelldStorageReservation{Name: reservationName(f)}
+			if err := p.client.Create(t.Context(), w); err != nil {
+				t.Fatal(err)
+			}
+			if err := p.client.Create(t.Context(), res); err != nil {
+				t.Fatal(err)
+			}
+			r := &Reconciler{Client: p.client, Options: opts, Evidence: p, now: p.now}
+			pods := &corev1.PodList{}
+			if err := r.List(t.Context(), pods); err != nil {
+				t.Fatal(err)
+			}
+			r.Collector = tc.collect(reader.now, pods)
+			var blocked error
+			step := func() {
+				t.Helper()
+				blocked = nil
+				_, _, err := r.executeBucketDeletion(t.Context(), f, res, j, w, func(e error) (ctrl.Result, bool, error) { blocked = e; return ctrl.Result{}, true, nil })
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			step()
+			if j.Maintenance.Phase != "Authorized" {
+				t.Fatal("capacity gate blocked shutdown capture", blocked)
+			}
+			step()
+			if replicas(w) != 0 || j.Maintenance.Phase != "Recovering" {
+				t.Fatal("shutdown replicas not issued", blocked)
+			}
+			for i := range pods.Items {
+				if err := r.Delete(t.Context(), &pods.Items[i]); err != nil {
+					t.Fatal(err)
+				}
+			}
+			reader.expired = map[string]bool{"pod-0": true, "pod-1": true, "pod-2": true}
+			step()
+			if blocked != nil {
+				t.Fatal(blocked)
+			}
+			reader.now = reader.now.Add(11 * time.Second)
+			step()
+			step()
+			if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), &fleet.CelldFleet{}); !apierrors.IsNotFound(err) {
+				t.Fatal("finalizer not removed", err)
+			}
+			if err := r.Get(t.Context(), client.ObjectKeyFromObject(res), &fleet.CelldStorageReservation{}); err != nil {
+				t.Fatal("permanent reservation removed", err)
+			}
+		})
+	}
+}
+
 func TestPersistentRestartWaitsForFollowerBarrierAndReusesExactDisk(t *testing.T) {
 	p := persistentSetup(t)
 	p.j.Operation = nil
