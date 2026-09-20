@@ -31,22 +31,11 @@ func (a *Adapter) InspectBucket(ctx context.Context, r Reader, req Request, now 
 		expected[s.Node] = s.Generation
 	}
 	budget := req.PageBudget
-	keys, err := list(ctx, r, "nodes/", &budget)
+	nodes, err := a.readNodes(ctx, r, &budget, len(expected), errors.New("bucket writer inventory changed or missing"))
 	if err != nil {
 		return BucketObservation{}, err
 	}
-	if len(keys) != len(expected) {
-		return BucketObservation{}, errors.New("bucket writer inventory changed or missing")
-	}
-	for _, key := range keys {
-		data, err := r.Get(ctx, key)
-		if err != nil {
-			return BucketObservation{}, err
-		}
-		n, err := a.ParseNode(key, data)
-		if err != nil {
-			return BucketObservation{}, err
-		}
+	for _, n := range nodes {
 		if expected[n.Name] != n.Generation || n.Epoch != 0 || n.LogState != "" {
 			return BucketObservation{}, errors.New("bucket generation changed or peer-log session present")
 		}
@@ -147,20 +136,12 @@ func (a *Adapter) InspectBucketMembership(ctx context.Context, r Reader, members
 		return BucketObservation{}, errors.New("empty bucket membership")
 	}
 	budget := 1000
-	keys, err := list(ctx, r, "nodes/", &budget)
+	nodes, err := a.readNodes(ctx, r, &budget, -1, nil)
 	if err != nil {
 		return BucketObservation{}, err
 	}
 	seen := map[string]bool{}
-	for _, key := range keys {
-		body, err := r.Get(ctx, key)
-		if err != nil {
-			return BucketObservation{}, err
-		}
-		node, err := a.ParseNode(key, body)
-		if err != nil {
-			return BucketObservation{}, err
-		}
+	for _, node := range nodes {
 		seen[node.Name] = true
 		s, ok := expected[node.Name]
 		if ok && node.Generation != s.Generation {

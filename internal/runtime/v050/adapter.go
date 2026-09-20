@@ -301,22 +301,11 @@ func (a *Adapter) assess(ctx context.Context, r Reader, req Request, now func() 
 		expected[s.Node] = s
 	}
 	budget := req.PageBudget
-	keys, err := list(ctx, r, "nodes/", &budget)
+	nodes, err := a.readNodes(ctx, r, &budget, len(expected), errors.New("inventory changed or missing nodes"))
 	if err != nil {
 		return Evidence{}, err
 	}
-	if len(keys) != len(expected) {
-		return Evidence{}, errors.New("inventory changed or missing nodes")
-	}
-	for _, key := range keys {
-		data, err := r.Get(ctx, key)
-		if err != nil {
-			return Evidence{}, err
-		}
-		n, err := a.ParseNode(key, data)
-		if err != nil {
-			return Evidence{}, err
-		}
+	for _, n := range nodes {
 		s, ok := expected[n.Name]
 		if !ok || s.Generation != n.Generation {
 			return Evidence{}, errors.New("unknown node or generation replacement")
@@ -401,6 +390,38 @@ func listEach(ctx context.Context, r Reader, prefix string, budget *int, visit f
 		seenTokens[page.Next] = true
 		token = page.Next
 	}
+}
+
+// readNodes lists nodes/ and parses every record it names. The listing spends
+// the caller's shared page budget. When want is non-negative the listing size is
+// compared against it and mismatch is returned before any body is read, so an
+// inventory that changed under us costs no object reads; pass -1 and a nil
+// mismatch to accept whatever the fleet currently publishes.
+//
+// On failure the records parsed before the error are still returned: they are
+// negative observations that Inventory callers retain. They are NEVER positive
+// evidence, so every caller that assesses completion discards them.
+func (a *Adapter) readNodes(ctx context.Context, r Reader, budget *int, want int, mismatch error) ([]Node, error) {
+	var nodes []Node
+	keys, err := list(ctx, r, "nodes/", budget)
+	if err != nil {
+		return nodes, err
+	}
+	if want >= 0 && len(keys) != want {
+		return nodes, mismatch
+	}
+	for _, key := range keys {
+		data, err := r.Get(ctx, key)
+		if err != nil {
+			return nodes, err
+		}
+		n, err := a.ParseNode(key, data)
+		if err != nil {
+			return nodes, err
+		}
+		nodes = append(nodes, n)
+	}
+	return nodes, nil
 }
 
 // scanLog walks the complete log/ listing. It reports whether ANY peer-log
