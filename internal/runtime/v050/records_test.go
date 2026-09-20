@@ -218,35 +218,68 @@ func TestRemovedKeyIsEvictedAndRereadOnReturn(t *testing.T) {
 	}
 }
 
-// The listing and the read must agree. A body whose ETag is not the listed one
-// means the object changed under the pass; a body whose length contradicts the
-// size listed against a matching ETag is the same contradiction. Both fail the
-// pass and cache nothing, so the next reconcile starts from a fresh listing.
+// A body whose length contradicts the size listed against a MATCHING ETag is a
+// real contradiction: the same version cannot have two lengths. It fails the
+// pass and caches nothing, so the next reconcile starts from a fresh listing.
 func TestReadContradictingTheListingFailsClosed(t *testing.T) {
-	for _, name := range []string{"etag", "size"} {
-		t.Run(name, func(t *testing.T) {
-			a, _ := New(Image)
-			store := newStore(t, "a")
-			if name == "etag" {
-				store.getETags["nodes/a.json"] = `"a-v9"`
-			} else {
-				store.sizes["nodes/a.json"] = int64(len(store.records["nodes/a.json"])) + 1
-			}
-			out, err := inventory(t, a, store)
-			if err == nil {
-				t.Fatalf("contradiction accepted: %+v", out)
-			}
-			if !strings.Contains(err.Error(), "listing") && !strings.Contains(err.Error(), "listed") {
-				t.Fatalf("unexpected failure: %v", err)
-			}
-			store.taken()
-			if _, err := inventory(t, a, store); err == nil {
-				t.Fatal("contradiction accepted on retry")
-			}
-			if got := store.taken(); len(got) != 1 {
-				t.Fatalf("retry did not re-read: %v", got)
-			}
-		})
+	a, _ := New(Image)
+	store := newStore(t, "a")
+	store.sizes["nodes/a.json"] = int64(len(store.records["nodes/a.json"])) + 1
+	out, err := inventory(t, a, store)
+	if err == nil {
+		t.Fatalf("contradiction accepted: %+v", out)
+	}
+	if !strings.Contains(err.Error(), "listing") && !strings.Contains(err.Error(), "listed") {
+		t.Fatalf("unexpected failure: %v", err)
+	}
+	store.taken()
+	if _, err := inventory(t, a, store); err == nil {
+		t.Fatal("contradiction accepted on retry")
+	}
+	if got := store.taken(); len(got) != 1 {
+		t.Fatalf("retry did not re-read: %v", got)
+	}
+}
+
+// Every live writer rewrites its own record on each lease heartbeat, so on a
+// link slow enough for the read to trail the listing the two ETags differ as a
+// matter of course. That is an ordinary concurrent rewrite: the read returned
+// one whole version of the object, so the pass uses it and must not fail. Only
+// the cache key is stale, so nothing is remembered and the next pass reads it
+// again. Treating this as a contradiction wedged every membership assessment
+// under S3 latency, because a heartbeat almost always lands inside the window.
+func TestHeartbeatRewriteBetweenListAndReadIsUsedNotRemembered(t *testing.T) {
+	a, _ := New(Image)
+	store := newStore(t, "a", "b")
+	// The listing named version 1 of a; by the time its body arrives the writer
+	// has published version 2. b is quiet and keeps the ETag it was listed with.
+	store.records["nodes/a.json"] = mutate(t, fixture(t, "node-sealed"), func(m map[string]any) {
+		m["node"] = "a"
+		m["expires_ms"] = time.Now().Add(time.Hour).UnixMilli()
+		m["log"].(map[string]any)["epoch"] = 2
+	})
+	store.getETags["nodes/a.json"] = `"a-v2"`
+	out, err := inventory(t, a, store)
+	if err != nil {
+		t.Fatalf("heartbeat rewrite failed the pass: %v", err)
+	}
+	if len(out.Nodes) != 2 {
+		t.Fatalf("records lost: %+v", out.Nodes)
+	}
+	index := slices.IndexFunc(out.Nodes, func(n Node) bool { return n.Name == "a" })
+	if index < 0 || out.Nodes[index].Epoch != 2 {
+		t.Fatalf("the body that was actually read was not used: %+v", out.Nodes)
+	}
+	if got := store.taken(); len(got) != 2 {
+		t.Fatalf("first pass reads: %v", got)
+	}
+	// Nothing was remembered for a, so it is read again; b was confirmed and is
+	// served from memory.
+	if _, err := inventory(t, a, store); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.taken(); len(got) != 1 || got[0] != "nodes/a.json" {
+		t.Fatalf("unconfirmed record remembered, or confirmed one dropped: %v", got)
 	}
 }
 
