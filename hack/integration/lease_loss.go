@@ -84,6 +84,10 @@ func (h *harness) exerciseLeaseLoss() {
 		}
 		return true
 	}
+	// Include the acknowledged tail immediately before S3 becomes unavailable,
+	// not only values which had the entire earlier fault sequence to upload.
+	h.writeLedger("client", "alpha")
+	h.writeLedger("client-beta", "beta")
 	h.toxic("POST", "/proxies/minio/toxics", object{"name": "partition", "type": "timeout", "stream": "upstream", "attributes": object{"timeout": 0}})
 	func() {
 		defer h.toxic("DELETE", "/proxies/minio/toxics/partition", nil)
