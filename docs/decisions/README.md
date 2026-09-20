@@ -24,6 +24,7 @@ These records capture the celld operator decisions agreed on 18 September 2026. 
 | [0018](0018-per-fleet-tuning.md) | Per-fleet execution and lifecycle tuning, immutable at creation | Implemented |
 | [0019](0019-external-capacity-mode.md) | External capacity mode and the /scale subresource | Implemented; HPA-driven contraction release-gated |
 | [0020](0020-fence-sustained-unreachability.md) | EC2 fencing requires sustained donor unreachability | Implemented; EC2 fencing remains release-gated |
+| [0021](0021-lifecycle-state-tiers.md) | Lifecycle state tiers: bounded hot authority, externalized resolution ledger | Proposed; phases 1 and 2 implementable now, phase 3 needs an IAM decision |
 
 Read [runtime qualification](../runtime-qualification.md), [shutdown evidence](../shutdown-evidence.md), and [S3 recovery evidence](../s3-recovery-evidence.md) for implementation evidence and unresolved gates. The later S3 investigation corrects the earlier interpretation of sealed logs: sealing alone does not establish lossless recovery.
 
