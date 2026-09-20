@@ -105,3 +105,9 @@ Helm checks, local and kind integration suites, and gated image/release
 publication should be added alongside the corresponding deployable operator.
 Describe exactly which local, cluster, and AWS checks ran; a passing baseline
 does not qualify celld durability or scaling behavior.
+
+## License
+
+By contributing, you agree that your contributions are licensed under the
+[Apache License, Version 2.0](LICENSE), as described in Section 5 of that
+license.
