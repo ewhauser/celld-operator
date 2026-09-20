@@ -647,3 +647,54 @@ func TestEnvtestScaleSubresource(t *testing.T) {
 		t.Fatalf("invalid scale accepted: %v", err)
 	}
 }
+
+// External capacity mode is the /scale contract an autoscaler depends on: the
+// selector it measures pods with, the spec count it writes, and the promise that
+// the operator never writes that count back. The kind suite proves the same
+// contract against a real HPA; this pins it against a real API server, where the
+// CRD's own scale subresource, defaulting and CEL admission apply.
+func TestEnvtestExternalModeScaleContract(t *testing.T) {
+	r, x := envtestSetup(t, "Bucket")
+	x.provision(t, r)
+	ctx := t.Context()
+	f := enableCapacity(t, r, x.fleet, "External")
+	got := reconcile(t, r, f)
+	if got.Status.Capacity.Mode != "External" || got.Status.Capacity.Reason != "ExternalOwner" {
+		t.Fatalf("external ownership not published: %+v", got.Status.Capacity)
+	}
+	selector := FleetLabel + "=" + string(x.fleet.UID)
+	scale := &autoscalingv1.Scale{}
+	if err := r.SubResource("scale").Get(ctx, f, scale); err != nil {
+		t.Fatalf("scale subresource unavailable in External mode: %v", err)
+	}
+	if scale.Spec.Replicas != got.Spec.Replicas || scale.Status.Selector != selector {
+		t.Fatalf("scale view %+v", scale)
+	}
+	// The autoscaler's write, through the same subresource an HPA uses.
+	scale.Spec.Replicas = 5
+	if err := r.SubResource("scale").Update(ctx, f, client.WithSubResourceBody(scale)); err != nil {
+		t.Fatalf("external scale write rejected: %v", err)
+	}
+	for range 6 {
+		reconcile(t, envtestFreshReconciler(r), f)
+	}
+	after := &fleet.CelldFleet{}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(f), after); err != nil {
+		t.Fatal(err)
+	}
+	if after.Spec.Replicas != 5 {
+		t.Fatalf("operator rewrote the /scale writer's count: %d", after.Spec.Replicas)
+	}
+	if after.Status.LabelSelector != selector || !after.Status.ReplicaObservationValid {
+		t.Fatalf("scale status stopped being projected: %+v", after.Status)
+	}
+	if after.Status.Capacity.Reason != "ExternalOwner" || after.Status.Capacity.DesiredReplicas != 5 {
+		t.Fatalf("external decision not refreshed: %+v", after.Status.Capacity)
+	}
+	if err := r.SubResource("scale").Get(ctx, after, scale); err != nil {
+		t.Fatal(err)
+	}
+	if scale.Spec.Replicas != 5 || scale.Status.Selector != selector {
+		t.Fatalf("scale view after the external write %+v", scale)
+	}
+}

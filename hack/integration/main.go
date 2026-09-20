@@ -189,6 +189,11 @@ func (h *harness) diagnostics(recovered any) {
 			{"-n", "fleets", "get", "celldfleets", "-o", "yaml"},
 			{"get", "celldstoragereservations", "-o", "json"},
 			{"-n", "fleets", "get", "events", "--sort-by=.lastTimestamp"},
+			// An autoscaler that declines to act leaves nothing in the objects
+			// above: it records why in its own conditions, and the answer is
+			// usually what it measured rather than what the operator allowed.
+			{"-n", "fleets", "describe", "hpa"},
+			{"top", "pods", "-A"},
 		} {
 			out, err := h.try(command{args: h.kubectl(args...), timeout: 5 * time.Minute, background: true})
 			if err != nil {
