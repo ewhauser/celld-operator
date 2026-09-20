@@ -2,10 +2,12 @@ package recovery
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -132,5 +134,97 @@ func TestCredentialResolutionCancellation(t *testing.T) {
 	defer cancel()
 	if _, err := r.Get(ctx, "nodes/a.json"); err == nil {
 		t.Fatal("credential timeout accepted")
+	}
+}
+
+// The reconcile path calls the reader factory every pass; each construction
+// would otherwise re-resolve credentials over STS and open new connections.
+func TestClientCacheConstructsOncePerRegion(t *testing.T) {
+	var constructions atomic.Int64
+	cache := &ClientCache{newClient: func(ctx context.Context, region string) (*s3.Client, error) {
+		constructions.Add(1)
+		return awsClient(ctx, region)
+	}}
+	t.Setenv("AWS_ACCESS_KEY_ID", "test")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "test")
+	first, err := cache.Reader("reserved-bucket", "us-west-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var group sync.WaitGroup
+	for i := range 32 {
+		group.Go(func() {
+			if _, err := cache.Reader(fmt.Sprintf("reserved-bucket-%d", i%2), "us-west-2"); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	group.Wait()
+	if got := constructions.Load(); got != 1 {
+		t.Fatalf("constructed %d clients for one region", got)
+	}
+	// Distinct buckets share the region's client but never each other's bucket.
+	other, err := cache.Reader("other-bucket", "us-west-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if other.API != first.API || other.Bucket == first.Bucket {
+		t.Fatalf("bucket %q did not share the region client, or shared a bucket", other.Bucket)
+	}
+	// A second region is a separate client and keeps the same hardening.
+	east, err := cache.Reader("reserved-bucket", "us-east-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if constructions.Load() != 2 || east.API == first.API {
+		t.Fatal("second region reused the first region's client")
+	}
+	opts := east.API.(*s3.Client).Options()
+	if opts.Region != "us-east-1" || opts.BaseEndpoint != nil || opts.RetryMaxAttempts != 2 {
+		t.Fatalf("cached client lost hardening: region=%s endpoint=%v retries=%d", opts.Region, opts.BaseEndpoint, opts.RetryMaxAttempts)
+	}
+}
+
+// A construction failure must not be remembered: the next reconcile retries.
+func TestClientCacheDoesNotCacheConstructionFailure(t *testing.T) {
+	var constructions atomic.Int64
+	failure := errors.New("credential resolution failed")
+	cache := &ClientCache{newClient: func(ctx context.Context, region string) (*s3.Client, error) {
+		if constructions.Add(1) <= 2 {
+			return nil, failure
+		}
+		return awsClient(ctx, region)
+	}}
+	t.Setenv("AWS_ACCESS_KEY_ID", "test")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "test")
+	for range 2 {
+		if _, err := cache.Reader("reserved-bucket", "us-west-2"); !errors.Is(err, failure) {
+			t.Fatalf("construction failure not surfaced: %v", err)
+		}
+	}
+	if _, err := cache.Reader("reserved-bucket", "us-west-2"); err != nil {
+		t.Fatalf("retry after failure did not construct: %v", err)
+	}
+	if got := constructions.Load(); got != 3 {
+		t.Fatalf("expected 3 attempts, got %d", got)
+	}
+	if _, err := cache.Reader("reserved-bucket", "us-west-2"); err != nil || constructions.Load() != 3 {
+		t.Fatalf("successful client not cached: err=%v attempts=%d", err, constructions.Load())
+	}
+}
+
+// LocalReader must not rebuild the fixture client (and its connection pool) per
+// reconcile either, while still scoping each reader to its own bucket.
+func TestLocalReaderSharesOneClient(t *testing.T) {
+	first, second := LocalReader("one"), LocalReader("two")
+	if first.API != second.API {
+		t.Fatal("fixture client rebuilt per call")
+	}
+	if first.Bucket != "one" || second.Bucket != "two" {
+		t.Fatalf("bucket scope lost: %q %q", first.Bucket, second.Bucket)
+	}
+	opts := first.API.(*s3.Client).Options()
+	if opts.BaseEndpoint == nil || *opts.BaseEndpoint != "http://minio.celld-test-store.svc:9000" || !opts.UsePathStyle || opts.RetryMaxAttempts != 2 {
+		t.Fatalf("fixture client options changed: %v", opts.BaseEndpoint)
 	}
 }
