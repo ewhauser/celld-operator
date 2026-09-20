@@ -459,6 +459,28 @@ func (r *Reconciler) qualifyPersistentCapacity(ctx context.Context, f *fleet.Cel
 	return observation, policy, nil
 }
 
+// persistentContraction carries the three per-reconcile outcomes every phase
+// step shares: report a non-fatal block, persist the journal and requeue, or
+// fail the step. They close over the reconcile's reservation and workload, so
+// the phase methods below take them rather than rebuilding them.
+type persistentContraction struct {
+	report func(reason, message string) (ctrl.Result, bool, error)
+	save   func() (ctrl.Result, bool, error)
+	fail   func(error) (ctrl.Result, bool, error)
+}
+
+// automaticPolicyStable reports whether the Automatic capacity policy behind an
+// admitted contraction is still the exact policy the operation was opened
+// against. It is the shared prefix of both Automatic re-checks below and, when
+// true, guarantees f.Spec.Capacity and j.Capacity are non-nil.
+func automaticPolicyStable(f *fleet.CelldFleet, j *lifecycleJournal, op *lifecycleOperation) bool {
+	return f.Spec.Capacity != nil && f.Spec.Capacity.Mode == "Automatic" && j.Capacity != nil && op.PolicyHash == j.Capacity.Config && op.ManualBaseline == f.Spec.Replicas
+}
+
+// contractPersistent dispatches one reconcile of a PersistentFleet contraction
+// to the step for the operation's phase. Phase order is Blocked/Intent ->
+// Stopping -> Retiring -> Recovering; the workload CAS (issued) decides which
+// side of the replica decrement the operation is on.
 func (r *Reconciler) contractPersistent(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, j *lifecycleJournal, w client.Object) (ctrl.Result, bool, error) {
 	op := j.Operation
 	report := func(reason, message string) (ctrl.Result, bool, error) {
@@ -480,202 +502,19 @@ func (r *Reconciler) contractPersistent(ctx context.Context, f *fleet.CelldFleet
 		}
 		return report("PersistentRecoveryBlocked", err.Error())
 	}
+	c := persistentContraction{report: report, save: save, fail: fail}
 	if j.Loss != "" {
 		return report("PossibleDataLoss", j.Loss)
 	}
 	if op.Phase == "Blocked" || op.Phase == "Intent" {
-		if op.Stalled {
-			return report("OperationStalled", "Persistent removal expired before graceful stop")
-		}
-		if maintenanceFence(f) != "" {
-			return report("MaintenancePaused", "Persistent removal remains unissued")
-		}
-		if op.Automatic && !r.Options.LocalTest {
-			return report("PersistentAutomaticUnqualified", "Automatic PersistentFleet contraction requires EKS/S3/EBS qualification")
-		}
-		if externalOwner(f) && !r.Options.LocalTest {
-			return report("ExternalContractionUnqualified", "Contraction requested through /scale by an external writer awaits the same EKS/S3/EBS release qualification as Automatic mode; additions proceed")
-		}
-		if !op.Automatic && f.Spec.Replicas >= op.From {
-			return report("DesiredChanged", "Persistent removal awaits matching intent or cancellation")
-		}
-		if op.To < 2 {
-			return report("FollowerRetirementUnqualified", "Graceful PersistentFleet contraction currently retains at least two live nodes; last follower tiering lacks an external completion watermark")
-		}
-		members, _, err := r.assessPersistent(ctx, f, j, false, false)
-		if err != nil {
-			return fail(err)
-		}
-		if op.Phase == "Blocked" {
-			op.PersistentMembers = members
-			op.TargetPod = fmt.Sprintf("%s-%d", f.Name, op.To)
-			for _, m := range members {
-				if m.Node == op.TargetPod {
-					op.TargetUID = m.PodUID
-					op.TargetGeneration = m.Generation
-				}
-			}
-			op.Phase = "Intent"
-			return save()
-		}
-		for _, m := range members {
-			if !slices.ContainsFunc(op.PersistentMembers, func(p persistentMember) bool { return sameInvocation(m, p) }) {
-				return fail(errors.New("persistent capture changed before stop"))
-			}
-		}
-		if op.Automatic {
-			if f.Spec.Capacity == nil || f.Spec.Capacity.Mode != "Automatic" || j.Capacity == nil || op.PolicyHash != j.Capacity.Config || op.ManualBaseline != f.Spec.Replicas || j.Capacity.LowSince.IsZero() || j.Capacity.LowSamples < f.Spec.Capacity.MinSamples || r.capacityNow().Sub(j.Capacity.LowSince) < capacity.Seconds(f.Spec.Capacity.ScaleInStabilizationSeconds) {
-				return report("CapacityChanged", "Fresh stable Automatic policy required")
-			}
-		}
-		op.PersistentMembers = members // persist latest follower epochs before stopping.
-		op.Phase = "Stopping"          // irreversible authority; cancellation no longer bypasses it.
-		return save()
+		return r.contractPersistentIntent(ctx, f, j, c)
 	}
 	issued := replicas(w) == op.To && w.GetAnnotations()[operationKey] == op.ID
 	if !issued && op.Phase == "Stopping" {
-		pod := &corev1.Pod{}
-		if err := r.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: op.TargetPod}, pod); err != nil {
-			return fail(err)
-		}
-		id, _ := podIdentity(pod)
-		oldIndex := slices.IndexFunc(op.PersistentMembers, func(m persistentMember) bool { return m.Node == op.TargetPod })
-		if oldIndex < 0 {
-			return fail(errors.New("missing exact donor admission"))
-		}
-		old := op.PersistentMembers[oldIndex]
-		if string(pod.UID) != old.PodUID || id != old.Container {
-			if !r.capacityNow().Before(op.Deadline.Add(stopExpiryGrace)) {
-				// The captured donor is gone and every stop request for it has
-				// expired; no Retiring authority was ever recorded. The removal is
-				// unissued and cancels; the old generation stays unresolved history.
-				op.Phase = "Canceling"
-				return save()
-			}
-			return fail(errors.New("donor invocation changed before stop"))
-		}
-		state, err := r.callLauncher(ctx, f, pod, "", "")
-		recorded := slices.ContainsFunc(j.InfrastructureFences, func(receipt infrastructureFence) bool {
-			return receipt.Operation == op.ID && sameInvocation(receipt.Member, old)
-		})
-		// A single short-timeout launcher error is not evidence that the donor
-		// host is gone. Track continuous unreachability durably so that the
-		// fence annotation can only authorize termination after the window,
-		// and never while the last call to the donor succeeded. Intent already
-		// recorded still completes regardless of later reachability.
-		unreachable, changed := err != nil, false
-		if unreachable && op.DonorUnreachableSince.IsZero() {
-			op.DonorUnreachableSince, changed = r.capacityNow(), true
-		} else if !unreachable && !op.DonorUnreachableSince.IsZero() {
-			op.DonorUnreachableSince, changed = time.Time{}, true
-		}
-		// Sustained requires an earlier reconcile to have set the marker; the
-		// first failing reconcile can never satisfy the window on its own.
-		sustained := unreachable && !changed && !r.capacityNow().Before(op.DonorUnreachableSince.Add(fenceUnreachableWindow))
-		requested := f.Annotations[fenceRequestKey] == op.ID
-		if recorded || (unreachable && (sustained || !requested)) {
-			fenced, fenceErr := r.ensureInfrastructureFence(ctx, f, res, j, old, op.ID)
-			if fenceErr != nil {
-				return fail(fenceErr)
-			}
-			if !fenced {
-				return report("InfrastructureFencing", "Waiting for positive exact EC2 instance termination")
-			}
-			members, _, assessmentErr := r.assessPersistent(ctx, f, j, true, false)
-			if assessmentErr != nil {
-				return fail(assessmentErr)
-			}
-			op.PersistentMembers = members
-			op.Phase = "Retiring"
-			op.WorkloadVersion = w.GetResourceVersion()
-			return save()
-		}
-		if changed {
-			if e := r.saveJournal(ctx, res, j); e != nil {
-				return ctrl.Result{}, true, e
-			}
-		}
-		if unreachable {
-			return report("InfrastructureFencing", fmt.Sprintf("donor launcher unreachable for %ds (%v); fencing requires %ds of sustained unreachability", int(r.capacityNow().Sub(op.DonorUnreachableSince).Seconds()), err, int(fenceUnreachableWindow.Seconds())))
-		}
-		if state.Invocation != old.Invocation || state.Generation != old.Generation {
-			return fail(errors.New("donor launcher changed before stop"))
-		}
-		if state.Phase == "Running" {
-			if op.Automatic {
-				if f.Spec.Capacity == nil || f.Spec.Capacity.Mode != "Automatic" || j.Capacity == nil || op.PolicyHash != j.Capacity.Config || op.ManualBaseline != f.Spec.Replicas || op.To < f.Spec.Capacity.MinReplicas {
-					return report("CapacityChanged", "Automatic policy changed before graceful stop")
-				}
-				observation := r.Collector.Collect(ctx, f)
-				*j.Capacity = capacity.Evaluate(*f.Spec.Capacity, *j.Capacity, observation, op.From)
-				if err := r.saveJournal(ctx, res, j); err != nil {
-					return ctrl.Result{}, true, err
-				}
-				if !capacity.LowDemand(*f.Spec.Capacity, observation, op.From) || j.Capacity.LowSince.IsZero() || j.Capacity.LowSamples < f.Spec.Capacity.MinSamples || observation.At.Sub(j.Capacity.LowSince) < capacity.Seconds(f.Spec.Capacity.ScaleInStabilizationSeconds) {
-					return report("CapacityUncertain", "Fresh sustained low demand required before graceful stop")
-				}
-			}
-			if op.Stalled || !r.capacityNow().Before(op.Deadline) {
-				if !r.capacityNow().Before(op.Deadline.Add(stopExpiryGrace)) {
-					// The launcher positively reports Running and every stop request for
-					// this operation has expired: nothing was issued. Cancel through the
-					// ordinary workload-CAS fence instead of holding the fleet forever.
-					op.Phase = "Canceling"
-					return save()
-				}
-				return report("OperationStalled", "No graceful stop issued before deadline; canceling once every stop request has provably expired")
-			}
-			members, _, err := r.assessPersistent(ctx, f, j, false, false)
-			if err != nil {
-				return fail(err)
-			}
-			for _, m := range members {
-				if !slices.ContainsFunc(op.PersistentMembers, func(p persistentMember) bool { return sameInvocation(m, p) }) {
-					return fail(errors.New("persistent invocation changed before stop request"))
-				}
-			}
-			stopCtx, stopCancel := context.WithDeadline(ctx, op.Deadline)
-			state, err = r.callLauncher(stopCtx, f, pod, op.ID, old.Generation)
-			stopCancel()
-			if err != nil {
-				return fail(err)
-			}
-		}
-		if state.Operation != op.ID {
-			return fail(errors.New("launcher stop belongs to another operation"))
-		}
-		if state.Invocation != old.Invocation || state.Generation != old.Generation {
-			return fail(errors.New("donor launcher invocation changed"))
-		}
-		if state.Phase != "Stopped" {
-			return report("LifecycleProgress", "Waiting for launcher child exit and exclusive inherited-lock release")
-		}
-		members, _, err := r.assessPersistent(ctx, f, j, true, false)
-		if err != nil {
-			return fail(err)
-		}
-		op.PersistentMembers = members
-		op.Phase = "Retiring"
-		op.WorkloadVersion = w.GetResourceVersion()
-		return save()
+		return r.contractPersistentStopping(ctx, f, res, j, w, c)
 	}
 	if !issued && op.Phase == "Retiring" {
-		if _, _, err := r.assessPersistent(ctx, f, j, true, false); err != nil {
-			return fail(err)
-		}
-		// Stop is already issued. A deadline cannot strand a positively terminated
-		// donor by preventing the cleanup decrement; stale generation CAS still applies.
-		if w.GetResourceVersion() != op.WorkloadVersion {
-			op.WorkloadVersion = w.GetResourceVersion()
-			return save()
-		}
-		cleanup := *op
-		cleanup.Deadline = time.Time{}
-		if err := r.applyReplicas(ctx, w, &cleanup); err != nil {
-			return fail(err)
-		}
-		op.Phase = "Recovering"
-		return save()
+		return r.contractPersistentRetiring(ctx, f, j, w, c)
 	}
 	if !issued {
 		return fail(errors.New("persistent operation authority differs from workload"))
@@ -684,16 +523,243 @@ func (r *Reconciler) contractPersistent(ctx context.Context, f *fleet.CelldFleet
 		op.Phase = "Recovering"
 		return save()
 	}
+	return r.contractPersistentRecovering(ctx, f, j, c)
+}
+
+// contractPersistentIntent qualifies an unissued removal and, once qualified,
+// records the exact donor capture (Blocked -> Intent) and then the irreversible
+// stop authority (Intent -> Stopping).
+func (r *Reconciler) contractPersistentIntent(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal, c persistentContraction) (ctrl.Result, bool, error) {
+	op := j.Operation
+	if op.Stalled {
+		return c.report("OperationStalled", "Persistent removal expired before graceful stop")
+	}
+	if maintenanceFence(f) != "" {
+		return c.report("MaintenancePaused", "Persistent removal remains unissued")
+	}
+	if op.Automatic && !r.Options.LocalTest {
+		return c.report("PersistentAutomaticUnqualified", "Automatic PersistentFleet contraction requires EKS/S3/EBS qualification")
+	}
+	if externalOwner(f) && !r.Options.LocalTest {
+		return c.report("ExternalContractionUnqualified", "Contraction requested through /scale by an external writer awaits the same EKS/S3/EBS release qualification as Automatic mode; additions proceed")
+	}
+	if !op.Automatic && f.Spec.Replicas >= op.From {
+		return c.report("DesiredChanged", "Persistent removal awaits matching intent or cancellation")
+	}
+	if op.To < 2 {
+		return c.report("FollowerRetirementUnqualified", "Graceful PersistentFleet contraction currently retains at least two live nodes; last follower tiering lacks an external completion watermark")
+	}
+	members, _, err := r.assessPersistent(ctx, f, j, false, false)
+	if err != nil {
+		return c.fail(err)
+	}
+	if op.Phase == "Blocked" {
+		op.PersistentMembers = members
+		op.TargetPod = fmt.Sprintf("%s-%d", f.Name, op.To)
+		for _, m := range members {
+			if m.Node == op.TargetPod {
+				op.TargetUID = m.PodUID
+				op.TargetGeneration = m.Generation
+			}
+		}
+		op.Phase = "Intent"
+		return c.save()
+	}
+	for _, m := range members {
+		if !slices.ContainsFunc(op.PersistentMembers, func(p persistentMember) bool { return sameInvocation(m, p) }) {
+			return c.fail(errors.New("persistent capture changed before stop"))
+		}
+	}
+	if op.Automatic {
+		if !automaticPolicyStable(f, j, op) {
+			return c.report("CapacityChanged", "Fresh stable Automatic policy required")
+		}
+		// automaticPolicyStable proved f.Spec.Capacity and j.Capacity are present.
+		if j.Capacity.LowSince.IsZero() || j.Capacity.LowSamples < f.Spec.Capacity.MinSamples || r.capacityNow().Sub(j.Capacity.LowSince) < capacity.Seconds(f.Spec.Capacity.ScaleInStabilizationSeconds) {
+			return c.report("CapacityChanged", "Fresh stable Automatic policy required")
+		}
+	}
+	op.PersistentMembers = members // persist latest follower epochs before stopping.
+	op.Phase = "Stopping"          // irreversible authority; cancellation no longer bypasses it.
+	return c.save()
+}
+
+// contractPersistentStopping drives the donor to a positive stop: either a
+// launcher-confirmed graceful child exit, or, when the launcher is unreachable
+// or a fence receipt already exists, an infrastructure fence.
+func (r *Reconciler) contractPersistentStopping(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, j *lifecycleJournal, w client.Object, c persistentContraction) (ctrl.Result, bool, error) {
+	op := j.Operation
+	pod := &corev1.Pod{}
+	if err := r.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: op.TargetPod}, pod); err != nil {
+		return c.fail(err)
+	}
+	id, _ := podIdentity(pod)
+	oldIndex := slices.IndexFunc(op.PersistentMembers, func(m persistentMember) bool { return m.Node == op.TargetPod })
+	if oldIndex < 0 {
+		return c.fail(errors.New("missing exact donor admission"))
+	}
+	old := op.PersistentMembers[oldIndex]
+	if string(pod.UID) != old.PodUID || id != old.Container {
+		if !r.capacityNow().Before(op.Deadline.Add(stopExpiryGrace)) {
+			// The captured donor is gone and every stop request for it has
+			// expired; no Retiring authority was ever recorded. The removal is
+			// unissued and cancels; the old generation stays unresolved history.
+			op.Phase = "Canceling"
+			return c.save()
+		}
+		return c.fail(errors.New("donor invocation changed before stop"))
+	}
+	// The fence-entry block below is kept verbatim, dedented only, so concurrent
+	// work on infrastructure fencing rebases cleanly. These aliases exist so its
+	// body still reads report/fail/save exactly as it did before the split.
+	report, fail, save := c.report, c.fail, c.save
+	state, err := r.callLauncher(ctx, f, pod, "", "")
+	recorded := slices.ContainsFunc(j.InfrastructureFences, func(receipt infrastructureFence) bool {
+		return receipt.Operation == op.ID && sameInvocation(receipt.Member, old)
+	})
+	// A single short-timeout launcher error is not evidence that the donor
+	// host is gone. Track continuous unreachability durably so that the
+	// fence annotation can only authorize termination after the window,
+	// and never while the last call to the donor succeeded. Intent already
+	// recorded still completes regardless of later reachability.
+	unreachable, changed := err != nil, false
+	if unreachable && op.DonorUnreachableSince.IsZero() {
+		op.DonorUnreachableSince, changed = r.capacityNow(), true
+	} else if !unreachable && !op.DonorUnreachableSince.IsZero() {
+		op.DonorUnreachableSince, changed = time.Time{}, true
+	}
+	// Sustained requires an earlier reconcile to have set the marker; the
+	// first failing reconcile can never satisfy the window on its own.
+	sustained := unreachable && !changed && !r.capacityNow().Before(op.DonorUnreachableSince.Add(fenceUnreachableWindow))
+	requested := f.Annotations[fenceRequestKey] == op.ID
+	if recorded || (unreachable && (sustained || !requested)) {
+		fenced, fenceErr := r.ensureInfrastructureFence(ctx, f, res, j, old, op.ID)
+		if fenceErr != nil {
+			return fail(fenceErr)
+		}
+		if !fenced {
+			return report("InfrastructureFencing", "Waiting for positive exact EC2 instance termination")
+		}
+		members, _, assessmentErr := r.assessPersistent(ctx, f, j, true, false)
+		if assessmentErr != nil {
+			return fail(assessmentErr)
+		}
+		op.PersistentMembers = members
+		op.Phase = "Retiring"
+		op.WorkloadVersion = w.GetResourceVersion()
+		return save()
+	}
+	if changed {
+		if e := r.saveJournal(ctx, res, j); e != nil {
+			return ctrl.Result{}, true, e
+		}
+	}
+	if unreachable {
+		return report("InfrastructureFencing", fmt.Sprintf("donor launcher unreachable for %ds (%v); fencing requires %ds of sustained unreachability", int(r.capacityNow().Sub(op.DonorUnreachableSince).Seconds()), err, int(fenceUnreachableWindow.Seconds())))
+	}
+	if state.Invocation != old.Invocation || state.Generation != old.Generation {
+		return c.fail(errors.New("donor launcher changed before stop"))
+	}
+	if state.Phase == "Running" {
+		if op.Automatic {
+			if !automaticPolicyStable(f, j, op) {
+				return c.report("CapacityChanged", "Automatic policy changed before graceful stop")
+			}
+			// automaticPolicyStable proved f.Spec.Capacity is present.
+			if op.To < f.Spec.Capacity.MinReplicas {
+				return c.report("CapacityChanged", "Automatic policy changed before graceful stop")
+			}
+			observation := r.Collector.Collect(ctx, f)
+			*j.Capacity = capacity.Evaluate(*f.Spec.Capacity, *j.Capacity, observation, op.From)
+			if err := r.saveJournal(ctx, res, j); err != nil {
+				return ctrl.Result{}, true, err
+			}
+			if !capacity.LowDemand(*f.Spec.Capacity, observation, op.From) || j.Capacity.LowSince.IsZero() || j.Capacity.LowSamples < f.Spec.Capacity.MinSamples || observation.At.Sub(j.Capacity.LowSince) < capacity.Seconds(f.Spec.Capacity.ScaleInStabilizationSeconds) {
+				return c.report("CapacityUncertain", "Fresh sustained low demand required before graceful stop")
+			}
+		}
+		if op.Stalled || !r.capacityNow().Before(op.Deadline) {
+			if !r.capacityNow().Before(op.Deadline.Add(stopExpiryGrace)) {
+				// The launcher positively reports Running and every stop request for
+				// this operation has expired: nothing was issued. Cancel through the
+				// ordinary workload-CAS fence instead of holding the fleet forever.
+				op.Phase = "Canceling"
+				return c.save()
+			}
+			return c.report("OperationStalled", "No graceful stop issued before deadline; canceling once every stop request has provably expired")
+		}
+		members, _, err := r.assessPersistent(ctx, f, j, false, false)
+		if err != nil {
+			return c.fail(err)
+		}
+		for _, m := range members {
+			if !slices.ContainsFunc(op.PersistentMembers, func(p persistentMember) bool { return sameInvocation(m, p) }) {
+				return c.fail(errors.New("persistent invocation changed before stop request"))
+			}
+		}
+		stopCtx, stopCancel := context.WithDeadline(ctx, op.Deadline)
+		state, err = r.callLauncher(stopCtx, f, pod, op.ID, old.Generation)
+		stopCancel()
+		if err != nil {
+			return c.fail(err)
+		}
+	}
+	if state.Operation != op.ID {
+		return c.fail(errors.New("launcher stop belongs to another operation"))
+	}
+	if state.Invocation != old.Invocation || state.Generation != old.Generation {
+		return c.fail(errors.New("donor launcher invocation changed"))
+	}
+	if state.Phase != "Stopped" {
+		return c.report("LifecycleProgress", "Waiting for launcher child exit and exclusive inherited-lock release")
+	}
+	members, _, err := r.assessPersistent(ctx, f, j, true, false)
+	if err != nil {
+		return c.fail(err)
+	}
+	op.PersistentMembers = members
+	op.Phase = "Retiring"
+	op.WorkloadVersion = w.GetResourceVersion()
+	return c.save()
+}
+
+// contractPersistentRetiring issues the replica decrement once the donor is
+// positively stopped, under the workload's own resource-version CAS.
+func (r *Reconciler) contractPersistentRetiring(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal, w client.Object, c persistentContraction) (ctrl.Result, bool, error) {
+	op := j.Operation
+	if _, _, err := r.assessPersistent(ctx, f, j, true, false); err != nil {
+		return c.fail(err)
+	}
+	// Stop is already issued. A deadline cannot strand a positively terminated
+	// donor by preventing the cleanup decrement; stale generation CAS still applies.
+	if w.GetResourceVersion() != op.WorkloadVersion {
+		op.WorkloadVersion = w.GetResourceVersion()
+		return c.save()
+	}
+	cleanup := *op
+	cleanup.Deadline = time.Time{}
+	if err := r.applyReplicas(ctx, w, &cleanup); err != nil {
+		return c.fail(err)
+	}
+	op.Phase = "Recovering"
+	return c.save()
+}
+
+// contractPersistentRecovering waits for the survivors to settle for a full
+// interval across two assessments, then retires the donor into history and
+// completes the operation.
+func (r *Reconciler) contractPersistentRecovering(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal, c persistentContraction) (ctrl.Result, bool, error) {
+	op := j.Operation
 	members, at, err := r.assessPersistent(ctx, f, j, true, true)
 	if err != nil {
-		return fail(err)
+		return c.fail(err)
 	}
 	if op.SettledAt.IsZero() {
 		op.SettledAt = at
-		return save()
+		return c.save()
 	}
 	if at.Sub(op.SettledAt) < 10*time.Second {
-		return report("LifecycleProgress", "Revalidating PersistentFleet recovery and survivor settling")
+		return c.report("LifecycleProgress", "Revalidating PersistentFleet recovery and survivor settling")
 	}
 	for _, old := range op.PersistentMembers {
 		if old.Node == op.TargetPod {
@@ -717,7 +783,7 @@ func (r *Reconciler) contractPersistent(ctx context.Context, f *fleet.CelldFleet
 	if j.Capacity != nil {
 		capacity.RecordAction(j.Capacity, r.capacityNow(), op.From, op.To)
 	}
-	return save()
+	return c.save()
 }
 
 func reactivatedNode(name, node string, from, to int32) bool {
