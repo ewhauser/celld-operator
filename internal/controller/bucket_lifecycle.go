@@ -103,9 +103,11 @@ type bucketRetirementProbe struct {
 	// Changed reports that a record was positively read expired, so the caller
 	// must persist the journal before doing anything that can fail.
 	Changed bool
-	// Pending reports that some admitted generation has left the workload and
-	// still carries no positive expiry authority, so the readable-expired window
-	// may still be open and this pass should repoll inside it.
+	// Pending reports that a probed generation's record is still present with a
+	// lease that has not elapsed yet, so the readable-expired window is still
+	// ahead and repolling inside it can pay off. It is deliberately false once a
+	// record has gone: absence means the window is closed, and a fleet wedged on
+	// lost evidence must fall back to the ordinary cadence rather than spin.
 	Pending bool
 }
 
@@ -151,19 +153,30 @@ func (r *Reconciler) observeRetirementExpiry(ctx context.Context, f *fleet.Celld
 	}
 	present := map[string]bool{}
 	for i := range pods {
+		// A Pod under deletion, or one that has stopped being Ready, is not
+		// membership worth trusting here. A grace period outlives the lease by
+		// far -- shutdown defaults to 20s plus headroom, the lease to 10s -- and
+		// an unready Pod is exactly what a lost node leaves behind, so counting
+		// either as present would skip the one writer whose record is expiring
+		// right now. This only decides whether to attempt the read: a process
+		// still renewing its lease is read live and yields nothing, so the
+		// evidence gate is unchanged.
+		if !pods[i].DeletionTimestamp.IsZero() || !podReady(&pods[i]) {
+			continue
+		}
 		present[string(pods[i].UID)] = true
 	}
 	var members []v050.BucketMember
-	unresolved := map[string]bool{}
+	probed := map[string]bool{}
 	for _, sessions := range records {
 		for _, s := range sessions {
 			// A superseded predecessor can never be read expired through its own
 			// record, which the successor has overwritten; the full assessment
 			// resolves those through succession instead.
-			if s.SupersededBy != "" || present[s.Node] || resolvedBucketSession(s) || unresolved[s.Node] {
+			if s.SupersededBy != "" || present[s.Node] || resolvedBucketSession(s) || probed[s.Node] {
 				continue
 			}
-			unresolved[s.Node] = true
+			probed[s.Node] = true
 			members = append(members, v050.BucketMember{Node: s.Node, Generation: s.Generation, Retired: true})
 		}
 	}
@@ -178,12 +191,12 @@ func (r *Reconciler) observeRetirementExpiry(ctx context.Context, f *fleet.Celld
 	if err != nil {
 		return bucketRetirementProbe{Pending: true}
 	}
-	observed, err := adapter.ObserveBucketRetirement(ctx, reader, members, r.capacityNow)
+	reading, err := adapter.ObserveBucketRetirement(ctx, reader, members, r.capacityNow)
 	if err != nil {
 		return bucketRetirementProbe{Pending: true}
 	}
-	probe := bucketRetirementProbe{}
-	for _, o := range observed {
+	probe := bucketRetirementProbe{Pending: len(reading.Live) > 0}
+	for _, o := range reading.Expired {
 		for _, sessions := range records {
 			for i := range sessions {
 				s := &sessions[i]
@@ -197,9 +210,7 @@ func (r *Reconciler) observeRetirementExpiry(ctx context.Context, f *fleet.Celld
 				s.ExpiryInvalidated = false
 			}
 		}
-		delete(unresolved, o.Node)
 	}
-	probe.Pending = len(unresolved) > 0
 	return probe
 }
 

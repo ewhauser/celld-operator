@@ -146,6 +146,17 @@ record has already disappeared cannot manufacture that evidence. Supporting
 that ordering needs another durable runtime evidence contract or authenticated
 transport history; higher polling frequency is not a proof.
 
+A writer can leave membership outside a controlled decrement -- a lost node, an
+evicted or manually deleted Pod -- so the reading is taken on every reconcile,
+not only inside a post-effect phase. Neither existing path covers that case:
+steady observational admission is skipped entirely while any operation is
+recorded, so a contraction blocked on an unavailable replica observes nothing
+for the whole block, and its assessment aborts on the candidate sweep while a
+replacement is unscheduled, which is exactly the shape of a node loss. A Pod
+under deletion or one that has stopped being Ready is not treated as membership
+for this purpose: a termination grace period outlives the ten-second lease by
+far, so counting it would skip the one writer whose record is expiring.
+
 Because that window is roughly a second wide -- `CELLD_TTL_MS` is 10s and
 `dead_node_gc` deletes a no-log record about a second after the lease elapses --
 a post-effect pass reads the retired writer's record **first** and persists the

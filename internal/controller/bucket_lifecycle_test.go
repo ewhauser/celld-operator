@@ -563,8 +563,10 @@ func TestBucketRetirementProbeNeverInventsExpiry(t *testing.T) {
 	if probe.Changed {
 		t.Fatal("a missing record was promoted into positive expiry proof")
 	}
-	if !probe.Pending {
-		t.Fatal("a writer with no expiry proof was reported resolved")
+	// The window is closed, not open. Holding the tight cadence here would spin
+	// at one second forever on a fleet whose evidence is already unrecoverable.
+	if probe.Pending {
+		t.Fatal("a record that is already gone kept the tight cadence")
 	}
 	if proofs, _ := observedExpiry(j, "pod-1"); proofs != 0 {
 		t.Fatalf("%d expiry proofs recorded for a record nothing read", proofs)
@@ -649,5 +651,98 @@ func TestBucketEvidenceLostIsReportedDistinctly(t *testing.T) {
 	// Every other blocker keeps the generic reason.
 	if _, reported := bucketEvidenceLost(j, errors.New("bucket candidate is unscheduled")); reported {
 		t.Fatal("an ordinary blocker was reported as lost evidence")
+	}
+}
+
+// Node loss: the writer dies unplanned, the replacement cannot be scheduled on
+// the cordoned node, and a removal intent is journaled about a second later.
+// That pending intent suppresses observational admission entirely, and the
+// candidate sweep would abort on the unscheduled replacement anyway, so before
+// this probe existed no pass ever reached the S3 read and the evidence was lost
+// while the operation sat blocked waiting for the replica to come back.
+func TestBucketUnplannedDeathObservedDespitePendingIntent(t *testing.T) {
+	p, f, j, opts, reader := bucketPreflightSetup(t)
+	j.Operation = nil
+	j.Applied = 3
+	r := &Reconciler{Client: p.client, Evidence: p, Options: opts, now: p.now}
+	if _, err := r.admitBucketHistory(t.Context(), f, j); err != nil {
+		t.Fatal(err)
+	}
+	// The node is lost: the Pod object survives but stops being Ready, which is
+	// what a cordoned/unreachable node leaves behind.
+	pod := &corev1.Pod{}
+	if err := r.Get(t.Context(), client.ObjectKey{Namespace: f.Namespace, Name: "pod-1"}, pod); err != nil {
+		t.Fatal(err)
+	}
+	for i := range pod.Status.Conditions {
+		if pod.Status.Conditions[i].Type == corev1.PodReady {
+			pod.Status.Conditions[i].Status = corev1.ConditionFalse
+		}
+	}
+	if err := r.Status().Update(t.Context(), pod); err != nil {
+		t.Fatal(err)
+	}
+	for i := range j.BucketHistory {
+		if j.BucketHistory[i].Node == "pod-1" {
+			j.BucketHistory[i].ExpiryObserved = false
+			j.BucketHistory[i].ExpiryInvalidated = false
+		}
+	}
+	// A removal intent is recorded. Observational admission is skipped while any
+	// operation exists, so this is the state the faults fixture sits in.
+	j.Operation = &lifecycleOperation{ID: "op", From: 3, To: 2, Phase: "Blocked"}
+	if changed, err := r.admitBucketHistory(t.Context(), f, j); changed || err != nil {
+		t.Fatalf("admission ran with an operation recorded: changed=%v err=%v", changed, err)
+	}
+	// The lease elapses. The probe must still take the reading.
+	reader.expired = map[string]bool{"pod-1": true}
+	probe := r.observeRetirementExpiry(t.Context(), f, j, [][]bucketSession{j.BucketHistory})
+	if !probe.Changed {
+		t.Fatalf("unplanned death was not observed while an intent was pending: %+v", probe)
+	}
+	proofs, records := observedExpiry(j, "pod-1")
+	if records == 0 || proofs != records {
+		t.Fatalf("expiry proof recorded in %d of %d records", proofs, records)
+	}
+	// And the proof survives the runtime deleting the record.
+	reader.nodes = slices.DeleteFunc(reader.nodes, func(node string) bool { return node == "pod-1" })
+	j.Operation.BucketCandidates = slices.Clone(j.BucketHistory)
+	j.Operation.Phase = "Recovering"
+	_, _, err := r.bucketAssessment(t.Context(), f, j, 2, true)
+	if err != nil && strings.Contains(err.Error(), "unresolved bucket writer record missing") {
+		t.Fatalf("recorded expiry did not survive the record's deletion: %v", err)
+	}
+}
+
+// While an unplanned death's lease is still live the window is ahead, so the
+// pass repolls inside it; once the lease elapses the reading is taken and the
+// fleet returns to its ordinary cadence.
+func TestBucketUnplannedDeathHoldsTheWindowThenReleasesIt(t *testing.T) {
+	p, f, j, opts, reader := bucketPreflightSetup(t)
+	j.Operation = nil
+	j.Applied = 3
+	r := &Reconciler{Client: p.client, Evidence: p, Options: opts, now: p.now}
+	if _, err := r.admitBucketHistory(t.Context(), f, j); err != nil {
+		t.Fatal(err)
+	}
+	pod := &corev1.Pod{}
+	if err := r.Get(t.Context(), client.ObjectKey{Namespace: f.Namespace, Name: "pod-1"}, pod); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Delete(t.Context(), pod); err != nil {
+		t.Fatal(err)
+	}
+	for i := range j.BucketHistory {
+		if j.BucketHistory[i].Node == "pod-1" {
+			j.BucketHistory[i].ExpiryObserved = false
+		}
+	}
+	records := [][]bucketSession{j.BucketHistory}
+	if probe := r.observeRetirementExpiry(t.Context(), f, j, records); probe.Changed || !probe.Pending {
+		t.Fatalf("a live lease on a dead writer did not hold the window: %+v", probe)
+	}
+	reader.expired = map[string]bool{"pod-1": true}
+	if probe := r.observeRetirementExpiry(t.Context(), f, j, records); !probe.Changed || probe.Pending {
+		t.Fatalf("elapsed lease was not recorded and released: %+v", probe)
 	}
 }

@@ -315,6 +315,7 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, h *hydr
 		s.schedulePersistentMembership,
 		s.scheduleOrderedBucketMembership,
 		s.observeRuntimeEvidence,
+		s.observeRetiredWriters,
 		s.releaseStaleMaintenanceFence,
 		s.holdUnderMaintenanceFence,
 		s.admitOperation,
@@ -699,6 +700,49 @@ func (s *lifecycleRun) admitOperation(ctx context.Context) *lifecycleOutcome {
 		capacity.RecordAction(s.j.Capacity, s.r.capacityNow(), s.op.From, s.op.To)
 	}
 	return s.save(ctx) // No external action before the intent has survived an API write.
+}
+
+// observeRetiredWriters reads the record of any admitted writer that has left
+// the workload without positive expiry proof, on every reconcile rather than
+// only inside a post-effect phase. A writer can leave membership at any time --
+// a lost node, an evicted or manually deleted Pod -- and the pinned runtime
+// deletes its record about a second after the lease elapses, after which ADR
+// 0016 can never resolve that retirement.
+//
+// Neither existing path covers that. Observational admission below is skipped
+// entirely while any operation is recorded, so a contraction blocked on an
+// unavailable replica observes nothing for the whole block; and its assessment
+// aborts on the candidate sweep while a replacement is unscheduled, which is
+// exactly the shape of a node loss. The post-effect probes only run once a
+// phase has reached Recovering, which is later than the writer's death.
+//
+// Ordering and cadence only: this records the same positively read expired
+// lease the full assessment would, and nothing else. Sessions that already hold
+// unrevoked proof are not probed at all, so contrary live-lease evidence still
+// reaches invalidateBucketExpiry through the ordinary assessment.
+func (s *lifecycleRun) observeRetiredWriters(ctx context.Context) *lifecycleOutcome {
+	if s.f.Spec.Profile != "Bucket" || s.r.Evidence == nil || s.j == nil {
+		return nil
+	}
+	records := [][]bucketSession{s.j.BucketHistory}
+	if s.j.Operation != nil {
+		records = append(records, s.j.Operation.BucketCandidates)
+	}
+	probe := s.r.observeRetirementExpiry(ctx, s.f, s.j, records)
+	if probe.Changed {
+		if outcome := s.persist(ctx); outcome != nil {
+			return outcome
+		}
+	}
+	if probe.Pending {
+		// The record is still there and the lease has not elapsed, so the window
+		// is ahead and at most one lease wide. Come back inside it instead of in
+		// five to seven seconds. This also spares the assessment a pass it would
+		// certainly lose on "retired bucket process still has a live lease",
+		// which would reset the settling window on its way out.
+		return s.stop(ctrl.Result{RequeueAfter: retirementWindow}, true, nil)
+	}
+	return nil
 }
 
 // admitBucketObservations establishes durably admitted observational Bucket

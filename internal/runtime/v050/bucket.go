@@ -101,6 +101,17 @@ type BucketMember struct {
 // positively read while its lease had already elapsed.
 type RetirementObservation struct{ Node, Generation string }
 
+// RetirementReading is one probe's result. Expired carries the positive
+// observations. Live names probed generations whose record is still present
+// with a lease that has not elapsed yet, which is the only case where the
+// readable-expired window is still ahead and waiting for it can pay off. A
+// probed generation in neither list has no readable record at all: its window,
+// if it ever opened, is closed, and no amount of polling reopens it.
+type RetirementReading struct {
+	Expired []RetirementObservation
+	Live    []string
+}
+
 // ObserveBucketRetirement reads the named generations' node records and reports
 // only those positively read with an expired lease. The pinned dead_node_gc
 // deletes a no-log record about a second after the lease elapses, so a caller
@@ -117,28 +128,28 @@ type RetirementObservation struct{ Node, Generation string }
 // InspectBucketMembership's job on this pass and on every later one, and an
 // observation recorded here only ever lets that function tolerate the exact
 // record's later disappearance.
-func (a *Adapter) ObserveBucketRetirement(ctx context.Context, r Reader, members []BucketMember, now func() time.Time) ([]RetirementObservation, error) {
+func (a *Adapter) ObserveBucketRetirement(ctx context.Context, r Reader, members []BucketMember, now func() time.Time) (RetirementReading, error) {
 	if len(members) == 0 {
-		return nil, nil
+		return RetirementReading{}, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	expected := map[string]string{}
 	for _, member := range members {
 		if !validID(member.Node) || !validID(member.Generation) || member.SupersededBy != "" {
-			return nil, errors.New("invalid bucket retirement probe")
+			return RetirementReading{}, errors.New("invalid bucket retirement probe")
 		}
 		if _, exists := expected[member.Node]; exists {
-			return nil, errors.New("duplicate bucket retirement probe")
+			return RetirementReading{}, errors.New("duplicate bucket retirement probe")
 		}
 		expected[member.Node] = member.Generation
 	}
 	budget := 1000
 	nodes, err := a.readNodes(ctx, r, &budget, -1, nil)
 	if err != nil {
-		return nil, err
+		return RetirementReading{}, err
 	}
-	var observed []RetirementObservation
+	var reading RetirementReading
 	for _, node := range nodes {
 		generation, ok := expected[node.Name]
 		if !ok || node.Generation != generation || node.Epoch != 0 || node.LogState != "" {
@@ -148,14 +159,15 @@ func (a *Adapter) ObserveBucketRetirement(ctx context.Context, r Reader, members
 		// and the lease comparison must judge the same instant.
 		at := now()
 		if at.UnixMilli() < 0 {
-			return nil, errors.New("invalid observation clock")
+			return RetirementReading{}, errors.New("invalid observation clock")
 		}
 		if node.ExpiresMS > uint64(at.UnixMilli()) {
+			reading.Live = append(reading.Live, node.Name)
 			continue
 		}
-		observed = append(observed, RetirementObservation{Node: node.Name, Generation: node.Generation})
+		reading.Expired = append(reading.Expired, RetirementObservation{Node: node.Name, Generation: node.Generation})
 	}
-	return observed, nil
+	return reading, nil
 }
 
 // InspectBucketMembership supports repeated removals without erasing historical

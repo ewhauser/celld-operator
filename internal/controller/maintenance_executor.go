@@ -184,16 +184,19 @@ func (r *Reconciler) executeMaintenance(ctx context.Context, f *fleet.CelldFleet
 	}
 	p.view = *j
 	p.view.Operation = &lifecycleOperation{ID: m.ID, Phase: "Recovering", From: j.Applied, To: j.Applied, BucketCandidates: m.Sessions}
-	// Post-effect: the target is gone and its record is on the pinned runtime's
-	// short deletion clock. Read it before the assessments below, which can fail
-	// on survivors, placement or collection while the reading is still possible.
-	if m.Phase == "Recovering" {
-		probe := r.observeRetirementExpiry(ctx, f, j, [][]bucketSession{m.Sessions, j.BucketHistory})
-		p.window = probe.Pending
-		if probe.Changed {
-			if err := r.saveJournal(ctx, res, j); err != nil {
-				return ctrl.Result{}, true, err
-			}
+	// A stopped target's record is on the pinned runtime's short deletion clock
+	// from the moment it stops heartbeating, which is not tied to any phase
+	// boundary: the Pod is deleted while the operation is still Authorized and
+	// the lease elapses about ten seconds later. Read it on every pass, before
+	// the assessments below, which can fail on survivors, placement or
+	// collection while the reading is still possible. The lifecycle's own
+	// observeRetiredWriters step cannot cover this: an active maintenance
+	// operation ends the reconcile before that step runs.
+	probe := r.observeRetirementExpiry(ctx, f, j, [][]bucketSession{m.Sessions, j.BucketHistory})
+	p.window = probe.Pending
+	if probe.Changed {
+		if err := r.saveJournal(ctx, res, j); err != nil {
+			return ctrl.Result{}, true, err
 		}
 	}
 	if m.Kind == "Delete" {

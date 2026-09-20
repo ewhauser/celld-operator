@@ -209,11 +209,21 @@ func TestObserveBucketRetirementReportsOnlyPositiveExpiry(t *testing.T) {
 			if name == "expired" || name == "elapsed exactly" {
 				want = 1
 			}
-			if len(observed) != want {
-				t.Fatalf("observed %d expired records, want %d: %+v", len(observed), want, observed)
+			if len(observed.Expired) != want {
+				t.Fatalf("observed %d expired records, want %d: %+v", len(observed.Expired), want, observed)
 			}
-			if want == 1 && (observed[0].Node != n.Name || observed[0].Generation != n.Generation) {
-				t.Fatalf("observation names the wrong writer: %+v", observed[0])
+			if want == 1 && (observed.Expired[0].Node != n.Name || observed.Expired[0].Generation != n.Generation) {
+				t.Fatalf("observation names the wrong writer: %+v", observed.Expired[0])
+			}
+			// Live is the "window is still ahead" signal and must be reported for
+			// exactly the one case where the record is there with an unelapsed
+			// lease -- never for a record that is absent, unknown or replaced.
+			wantLive := 0
+			if name == "live lease" {
+				wantLive = 1
+			}
+			if len(observed.Live) != wantLive {
+				t.Fatalf("reported %d live records, want %d: %+v", len(observed.Live), wantLive, observed)
 			}
 		})
 	}
@@ -235,7 +245,7 @@ func TestObserveBucketRetirementRefusesAmbiguousProbes(t *testing.T) {
 			t.Fatalf("ambiguous probe accepted: %+v", members)
 		}
 	}
-	if observed, err := a.ObserveBucketRetirement(t.Context(), r, nil, func() time.Time { return now }); err != nil || observed != nil {
+	if observed, err := a.ObserveBucketRetirement(t.Context(), r, nil, func() time.Time { return now }); err != nil || len(observed.Expired) != 0 || len(observed.Live) != 0 {
 		t.Fatalf("empty probe read anything: %+v %v", observed, err)
 	}
 }
