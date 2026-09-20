@@ -35,7 +35,9 @@ func TestStrictRuntimeSupervisorHTTP(t *testing.T) {
 	t.Logf("strict celld binary SHA256 %s", hex.EncodeToString(hash[:]))
 	name := "launcher-strict-" + Nonce()[:12]
 	image := "quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e"
-	cmd := exec.CommandContext(t.Context(), "docker", "run", "-d", "--name", name, "-p", "127.0.0.1::9000", "-e", "MINIO_ROOT_USER=launcher", "-e", "MINIO_ROOT_PASSWORD=launcher-local-only", image, "server", "/data")
+	// Isolate this disposable object-store fixture from Docker disk pressure.
+	// This handshake does not test object-store restart durability.
+	cmd := exec.CommandContext(t.Context(), "docker", "run", "-d", "--tmpfs", "/data:rw,size=1g", "--name", name, "-p", "127.0.0.1::9000", "-e", "MINIO_ROOT_USER=launcher", "-e", "MINIO_ROOT_PASSWORD=launcher-local-only", image, "server", "/data")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("MinIO: %s %v", out, err)
 	}
