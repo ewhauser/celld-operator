@@ -16,6 +16,11 @@ import (
 
 const fenceRequestKey = "celld.eric.dev/fence-operation"
 
+// The donor launcher must be continuously unreachable for this long before the
+// fence annotation may record new termination intent. callLauncher has a short
+// timeout, so a single failure is an ordinary transient, not a dead host.
+const fenceUnreachableWindow = 60 * time.Second
+
 type infrastructureFence struct {
 	Operation             string
 	Member                persistentMember

@@ -69,6 +69,10 @@ type lifecycleOperation struct {
 	BucketCandidates                       []bucketSession
 	PersistentMembers                      []persistentMember
 	SettledAt                              time.Time
+	// Start of the current run of consecutive donor launcher failures during
+	// Stopping. Zero whenever the last call succeeded. Optional and additive:
+	// journals written before it simply decode as zero.
+	DonorUnreachableSince time.Time
 }
 
 // Qualification seam, deliberately unexported and not wired to a CLI flag.
