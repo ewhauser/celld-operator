@@ -382,7 +382,7 @@ func (h *harness) startOperator() {
 
 // setOperatorFault rolls the in-cluster manager with an explicit --local-test
 // crash point; an empty point withdraws it and replaces the crash-looping pod.
-func (h *harness) setOperatorFault(point string) {
+func (h *harness) setOperatorFault(point string) string {
 	args := append([]string{}, h.operatorArgs...)
 	if point != "" {
 		args = append(args, "--local-fault-point="+point)
@@ -390,6 +390,27 @@ func (h *harness) setOperatorFault(point string) {
 	h.k("-n", operatorNS, "patch", "deployment", "celld-operator", "--type=json", "-p",
 		encode([]object{{"op": "replace", "path": "/spec/template/spec/containers/0/args", "value": args}}))
 	h.k("-n", operatorNS, "rollout", "status", "deployment/celld-operator", "--timeout=180s")
+	// Bind crash evidence to the new manager Pod, not kubectl's choice of a
+	// matching Pod while a rollout or process restart changes readiness.
+	var selected string
+	h.wait("one manager Pod with the requested fault configuration", func() bool {
+		selected = ""
+		for _, pod := range items(decode(h.k("-n", operatorNS, "get", "pods", "-l", "app.kubernetes.io/name=celld-operator,pod-template-hash", "-o", "json"))) {
+			if str(pod, "metadata", "deletionTimestamp") != "" {
+				continue
+			}
+			for _, container := range list(pod, "spec", "containers") {
+				if str(container, "name") == "operator" && same(strs(container, "args"), args) {
+					if selected != "" {
+						return false
+					}
+					selected = nameOf(pod)
+				}
+			}
+		}
+		return selected != ""
+	})
+	return selected
 }
 
 func (h *harness) restartOperator() {

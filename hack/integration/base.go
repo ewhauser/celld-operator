@@ -110,6 +110,9 @@ func (h *harness) exerciseIsolation() {
 	fmt.Println("PASS: application writes readable only in their own fleet storage scope")
 	fmt.Println("PASS: same-fleet/operator peer access, cross-fleet/untrusted/client peer denial, ClusterIP health routing")
 	h.k("-n", "fleets", "delete", "pod", "same-fleet", "--wait=true")
+	// This probe uses the operator's network label and therefore also matches
+	// its Deployment selector. It must not shadow later manager log selection.
+	h.k("-n", operatorNS, "delete", "pod", "operator", "--wait=true")
 	h.apply(h.newFleet("conflict", "bucket-alpha", "Bucket", "other"))
 	h.wait("cross-namespace storage conflict blocked", func() bool {
 		return hasReason(h.getIn("other", "celldfleet", "conflict"), "StorageScopeConflict")

@@ -12,10 +12,10 @@ func (h *harness) exerciseFaults() {
 		h.scale(f.name, 3)
 		for _, point := range []string{"before-effect", "after-effect"} {
 			before := generation(h.get("statefulset", f.name))
-			h.setOperatorFault(point)
+			manager := h.setOperatorFault(point)
 			h.setReplicas(f.name, 2)
 			h.waitFor("manager crashes at "+point+": "+f.name, 8*time.Minute, func() bool {
-				out, _ := h.tryK("-n", operatorNS, "logs", "deployment/celld-operator", "--previous")
+				out, _ := h.tryK("-n", operatorNS, "logs", manager, "-c", "operator", "--previous")
 				return strings.Contains(out, "injected crash at lifecycle fault point \""+point+"\"")
 			})
 			state := h.currentState(f.name)
