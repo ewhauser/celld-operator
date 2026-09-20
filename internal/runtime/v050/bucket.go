@@ -98,8 +98,13 @@ type BucketMember struct {
 }
 
 // RetirementObservation names one admitted generation whose node record was
-// positively read while its lease had already elapsed.
-type RetirementObservation struct{ Node, Generation string }
+// positively read, with the lease instant it was judged against so a caller can
+// report exactly what it saw rather than only the verdict.
+type RetirementObservation struct {
+	Node, Generation string
+	ExpiresMS        uint64
+	At               time.Time
+}
 
 // RetirementReading is one probe's result. Expired carries the positive
 // observations. Live names probed generations whose record is still present
@@ -109,7 +114,7 @@ type RetirementObservation struct{ Node, Generation string }
 // if it ever opened, is closed, and no amount of polling reopens it.
 type RetirementReading struct {
 	Expired []RetirementObservation
-	Live    []string
+	Live    []RetirementObservation
 }
 
 // ObserveBucketRetirement reads the named generations' node records and reports
@@ -161,11 +166,12 @@ func (a *Adapter) ObserveBucketRetirement(ctx context.Context, r Reader, members
 		if at.UnixMilli() < 0 {
 			return RetirementReading{}, errors.New("invalid observation clock")
 		}
+		seen := RetirementObservation{Node: node.Name, Generation: node.Generation, ExpiresMS: node.ExpiresMS, At: at}
 		if node.ExpiresMS > uint64(at.UnixMilli()) {
-			reading.Live = append(reading.Live, node.Name)
+			reading.Live = append(reading.Live, seen)
 			continue
 		}
-		reading.Expired = append(reading.Expired, RetirementObservation{Node: node.Name, Generation: node.Generation})
+		reading.Expired = append(reading.Expired, seen)
 	}
 	return reading, nil
 }

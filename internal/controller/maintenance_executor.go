@@ -168,11 +168,33 @@ func (r *Reconciler) executeMaintenance(ctx context.Context, f *fleet.CelldFleet
 			return result, true, reportErr
 		}
 		result, reportErr := r.report(ctx, f, hydrated(res, j), "MaintenanceRecoveryBlocked", err.Error(), false)
-		return tighten(result, p.window), true, reportErr
+		return tightenLogged(ctx, result, p.window), true, reportErr
+	}
+	// A stopped target's record is on the pinned runtime's short deletion clock
+	// from the moment it stops heartbeating, which is tied to no phase boundary:
+	// the Pod is deleted while the operation is still Authorized and the lease
+	// elapses about ten seconds later. Read it before admission, which is itself
+	// something that can fail and which used to end the pass at reconcileDelay
+	// with the record still sitting there readable. Authority is not bypassed:
+	// nothing here acts, and the journal write below is the same reservation CAS
+	// a stale leader loses. The lifecycle's own observeRetiredWriters step
+	// cannot cover this, because an active maintenance operation ends the
+	// reconcile before that step runs.
+	if f.Spec.Profile == "Bucket" {
+		probe := r.observeRetirementExpiry(ctx, f, j, [][]bucketSession{m.Sessions, j.BucketHistory})
+		p.window = probe.Pending
+		if probe.Changed {
+			if err := r.saveJournal(ctx, res, j); err != nil {
+				return ctrl.Result{}, true, err
+			}
+		}
 	}
 	expected, denied := r.admitMaintenancePass(ctx, p)
 	if denied != nil {
-		return denied.unwrap()
+		// An open window outranks a denied pass's ordinary delay: the denial will
+		// still be there in a second, the record will not.
+		result, handled, err := denied.unwrap()
+		return tightenLogged(ctx, result, p.window), handled, err
 	}
 	if f.Spec.Profile == "PersistentFleet" {
 		beforeVersion := expected.ResourceVersion
@@ -184,21 +206,6 @@ func (r *Reconciler) executeMaintenance(ctx context.Context, f *fleet.CelldFleet
 	}
 	p.view = *j
 	p.view.Operation = &lifecycleOperation{ID: m.ID, Phase: "Recovering", From: j.Applied, To: j.Applied, BucketCandidates: m.Sessions}
-	// A stopped target's record is on the pinned runtime's short deletion clock
-	// from the moment it stops heartbeating, which is not tied to any phase
-	// boundary: the Pod is deleted while the operation is still Authorized and
-	// the lease elapses about ten seconds later. Read it on every pass, before
-	// the assessments below, which can fail on survivors, placement or
-	// collection while the reading is still possible. The lifecycle's own
-	// observeRetiredWriters step cannot cover this: an active maintenance
-	// operation ends the reconcile before that step runs.
-	probe := r.observeRetirementExpiry(ctx, f, j, [][]bucketSession{m.Sessions, j.BucketHistory})
-	p.window = probe.Pending
-	if probe.Changed {
-		if err := r.saveJournal(ctx, res, j); err != nil {
-			return ctrl.Result{}, true, err
-		}
-	}
 	if m.Kind == "Delete" {
 		return r.executeBucketDeletion(ctx, f, res, j, w, p.block)
 	}

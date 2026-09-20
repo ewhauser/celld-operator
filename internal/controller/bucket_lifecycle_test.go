@@ -496,9 +496,13 @@ func retiredBucketFleet(t *testing.T) (*Reconciler, *fleet.CelldFleet, *lifecycl
 	if err := r.Delete(t.Context(), pod); err != nil {
 		t.Fatal(err)
 	}
+	// Deliberately left at Retired=false, the state a persisted record is really
+	// in when the writer's Pod disappears mid-pass. assessBucket's Resolved
+	// lookup demands old.Retired as well as the expiry proof, so a probe that
+	// records only ExpiryObserved leaves evidence the assessment will not honor.
 	for i := range j.BucketHistory {
 		if j.BucketHistory[i].Node == "pod-1" {
-			j.BucketHistory[i].Retired = true
+			j.BucketHistory[i].Retired = false
 			j.BucketHistory[i].ExpiryObserved = false
 			j.BucketHistory[i].ExpiryInvalidated = false
 		}
@@ -520,7 +524,8 @@ func observedExpiry(j *lifecycleJournal, node string) (int, int) {
 				continue
 			}
 			records++
-			if resolvedBucketSession(s) {
+			// Exactly the predicate assessBucket applies to a persisted record.
+			if s.Retired && resolvedBucketSession(s) {
 				proofs++
 			}
 		}
@@ -744,5 +749,30 @@ func TestBucketUnplannedDeathHoldsTheWindowThenReleasesIt(t *testing.T) {
 	reader.expired = map[string]bool{"pod-1": true}
 	if probe := r.observeRetirementExpiry(t.Context(), f, j, records); !probe.Changed || probe.Pending {
 		t.Fatalf("elapsed lease was not recorded and released: %+v", probe)
+	}
+}
+
+// A blocked pass must not out-wait the window. Whatever the executor or its
+// report would have returned -- a denied admission, a failing candidate sweep,
+// expired freshness -- an open window pulls the requeue down to the retirement
+// window, because the blocker will still be there in a second and the record
+// will not.
+func TestBlockedPassStillRequeuesInsideTheWindow(t *testing.T) {
+	_, f, _, _, _ := bucketPreflightSetup(t)
+	blocked := ctrl.Result{RequeueAfter: reconcileDelay(f)}
+	if blocked.RequeueAfter <= retirementWindow {
+		t.Fatalf("ordinary blocked cadence %s does not exceed the window", blocked.RequeueAfter)
+	}
+	if got := tightenLogged(t.Context(), blocked, true); got.RequeueAfter != retirementWindow {
+		t.Fatalf("blocked pass requeued at %s during an open window, want %s", got.RequeueAfter, retirementWindow)
+	}
+	// A closed window leaves the ordinary cadence exactly alone.
+	if got := tightenLogged(t.Context(), blocked, false); got.RequeueAfter != blocked.RequeueAfter {
+		t.Fatalf("closed window changed the ordinary cadence to %s", got.RequeueAfter)
+	}
+	// And a pass that already comes back sooner keeps its own pace.
+	quick := ctrl.Result{RequeueAfter: 200 * time.Millisecond}
+	if got := tightenLogged(t.Context(), quick, true); got.RequeueAfter != quick.RequeueAfter {
+		t.Fatalf("window slowed a faster pass to %s", got.RequeueAfter)
 	}
 }

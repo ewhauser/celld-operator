@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // A retired session has left observed membership; physical liveness is unknown.
@@ -120,6 +121,19 @@ func tighten(result ctrl.Result, pending bool) ctrl.Result {
 	return result
 }
 
+// tightenLogged is tighten for the paths that end a pass, recording the requeue
+// the pass actually returns. A blocked executor reports at reconcileDelay, and
+// the whole point is that an open window overrides it, so the effective cadence
+// has to be visible rather than inferred.
+func tightenLogged(ctx context.Context, result ctrl.Result, pending bool) ctrl.Result {
+	out := tighten(result, pending)
+	if pending {
+		logf.FromContext(ctx).WithName("bucket-retirement").Info("retirement window holds the cadence",
+			"requeue", out.RequeueAfter.String(), "wouldHaveBeen", result.RequeueAfter.String())
+	}
+	return out
+}
+
 // observeRetirementExpiry reads the records of admitted generations that have
 // left the workload and records positive expiry for any read with an already
 // elapsed lease. Post-effect passes call it first, ahead of the candidate
@@ -147,8 +161,10 @@ func (r *Reconciler) observeRetirementExpiry(ctx context.Context, f *fleet.Celld
 	if r.Evidence == nil {
 		return bucketRetirementProbe{Pending: true}
 	}
+	log := logf.FromContext(ctx).WithName("bucket-retirement")
 	pods, err := r.Evidence.pods(ctx, f)
 	if err != nil {
+		log.Error(err, "retirement probe could not list pods")
 		return bucketRetirementProbe{Pending: true}
 	}
 	present := map[string]bool{}
@@ -185,15 +201,41 @@ func (r *Reconciler) observeRetirementExpiry(ctx context.Context, f *fleet.Celld
 	}
 	reader, err := r.Evidence.reader(ctx, f)
 	if err != nil {
+		log.Error(err, "retirement probe has no evidence reader", "writers", len(members))
 		return bucketRetirementProbe{Pending: true}
 	}
 	adapter, err := catalog.New(runtimeImage(evidenceRuntime(f, j)))
 	if err != nil {
+		log.Error(err, "retirement probe has no runtime adapter", "writers", len(members))
 		return bucketRetirementProbe{Pending: true}
 	}
 	reading, err := adapter.ObserveBucketRetirement(ctx, reader, members, r.capacityNow)
 	if err != nil {
+		log.Error(err, "retirement record unreadable", "writers", len(members))
 		return bucketRetirementProbe{Pending: true}
+	}
+	// One line per unresolved writer per pass, and only while one exists, so the
+	// volume is bounded by a window at most a lease wide. Without this the only
+	// record of what the operator saw is the journal's final state, which cannot
+	// say whether a read ever landed inside the window.
+	listed := map[string]bool{}
+	for _, o := range reading.Expired {
+		listed[o.Node] = true
+		log.Info("retirement record read", "node", o.Node, "generation", o.Generation,
+			"listed", true, "expiresMS", o.ExpiresMS, "nowMS", o.At.UnixMilli(),
+			"remainingMS", int64(o.ExpiresMS)-o.At.UnixMilli(), "outcome", "expiryObserved")
+	}
+	for _, o := range reading.Live {
+		listed[o.Node] = true
+		log.Info("retirement record read", "node", o.Node, "generation", o.Generation,
+			"listed", true, "expiresMS", o.ExpiresMS, "nowMS", o.At.UnixMilli(),
+			"remainingMS", int64(o.ExpiresMS)-o.At.UnixMilli(), "outcome", "pending")
+	}
+	for _, m := range members {
+		if !listed[m.Node] {
+			log.Info("retirement record read", "node", m.Node, "generation", m.Generation,
+				"listed", false, "outcome", "lost")
+		}
 	}
 	probe := bucketRetirementProbe{Pending: len(reading.Live) > 0}
 	for _, o := range reading.Expired {
@@ -203,9 +245,19 @@ func (r *Reconciler) observeRetirementExpiry(ctx context.Context, f *fleet.Celld
 				if s.Node != o.Node || s.Generation != o.Generation || s.SupersededBy != "" {
 					continue
 				}
-				if !s.ExpiryObserved || s.ExpiryInvalidated {
+				if !s.Retired || !s.ExpiryObserved || s.ExpiryInvalidated {
 					probe.Changed = true
 				}
+				// Retire it here too. assessBucket recomputes Retired for the
+				// sessions it returns, but the Resolved lookup it feeds the
+				// adapter reads the *persisted* record and demands
+				// "old.Retired && resolvedBucketSession(old)". A record left at
+				// Retired=false therefore carries expiry proof the assessment
+				// will not honor, and the operation still wedges on a missing
+				// record. The writer's Pod is gone or unready and its lease was
+				// just read elapsed, which is exactly what retirement means
+				// here; the deletion path records the same pair together.
+				s.Retired = true
 				s.ExpiryObserved = true
 				s.ExpiryInvalidated = false
 			}
@@ -548,7 +600,7 @@ func (r *Reconciler) contractBucket(ctx context.Context, f *fleet.CelldFleet, re
 			return report(retirementEvidenceLost, message)
 		}
 		result, handled, err := report("BucketRecoveryBlocked", err.Error())
-		return tighten(result, window), handled, err
+		return tightenLogged(ctx, result, window), handled, err
 	}
 	issued := w.GetAnnotations()[operationKey] == op.ID && replicas(w) == op.To
 	if j.Loss != "" {
