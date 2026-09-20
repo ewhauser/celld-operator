@@ -23,15 +23,19 @@ from two valid digest strings.
 
 ## Published fork artifact
 
-Release `v0.5.1-ewhauser.1` has a Linux amd64/arm64 image index:
+Release `v0.5.1-ewhauser.2` has a Linux amd64/arm64 image index:
 
 ```text
-ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af
+ghcr.io/ewhauser/celld@sha256:a00da2bcaeaee6879d658477cd1bdb354a5de55fa9e7f0ab5e2fd95e6e0ce080
 ```
 
-The source revision is `f3b7e8c07e6fee53f1752bfb7a30fffbf1d514c8`.
-[Release build 35538821096](https://github.com/ewhauser/celld/actions/runs/35538821096)
+Version `.2` fixes populated full-stop removal: strict shutdown completes after
+durability, runtime stop and ownership release without waiting for successor
+adoption. Do not use `.1` for coordinated maintenance.
+
+The source revision is `2a65a4df99bed5254bdd679df57ed98556454dec`.
+[Release build 35542493819](https://github.com/ewhauser/celld/actions/runs/35542493819)
 completed and the published index was verified anonymously. Native binaries and
-checksums are attached to the [fork release](https://github.com/ewhauser/celld/releases/tag/v0.5.1-ewhauser.1).
+checksums are attached to the [fork release](https://github.com/ewhauser/celld/releases/tag/v0.5.1-ewhauser.2).
 Published and attested artifacts still require the deployment qualification
 described above. The operator/launcher image is built and pinned separately.

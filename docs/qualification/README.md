@@ -21,9 +21,11 @@ Do not treat serialized fixtures as live server observations or the empty-disk
 handshake as replicated recovery qualification.
 
 The [released native maintenance run](native-maintenance/README.md) separately
-verified strict 3→2→1→0, deletion of every disk, fresh-disk recovery of all 29
-acknowledged KV/SQL writes, and 37/37 entries after new writes. Its failed-deadline
-case retained storage. This is native/MinIO evidence, separate from Kind and EBS.
+verified populated sequential and concurrent full stops with the released `.2`
+binary. After deletion of every original disk, all three fresh nodes recovered
+28/28, 20/20 and 21/21 acknowledged writes across the three schedules, including
+a peer-only acknowledgment. Its failed-deadline case retained storage. This is
+native/MinIO evidence, separate from Kind and EBS.
 
 Use [the EKS test plan](eks-smoke-plan.md) for cloud validation. Keep unsupported
 or blocked outcomes visible; never clear authority or force storage finalizers
@@ -32,7 +34,7 @@ to make a test pass.
 Run the disposable suite with an actual published fork image digest:
 
 ```sh
-CELLD_RUNTIME_IMAGE=ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af \
+CELLD_RUNTIME_IMAGE=ghcr.io/ewhauser/celld@sha256:a00da2bcaeaee6879d658477cd1bdb354a5de55fa9e7f0ab5e2fd95e6e0ce080 \
 go run ./hack/integration --suite all
 ```
 

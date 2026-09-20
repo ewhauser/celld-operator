@@ -129,8 +129,8 @@ go test -race ./internal/launcher -run '^TestStrictRuntimeSupervisorHTTP$' -v -c
 ```
 
 The September 20 local macOS ARM64 run used binary SHA256
-`a295e40f971e9800164b33e1e8e6e13f5d96ead32a210481f348bba35223c785`, from the
-verified `0.5.1-ewhauser.1` fork release. It captured the control-only result, exact seeded
+`f9b68e9e9608d74c40a9d8e9dab1846c3532f4f51762dc25e863c0986f2146db`, from the
+verified `0.5.1-ewhauser.2` fork release. It captured the control-only result, exact seeded
 generation, child exit, inherited-lock release and restart denial. This empty-disk
 handshake does not qualify replicated recovery, a published runtime image, or
 EKS/EBS removal. Those remain separate integration gates.

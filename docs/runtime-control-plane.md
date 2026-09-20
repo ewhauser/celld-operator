@@ -39,7 +39,7 @@ An explicitly qualified fork digest is still required for rollout.
 
 The adapter follows the implemented `State::snapshot` in
 `crates/celld/disk_removal.rs` and `handle_internal` in `crates/celld/main.rs` on
-`ewhauser/celld`, strict-shutdown release `v0.5.1-ewhauser.1` (upstream v0.5.1 base).
+`ewhauser/celld`, strict-shutdown release `v0.5.1-ewhauser.2` (upstream v0.5.1 base).
 Stock v0.5.1 does not implement this extension.
 
 `GET /state` adds a `shutdown` object containing:

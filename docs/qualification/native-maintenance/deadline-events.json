@@ -16,12 +16,12 @@
       "control_only": true,
       "operation": {
         "blocker": "follower admission deadline",
-        "expected_generation": "7b1a01fdaf39989b32c78e4fabdef5ee9692d25bfcc0373bdc38e491a94ed8ce",
+        "expected_generation": "1bcb7f0789bbf6d37f77400fd1c92e702209e7c1184baa9044c14169808989c1",
         "mode": "remove-disk",
         "operation_id": "store-outage",
         "phase": "failed"
       },
-      "runtime_generation": "7b1a01fdaf39989b32c78e4fabdef5ee9692d25bfcc0373bdc38e491a94ed8ce",
+      "runtime_generation": "1bcb7f0789bbf6d37f77400fd1c92e702209e7c1184baa9044c14169808989c1",
       "schema_version": 1
     }
   },

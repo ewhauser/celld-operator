@@ -158,8 +158,8 @@ CELLD_STRICT_TEST_ESBUILD=/absolute/path/to/esbuild \
 go test -race ./internal/controller -run '^TestStrictRuntimeCurrentOperation$' -v -count=1
 ```
 
-The September 20 run passed with the verified `0.5.1-ewhauser.1` macOS ARM64
-binary, SHA256 `a295e40f971e9800164b33e1e8e6e13f5d96ead32a210481f348bba35223c785`.
+The September 20 run passed with the verified `0.5.1-ewhauser.2` macOS ARM64
+binary, SHA256 `f9b68e9e9608d74c40a9d8e9dab1846c3532f4f51762dc25e863c0986f2146db`.
 It uses an empty runtime disk and simulated Kubernetes/CSI resources. Envtest
 separately exercises a real API server and etcd. Neither qualifies replicated
 workload recovery, Kind's full workload controllers, EKS/EBS or real disk cleanup.
