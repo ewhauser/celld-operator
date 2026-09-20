@@ -1,7 +1,7 @@
 # Disposable kind integration suites. They need Docker, a three-node kind
-# cluster, registry access and 15-25 minutes each, so they run nightly and on
-# demand rather than on every push. Add the `integration` label to a pull
-# request to run them there.
+# cluster, registry access and 15-25 minutes each. Every pull request runs the
+# base suite; the full matrix runs nightly, on demand, and on a pull request
+# carrying the `integration` label.
 name: Integration
 
 on:
@@ -14,7 +14,7 @@ on:
         default: all
         type: string
   pull_request:
-    types: [labeled, synchronize, reopened]
+    types: [opened, labeled, synchronize, reopened]
 
 permissions:
   contents: read
@@ -25,7 +25,6 @@ concurrency:
 
 jobs:
   kind:
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'integration')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
@@ -37,8 +36,17 @@ jobs:
       - name: Select suite
         id: select
         env:
-          REQUESTED: ${{ github.event.inputs.suite || 'all' }}
+          EVENT: ${{ github.event_name }}
+          LABELLED: ${{ contains(github.event.pull_request.labels.*.name, 'integration') }}
+          INPUT: ${{ github.event.inputs.suite || 'all' }}
         run: |
+          # A pull request runs base unless it carries the integration label;
+          # schedule and dispatch honour the requested suite.
+          if [ "$EVENT" = pull_request ] && [ "$LABELLED" != true ]; then
+            REQUESTED=base
+          else
+            REQUESTED="$INPUT"
+          fi
           if [ "$REQUESTED" != all ] && [ "$REQUESTED" != "${{ matrix.suite }}" ]; then
             echo "run=false" >> "$GITHUB_OUTPUT"
           else

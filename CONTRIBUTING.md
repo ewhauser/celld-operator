@@ -86,16 +86,11 @@ actionlint .github/workflows/ci.yaml
 ```
 
 CI has separate build, race-test, and lint jobs using the same Make targets.
-The kind integration suites run nightly and on demand from the Integration
-workflow (`workflow_dispatch` with a suite name, or the `integration` label on a
-pull request); each suite is a disposable three-node cluster and takes 15 to 25
-minutes.
-The test job also runs `make qualification-replay` and `make qualification-test`;
-see the [qualification harness](hack/qualification/README.md) for Python setup
-and the separately invoked local Docker experiments.
-GitHub Actions are pinned to immutable commits and workflow permissions are
-read-only. Renovate follows the source project's security-only update policy,
-three-day release cooldown, and grouped, digest-pinned GitHub Actions updates.
+The kind integration suites need Docker and a three-node kind cluster. Every
+pull request runs the `base` suite; the full matrix runs nightly, on demand from
+the Integration workflow (`workflow_dispatch` with a suite name), and on a pull
+request carrying the `integration` label. Run a suite locally with
+`make integration` or `make integration-<suite>`.
 
 The module pins controller-runtime and Kubernetes dependencies in `go.mod` and
 `go.sum`. CI module caching is enabled. Run `make manifests-check` for generated
