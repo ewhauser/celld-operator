@@ -44,6 +44,39 @@ func certifiedInfrastructureFence(j *lifecycleJournal, member persistentMember) 
 	})
 }
 
+// releaseInfrastructureFences drops the receipts an operation leaves behind, at
+// the one moment that is safe: when the operation record itself is cleared.
+// Both readers of a receipt reach it through the operation that recorded it
+// (certifiedInfrastructureFence is only consulted for j.Operation's own donor,
+// and the stopping path matches receipt.Operation against j.Operation.ID), so
+// once that record is gone no decision can ever consult the receipt again; only
+// validatePersistentJournal still re-validated it against Claims on every load.
+// An operation that is still recovering keeps its receipt: nothing here runs
+// until the record is retired, which is what ADR 0020 requires of an
+// irreversible intent. The receipt is emitted as an Event first (ADR 0021
+// tier 3), so the instance, member and confirmation survive outside the journal.
+func (r *Reconciler) releaseInfrastructureFences(f *fleet.CelldFleet, j *lifecycleJournal, operation string) {
+	if operation == "" || len(j.InfrastructureFences) == 0 {
+		return
+	}
+	kept := make([]infrastructureFence, 0, len(j.InfrastructureFences))
+	for _, receipt := range j.InfrastructureFences {
+		if receipt.Operation != operation {
+			kept = append(kept, receipt)
+			continue
+		}
+		if r.Recorder != nil {
+			r.Recorder.Eventf(f, nil, corev1.EventTypeNormal, "InfrastructureFenceRetired", "Complete",
+				"Fence receipt for operation %s retired: instance %s, node %s, member %s generation %s, intent %s, confirmed %s",
+				receipt.Operation, receipt.Binding.Instance, receipt.Member.Host, receipt.Member.Node, orNone(receipt.Member.Generation), stamp(receipt.IntentAt), stamp(receipt.ConfirmedAt))
+		}
+	}
+	if len(kept) == 0 {
+		kept = nil
+	}
+	j.InfrastructureFences = kept
+}
+
 func (r *Reconciler) ensureInfrastructureFence(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, j *lifecycleJournal, member persistentMember, operation string) (bool, error) {
 	if certifiedInfrastructureFence(j, member) {
 		return true, nil

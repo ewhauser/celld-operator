@@ -18,6 +18,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -459,5 +460,47 @@ func TestPersistentPauseCannotCompleteReactivation(t *testing.T) {
 				t.Fatal("pause certified incomplete reactivation after replica issuance")
 			}
 		})
+	}
+}
+
+// TestInfrastructureFenceReceiptRetiresWithItsOperation pins the ADR 0021
+// phase 1 boundary for InfrastructureFences: a receipt lives exactly as long as
+// the operation that recorded it, is audited as an event when that record is
+// cleared, and is never dropped while any operation could still read it.
+func TestInfrastructureFenceReceiptRetiresWithItsOperation(t *testing.T) {
+	p, m, api := infrastructureSetup(t)
+	recorder := events.NewFakeRecorder(16)
+	p.r.Recorder = recorder
+	for range 3 { // intent, cordon, terminate
+		if _, err := p.r.ensureInfrastructureFence(t.Context(), p.f, p.res, p.j, m, "removal"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	api.instance.State = "terminated"
+	api.instance.Disks = nil
+	if done, err := p.r.ensureInfrastructureFence(t.Context(), p.f, p.res, p.j, m, "removal"); !done || err != nil {
+		t.Fatalf("positive receipt not recorded: %v %v", done, err)
+	}
+	later := p.j.InfrastructureFences[0]
+	later.Operation = "later"
+	p.j.InfrastructureFences = append(p.j.InfrastructureFences, later)
+	// A recovering operation keeps its receipt: only clearing the record drops it.
+	p.r.releaseInfrastructureFences(p.f, p.j, "")
+	if len(p.j.InfrastructureFences) != 2 {
+		t.Fatalf("receipts dropped with no operation retired: %+v", p.j.InfrastructureFences)
+	}
+	p.r.releaseInfrastructureFences(p.f, p.j, "removal")
+	if len(p.j.InfrastructureFences) != 1 || p.j.InfrastructureFences[0].Operation != "later" {
+		t.Fatalf("wrong receipts retired: %+v", p.j.InfrastructureFences)
+	}
+	if !recordedEvent(recorder, "InfrastructureFenceRetired", m.Node, api.instance.ID) {
+		t.Fatal("retired receipt never reached the event stream")
+	}
+	if err := p.r.saveJournal(t.Context(), p.res, p.j); err != nil {
+		t.Fatal(err)
+	}
+	j, err := readJournal(p.res)
+	if err != nil || len(j.InfrastructureFences) != 1 {
+		t.Fatalf("journal without the retired receipt no longer loads: %v %+v", err, j)
 	}
 }

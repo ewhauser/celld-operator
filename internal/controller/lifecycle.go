@@ -623,6 +623,7 @@ func (s *lifecycleRun) holdUnderMaintenanceFence(ctx context.Context) *lifecycle
 	}
 	if op.To > op.From {
 		s.r.recordCompletion(f, j, completion(op, time.Time{}))
+		s.r.releaseInfrastructureFences(f, j, op.ID)
 		j.Applied, j.Operation = op.To, nil
 		return s.save(ctx)
 	}
@@ -1151,6 +1152,7 @@ func (s *lifecycleRun) confirmRemovalRecovery(ctx context.Context) *lifecycleOut
 		return s.progress(ctx, "Recovery evidence revalidated; waiting for another full assessment after settling")
 	}
 	s.r.recordCompletion(f, j, completion(op, evidence.ObservedAt))
+	s.r.releaseInfrastructureFences(f, j, op.ID)
 	j.Sessions, j.Applied, j.Operation = sessions, op.To, nil
 	return s.save(ctx)
 }
@@ -1256,6 +1258,7 @@ func (r *Reconciler) expand(ctx context.Context, f *fleet.CelldFleet, res *fleet
 		return ctrl.Result{RequeueAfter: time.Second}, true, r.saveJournal(ctx, res, j)
 	}
 	r.recordCompletion(f, j, completion(op, time.Time{}))
+	r.releaseInfrastructureFences(f, j, op.ID)
 	j.Applied, j.Operation = op.To, nil
 	return ctrl.Result{RequeueAfter: time.Second}, true, r.saveJournal(ctx, res, j)
 }

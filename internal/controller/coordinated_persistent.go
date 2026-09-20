@@ -37,6 +37,10 @@ func (r *Reconciler) beginCoordinatedContraction(ctx context.Context, f *fleet.C
 		result, err := r.report(ctx, f, "CoordinatedDowntimeBlocked", "Manual 2-to-1 requires explicit downtime permission and a one-AZ floor", false)
 		return result, true, err
 	}
+	// The operation is handed to maintenance under its own ID, not retired, so
+	// any fencing receipt keyed to that ID stays: releaseInfrastructureFences
+	// belongs only where the record is actually cleared. A freshly admitted
+	// operation cannot hold one in any case; receipts are recorded in Stopping.
 	j.Maintenance = &maintenanceOperation{ID: op.ID, Kind: "Contract", Coordinated: true, TargetReplicas: 1, Phase: "Capture", StartedAt: op.StartedAt, Deadline: op.Deadline}
 	j.Operation = nil
 	return r.saveMaintenance(ctx, f, res, j)

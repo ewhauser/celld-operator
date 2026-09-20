@@ -779,6 +779,7 @@ func (r *Reconciler) contractPersistentRecovering(ctx context.Context, f *fleet.
 	done := completion(op, at)
 	done.Outcome = "LauncherStoppedRecoveredFollowerRetired"
 	r.recordCompletion(f, j, done)
+	r.releaseInfrastructureFences(f, j, op.ID)
 	j.Applied, j.Operation = op.To, nil
 	if j.Capacity != nil {
 		capacity.RecordAction(j.Capacity, r.capacityNow(), op.From, op.To)
@@ -866,6 +867,7 @@ func (r *Reconciler) finishReactivation(ctx context.Context, f *fleet.CelldFleet
 	done := completion(op, inventory.ObservedAt)
 	done.Outcome = "RetainedVolumeReactivated"
 	r.recordCompletion(f, j, done)
+	r.releaseInfrastructureFences(f, j, op.ID)
 	j.Applied, j.Operation = op.To, nil
 	return ctrl.Result{RequeueAfter: time.Second}, true, r.saveJournal(ctx, res, j)
 }

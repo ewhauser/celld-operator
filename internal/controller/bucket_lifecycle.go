@@ -490,6 +490,7 @@ func (r *Reconciler) contractBucket(ctx context.Context, f *fleet.CelldFleet, re
 	done := completion(op, at)
 	done.Outcome = "BucketMembershipConvergedProcessLivenessUnknown"
 	r.recordCompletion(f, j, done)
+	r.releaseInfrastructureFences(f, j, op.ID)
 	j.Applied, j.Operation = op.To, nil
 	if j.Capacity != nil {
 		capacity.RecordAction(j.Capacity, r.capacityNow(), op.From, op.To)

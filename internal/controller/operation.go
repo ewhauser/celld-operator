@@ -55,6 +55,7 @@ func (r *Reconciler) cancelRemoval(ctx context.Context, f *fleet.CelldFleet, res
 			j.BucketHistory[index] = candidate
 		}
 	}
+	r.releaseInfrastructureFences(f, j, op.ID)
 	j.Operation = nil
 	resetMaintenanceCapacity(j)
 	return ctrl.Result{RequeueAfter: time.Second}, r.saveJournal(ctx, res, j)
