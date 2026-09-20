@@ -1,0 +1,140 @@
+COMMAND: make integration (go run ./hack/integration --suite all)
+SOURCE: 6ea528756e721d189eea5ab7283a1e3ab45ba815
+RUNTIME SOURCE: 2a65a4df99bed5254bdd679df57ed98556454dec
+RUNTIME INDEX: ghcr.io/ewhauser/celld@sha256:a00da2bcaeaee6879d658477cd1bdb354a5de55fa9e7f0ab5e2fd95e6e0ce080
+RUNTIME EXECUTED: linux/arm64 sha256:e4014d56abd9b8830a0a4a908fd8cdcd806a8b2220892bc4d3d962b9f9319e06
+OPERATOR/LAUNCHER: built from the exact source above
+STARTED (log creation): 2026-09-20T23:08:10.445532+00:00
+COMPACT LOG: runtime body and reservation JSON omitted; full archive hashes in result.json
+
+Creating isolated cluster celld-strict-b936d780
+PASS: create two isolated test buckets
+PASS: qualification app deployed to bucket-alpha
+PASS: qualification app deployed to bucket-beta
+PASS: pre-existing PVC blocks initial StatefulSet creation
+PASS: both runtime profiles ready through operator reconciliation
+PASS: strict replicas use distinct nodes within the configured zone
+PASS: strict placement blocks a missing eligible zone
+PASS: probe same-fleet running
+PASS: probe client running
+PASS: probe client-beta running
+PASS: probe untrusted running
+PASS: probe operator running
+PASS: application writes readable only in their own fleet storage scope
+PASS: same-fleet/operator peer access, cross-fleet/untrusted/client peer denial, ClusterIP health routing
+PASS: cross-namespace storage conflict blocked
+PASS: fleet in a namespace without the fleet Role is reported, not reconciled
+PASS: schema rejects invalid specs and lifecycle mutations
+PASS: additional probe and bucket override are reported as unsafe drift
+PASS: restored original template matches normalized API defaults
+PASS: alpha strict scale to 3
+PASS: pause prevents new removal: alpha held for 12 s
+PASS: alpha strict scale to 2
+PASS: alpha 12/12 acknowledged writes readable
+PASS: alpha strict scale to 3
+PASS: alpha strict scale to 2
+PASS: alpha strict scale to 1
+PASS: alpha 12/12 acknowledged writes readable
+PASS: alpha strict scale to 2
+PASS: alpha 12/12 acknowledged writes readable
+PASS: alpha strict scale to 3
+PASS: Metrics Server automatic contraction: alpha
+PASS: alpha 12/12 acknowledged writes readable
+PASS: alpha fresh-disk grow, exact-ordinal shrink, 2-to-1, controller restart, bounded idle state
+PASS: beta strict scale to 3
+PASS: pause prevents new removal: beta held for 12 s
+PASS: beta strict scale to 2
+PASS: beta 12/12 acknowledged writes readable
+PASS: beta strict scale to 3
+PASS: beta strict scale to 2
+PASS: beta strict scale to 1
+PASS: beta 12/12 acknowledged writes readable
+PASS: beta strict scale to 2
+PASS: beta 12/12 acknowledged writes readable
+PASS: beta strict scale to 3
+PASS: Metrics Server automatic contraction: beta
+PASS: beta 12/12 acknowledged writes readable
+PASS: beta fresh-disk grow, exact-ordinal shrink, 2-to-1, controller restart, bounded idle state
+PASS: External mode names the /scale writer as owner
+PASS: /scale reports spec, observed replicas and the fleet selector
+PASS: fleet load generator running
+PASS: HPA reads the fleet through /scale
+PASS: HPA measures the fleet above its target through Metrics Server
+PASS: HPA raises spec.replicas to its maximum
+PASS: operator applies the HPA addition through current-operation state
+PASS: External mode never fights the HPA; desired 3 applied 3
+PASS: HPA lowers spec.replicas
+PASS: HPA-requested contraction completes through the strict control plane and /scale catches up
+PASS: acknowledged write readable after HPA-driven shrink; /scale consistent
+PASS: kubectl scale through /scale adds a replica via current-operation state
+PASS: manual ownership restored after External mode
+PASS: alpha strict scale to 3
+PASS: one manager Pod with the requested fault configuration
+PASS: manager crashes at before-effect: alpha
+PASS: one manager Pod with the requested fault configuration
+PASS: manager resumes exact operation: alpha
+PASS: alpha 24/24 acknowledged writes readable
+PASS: alpha strict scale to 3
+PASS: one manager Pod with the requested fault configuration
+PASS: manager crashes at after-effect: alpha
+PASS: one manager Pod with the requested fault configuration
+PASS: manager resumes exact operation: alpha
+PASS: alpha 24/24 acknowledged writes readable
+PASS: alpha strict scale to 3
+PASS: alpha strict scale to 2
+PASS: beta strict scale to 3
+PASS: one manager Pod with the requested fault configuration
+PASS: manager crashes at before-effect: beta
+PASS: one manager Pod with the requested fault configuration
+PASS: manager resumes exact operation: beta
+PASS: beta 24/24 acknowledged writes readable
+PASS: beta strict scale to 3
+PASS: one manager Pod with the requested fault configuration
+PASS: manager crashes at after-effect: beta
+PASS: one manager Pod with the requested fault configuration
+PASS: manager resumes exact operation: beta
+PASS: beta 24/24 acknowledged writes readable
+PASS: beta strict scale to 3
+PASS: beta strict scale to 2
+PASS: alpha strict scale to 3
+PASS: alpha strict scale to 2
+PASS: alpha 24/24 acknowledged writes readable
+PASS: probe launcher-inspector running
+PASS: S3 lease expiry stops every runtime without removal authority
+BEGIN PRE-REPLACEMENT RUNTIME LOG pod=alpha-0 uid=64b61155-6f41-4679-b430-9eceae96df77 limit_bytes=8388608
+END PRE-REPLACEMENT RUNTIME LOG pod=alpha-0 uid=64b61155-6f41-4679-b430-9eceae96df77
+BEGIN PRE-REPLACEMENT RUNTIME LOG pod=alpha-1 uid=a271253f-a4ea-4009-8355-85775b5de1fb limit_bytes=8388608
+END PRE-REPLACEMENT RUNTIME LOG pod=alpha-1 uid=a271253f-a4ea-4009-8355-85775b5de1fb
+BEGIN PRE-REPLACEMENT RUNTIME LOG pod=beta-0 uid=b9be1073-9e13-40ae-9671-d8a1db137852 limit_bytes=8388608
+END PRE-REPLACEMENT RUNTIME LOG pod=beta-0 uid=b9be1073-9e13-40ae-9671-d8a1db137852
+BEGIN PRE-REPLACEMENT RUNTIME LOG pod=beta-1 uid=56155c84-5357-4f1a-b257-e98f64cee5bb limit_bytes=8388608
+END PRE-REPLACEMENT RUNTIME LOG pod=beta-1 uid=56155c84-5357-4f1a-b257-e98f64cee5bb
+PASS: restoring S3 does not restart failed children or delete disks held for 12 s
+PASS: lease-loss fail-stop preserves all Pod/PVC/PV identities; no strict proof or automatic restart
+PASS: explicit administrative Pod replacement restores both fleets
+PASS: alpha 36/36 acknowledged writes readable
+PASS: beta 36/36 acknowledged writes readable
+PASS: explicit administrative recovery uses new Pod/runtime identities and retains same-host PersistentFleet disks and every acknowledged write
+PASS: both profiles preserve acknowledged writes across before/after-effect manager crashes, storage latency and explicit administrative recovery after lease loss
+PASS: coordinated restart accepted: alpha
+PASS: restart completes across manager replacement: alpha
+PASS: alpha 48/48 acknowledged writes readable
+PASS: completed token does not replay: alpha held for 12 s
+PASS: strict final deletion: alpha
+PASS: alpha compute and disks deleted; bucket reservation retained
+PASS: coordinated restart accepted: beta
+PASS: restart completes across manager replacement: beta
+PASS: beta 48/48 acknowledged writes readable
+PASS: completed token does not replay: beta held for 12 s
+PASS: strict final deletion: beta
+PASS: beta compute and disks deleted; bucket reservation retained
+NOT RUN: different-digest runtime upgrade; set CELLD_UPGRADE_IMAGE to qualify an actual upgrade
+PASS: strict control-plane integration suite all runtime ghcr.io/ewhauser/celld@sha256:a00da2bcaeaee6879d658477cd1bdb354a5de55fa9e7f0ab5e2fd95e6e0ce080
+Cleaning up only cluster celld-strict-b936d780
+
+SUPPLEMENTAL READ-ONLY OBSERVER:
+PASS: beta-0 new Pod UID; IP 192.168.20.70 -> 192.168.20.77; unchanged node celld-strict-b936d780-worker2; unchanged advertised endpoint beta-0.beta-peers.fleets.svc:8081
+PASS: beta-1 new Pod UID; IP 192.168.17.10 -> 192.168.17.12; unchanged node celld-strict-b936d780-worker; unchanged advertised endpoint beta-1.beta-peers.fleets.svc:8081
+EXIT: 0
+CLEANUP VERIFIED: no owned celld-strict-b936d780 node containers remain
+COMPLETED (last log write): 2026-09-20T23:44:02.362813+00:00

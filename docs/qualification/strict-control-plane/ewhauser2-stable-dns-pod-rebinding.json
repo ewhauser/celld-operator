@@ -1,0 +1,44 @@
+{
+  "before": {
+    "beta-0": {
+      "pod_uid": "b9be1073-9e13-40ae-9671-d8a1db137852",
+      "pod_ip": "192.168.20.70",
+      "node": "celld-strict-b936d780-worker2",
+      "advertise": "beta-0.beta-peers.fleets.svc:8081"
+    },
+    "beta-1": {
+      "pod_uid": "56155c84-5357-4f1a-b257-e98f64cee5bb",
+      "pod_ip": "192.168.17.10",
+      "node": "celld-strict-b936d780-worker",
+      "advertise": "beta-1.beta-peers.fleets.svc:8081"
+    }
+  },
+  "after": {
+    "beta-0": {
+      "pod_uid": "0595ec0d-df76-463b-aec8-9fb3cc6aa635",
+      "pod_ip": "192.168.20.77",
+      "node": "celld-strict-b936d780-worker2",
+      "advertise": "beta-0.beta-peers.fleets.svc:8081"
+    },
+    "beta-1": {
+      "pod_uid": "fe1599ac-c6f0-48f6-8490-21701ffa5a7d",
+      "pod_ip": "192.168.17.12",
+      "node": "celld-strict-b936d780-worker",
+      "advertise": "beta-1.beta-peers.fleets.svc:8081"
+    }
+  },
+  "checks": {
+    "beta-0": {
+      "new_pod_uid": true,
+      "changed_ip": true,
+      "same_node": true,
+      "same_advertise": true
+    },
+    "beta-1": {
+      "new_pod_uid": true,
+      "changed_ip": true,
+      "same_node": true,
+      "same_advertise": true
+    }
+  }
+}
