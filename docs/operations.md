@@ -83,6 +83,27 @@ Keep the termination grace period at or above the manager's
 first the release is skipped and handover falls back to lease expiry, which is
 the behaviour before this option, not a regression.
 
+## RetirementEvidenceLost
+
+`RetirementEvidenceLost` means an admitted Bucket writer's `nodes/<uid>.json`
+left the store before any assessment positively read its lease expired. The
+condition names the writer, its generation and when the fleet last saw it.
+
+This is terminal, not transient. Absence never resolves a retirement, and no
+elapsed time, prior live lease or controller restart reconstructs the proof
+([ADR 0016](decisions/0016-bucket-preflight-and-completion-boundary.md)), so
+Bucket contraction for that fleet stays blocked and the operator offers no
+administrative success flag. Every other blocker keeps the ordinary
+`BucketRecoveryBlocked` / `MaintenanceRecoveryBlocked` reason, which does clear
+on a later pass.
+
+Expect it after the controller was leaderless or otherwise unable to reconcile
+across a retirement -- the window between lease expiry and the runtime deleting
+the record is about a second wide. Releasing the lease on shutdown and polling
+that window every second make it much less likely, but neither can guarantee the
+reading is taken. Treat the condition as a report to investigate, not something
+to wait out.
+
 ## Monitoring
 
 `metrics.enabled=true` exposes port 8084 through a ClusterIP service.

@@ -64,6 +64,31 @@ func invalidateBucketExpiry(records [][]bucketSession, e *v050.BucketExpiryInval
 	return changed
 }
 
+// retirementEvidenceLost is reported when an admitted generation's record left
+// the store before any pass positively read its lease expired. It is kept
+// distinct from the generic recovery blocker because nothing the controller
+// does next can clear it: ADR 0016 does not resolve a retirement from absence,
+// and this operator offers no administrative success flag, so the condition has
+// to say plainly which writer is unresolved and that contraction stays blocked.
+const retirementEvidenceLost = "RetirementEvidenceLost"
+
+// bucketEvidenceLost renders the blocked condition for a lost retirement proof,
+// naming the writer, its generation and when the fleet last observed it. It
+// reports false for every other blocker.
+func bucketEvidenceLost(j *lifecycleJournal, err error) (string, bool) {
+	lost, ok := errors.AsType[*v050.BucketEvidenceLostError](err)
+	if !ok {
+		return "", false
+	}
+	seen := "it was never observed in the runtime inventory"
+	for _, s := range j.Inventory.Sessions {
+		if s.Node == lost.Node && !s.LastSeen.IsZero() {
+			seen = "it was last seen " + s.LastSeen.UTC().Format(time.RFC3339)
+		}
+	}
+	return fmt.Sprintf("Bucket writer %s (generation %s) left the storage inventory before any assessment positively read its lease expired; %s. Absence does not resolve a retirement, so Bucket contraction for this fleet stays blocked until this generation is resolved.", lost.Node, lost.Generation, seen), true
+}
+
 // retirementWindow is how often a post-effect pass repolls while an admitted
 // generation that has left the workload still has no positive expiry
 // observation. The pinned runtime deletes a no-log record about a second after
@@ -505,6 +530,11 @@ func (r *Reconciler) contractBucket(ctx context.Context, f *fleet.CelldFleet, re
 			if err := r.saveJournal(ctx, res, j); err != nil {
 				return ctrl.Result{}, true, err
 			}
+		}
+		if message, lost := bucketEvidenceLost(j, err); lost {
+			// The window is closed, not open: repolling cannot read a record that
+			// is already gone, so this drops back to the ordinary cadence.
+			return report(retirementEvidenceLost, message)
 		}
 		result, handled, err := report("BucketRecoveryBlocked", err.Error())
 		return tighten(result, window), handled, err

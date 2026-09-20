@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -610,5 +611,43 @@ func TestBucketRetirementWindowCadence(t *testing.T) {
 	probe = r.observeRetirementExpiry(t.Context(), f, j, records)
 	if probe.Changed || probe.Pending {
 		t.Fatalf("resolved retirement kept the tight cadence: %+v", probe)
+	}
+}
+
+// A lost retirement proof is terminal and needs its own condition. The generic
+// "recovery blocked" message reads like a transient, so an operator watching the
+// fleet cannot tell a pass that will succeed on the next poll from one that
+// never will. Nothing here resolves it automatically: ADR 0016 forbids that, and
+// the message exists to say who is unresolved and that contraction is stopped.
+func TestBucketEvidenceLostIsReportedDistinctly(t *testing.T) {
+	r, f, j, reader := retiredBucketFleet(t)
+	reader.expired = map[string]bool{"pod-1": true}
+	reader.nodes = slices.DeleteFunc(reader.nodes, func(node string) bool { return node == "pod-1" })
+	seen := time.Unix(10000, 0).UTC()
+	for i := range j.Inventory.Sessions {
+		if j.Inventory.Sessions[i].Node == "pod-1" {
+			j.Inventory.Sessions[i].LastSeen = seen
+		}
+	}
+	_, _, err := r.bucketAssessment(t.Context(), f, j, 2, true)
+	lost, ok := errors.AsType[*v050.BucketEvidenceLostError](err)
+	if !ok {
+		t.Fatalf("missing record was not reported as lost evidence: %v", err)
+	}
+	if lost.Node != "pod-1" {
+		t.Fatalf("lost evidence names %q, want pod-1", lost.Node)
+	}
+	message, reported := bucketEvidenceLost(j, err)
+	if !reported {
+		t.Fatal("lost evidence produced no condition message")
+	}
+	for _, want := range []string{"pod-1", "generation", seen.Format(time.RFC3339), "stays blocked"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("condition message omits %q: %s", want, message)
+		}
+	}
+	// Every other blocker keeps the generic reason.
+	if _, reported := bucketEvidenceLost(j, errors.New("bucket candidate is unscheduled")); reported {
+		t.Fatal("an ordinary blocker was reported as lost evidence")
 	}
 }

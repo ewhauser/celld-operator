@@ -162,6 +162,11 @@ func (r *Reconciler) executeMaintenance(ctx context.Context, f *fleet.CelldFleet
 		if saveErr := r.saveJournal(ctx, res, j); saveErr != nil {
 			return ctrl.Result{}, true, saveErr
 		}
+		if message, lost := bucketEvidenceLost(j, err); lost {
+			// Nothing left to read: report it distinctly at the ordinary cadence.
+			result, reportErr := r.report(ctx, f, hydrated(res, j), retirementEvidenceLost, message, false)
+			return result, true, reportErr
+		}
 		result, reportErr := r.report(ctx, f, hydrated(res, j), "MaintenanceRecoveryBlocked", err.Error(), false)
 		return tighten(result, p.window), true, reportErr
 	}

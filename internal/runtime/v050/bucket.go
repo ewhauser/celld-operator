@@ -73,6 +73,17 @@ func (e *BucketExpiryInvalidatedError) Error() string {
 	return e.Reason
 }
 
+// BucketEvidenceLostError reports an admitted generation whose record left the
+// store before any assessment positively read its lease expired. Absence never
+// resolves a retirement, and no elapsed time or prior live lease reconstructs
+// the proof, so this blocker is terminal for the operation rather than a state
+// the controller can wait out.
+type BucketEvidenceLostError struct{ Node, Generation string }
+
+func (e *BucketEvidenceLostError) Error() string {
+	return "unresolved bucket writer record missing"
+}
+
 // BucketMember describes an operator-configured Bucket generation. Retired means
 // absent from desired Kubernetes membership, NOT physically stopped.
 type BucketMember struct {
@@ -228,10 +239,19 @@ func (a *Adapter) InspectBucketMembership(ctx context.Context, r Reader, members
 			return BucketObservation{}, errors.New("current bucket lease or sample unavailable")
 		}
 	}
+	// Name one writer deterministically rather than whichever the map yields, so
+	// the reported condition is stable across passes.
+	var lost *BucketEvidenceLostError
 	for node, member := range expected {
-		if !seen[node] && (!member.Retired || !member.Resolved) {
-			return BucketObservation{}, errors.New("unresolved bucket writer record missing")
+		if seen[node] || (member.Retired && member.Resolved) {
+			continue
 		}
+		if lost == nil || node < lost.Node {
+			lost = &BucketEvidenceLostError{Node: node, Generation: member.Generation}
+		}
+	}
+	if lost != nil {
+		return BucketObservation{}, lost
 	}
 	hasLog, _, err := scanLog(ctx, r, &budget)
 	if err != nil {
