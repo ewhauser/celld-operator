@@ -1,0 +1,13 @@
+2026-09-20 local all-suite, cluster celld-strict-f16e1e45
+Harness compiled at 92c433e; isolation had already passed.
+After alpha before/after-effect crash checks passed, root identified the
+completed celld-system/operator network probe as matching the operator
+Deployment selector. kubectl logs deployment/celld-operator --previous can
+select this probe instead of the crashed manager.
+Deleted only the completed probe with:
+  docker exec celld-strict-f16e1e45-control-plane kubectl \
+    --kubeconfig=/etc/kubernetes/admin.conf delete pod operator \
+    -n celld-system --wait=true
+No fleet workload, storage, operation, manager Deployment or runtime state was
+modified. Root is committing the fixture cleanup and exact-manager log selector
+in the harness; subsequent CI runs execute that source fix directly.

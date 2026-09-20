@@ -1,0 +1,101 @@
+go run ./hack/integration --suite all
+Creating isolated cluster celld-strict-c6856081
+Pulling into disposable node: ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af
+PASS: create two isolated test buckets
+FAIL: Test Pod failed: deploy-bucket-alpha
+ celld 0.5.1-ewhauser.1
+───────────────────────────────────────────────
+Total Upload: 1.58 KiB / gzip: 0.63 KiB
+Your Worker has access to the following bindings:
+Binding                  Resource
+env.LEDGER (Ledger)      Durable Object (SQLite)
+Bundled qualification (0.00 sec)
+Error: conditional write s3://bucket-alpha/wake/format.json may have committed
+
+Caused by:
+    0: Generic S3 error: Error performing PUT http://minio:9000/bucket-alpha/wake/format.json in 2.080081ms - Server returned non-2xx status code: 507 Insufficient Storage: 
+    1: Error performing PUT http://minio:9000/bucket-alpha/wake/format.json in 2.080081ms - Server returned non-2xx status code: 507 Insufficient Storage: 
+    2: Server returned non-2xx status code: 507 Insufficient Storage: 
+
+goroutine 1 [running]:
+runtime/debug.Stack()
+	/Users/ewhauser/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.27.1.darwin-arm64/src/runtime/debug/stack.go:26 +0x64
+main.fail({0x104e8b196?, 0x360?}, {0x10dfbcb07498?, 0x5?, 0x10dfbcb07468?})
+	/Users/ewhauser/working/celld-operator-strict-integration/hack/integration/harness.go:28 +0x30
+main.(*harness).succeeded(0x10dfbcb07d70, {0x104e85e2e, 0x10}, {0x10dfbccf8000, 0x13})
+	/Users/ewhauser/working/celld-operator-strict-integration/hack/integration/harness.go:188 +0x1e8
+main.(*harness).deployApplication.func1()
+	/Users/ewhauser/working/celld-operator-strict-integration/hack/integration/cluster.go:277 +0x30
+main.(*harness).waitFor(0x10dfbcb07d70, {0x10dfbcc30090, 0x2a}, 0x1bf08eb000, 0x10dfbcb079f0)
+	/Users/ewhauser/working/celld-operator-strict-integration/hack/integration/harness.go:202 +0x80
+main.(*harness).deployApplication(0x10dfbcb07d70)
+	/Users/ewhauser/working/celld-operator-strict-integration/hack/integration/cluster.go:277 +0x6c8
+main.(*harness).exercise(0x10dfbcb07d70)
+	/Users/ewhauser/working/celld-operator-strict-integration/hack/integration/main.go:130 +0x38
+main.realMain()
+	/Users/ewhauser/working/celld-operator-strict-integration/hack/integration/main.go:105 +0xb88
+main.main()
+	/Users/ewhauser/working/celld-operator-strict-integration/hack/integration/main.go:37 +0x1c
+NAMESPACE            NAME                                                          READY   STATUS      RESTARTS        AGE     IP               NODE                                  NOMINATED NODE   READINESS GATES
+celld-test-store     deploy-bucket-alpha                                           0/1     Error       0               4s      192.168.213.65   celld-strict-c6856081-control-plane   <none>           <none>
+celld-test-store     minio                                                         1/1     Running     0               11s     192.168.32.65    celld-strict-c6856081-worker2         <none>           <none>
+celld-test-store     seed                                                          0/1     Completed   0               8s      192.168.32.68    celld-strict-c6856081-worker2         <none>           <none>
+celld-test-store     toxi-ctl                                                      1/1     Running     0               9s      192.168.32.67    celld-strict-c6856081-worker2         <none>           <none>
+celld-test-store     toxiproxy                                                     1/1     Running     0               9s      192.168.32.66    celld-strict-c6856081-worker2         <none>           <none>
+kube-system          calico-kube-controllers-78576cf5c8-cgvvq                      1/1     Running     0               6m      192.168.11.65    celld-strict-c6856081-worker          <none>           <none>
+kube-system          calico-node-8gqxw                                             1/1     Running     0               6m      172.18.0.4       celld-strict-c6856081-worker          <none>           <none>
+kube-system          calico-node-d5mfd                                             1/1     Running     0               6m      172.18.0.3       celld-strict-c6856081-worker2         <none>           <none>
+kube-system          calico-node-pf5v9                                             1/1     Running     0               6m      172.18.0.5       celld-strict-c6856081-control-plane   <none>           <none>
+kube-system          coredns-7c65d6cfc9-6xtg4                                      1/1     Running     0               9m7s    192.168.11.68    celld-strict-c6856081-worker          <none>           <none>
+kube-system          coredns-7c65d6cfc9-kxns5                                      1/1     Running     0               9m7s    192.168.11.66    celld-strict-c6856081-worker          <none>           <none>
+kube-system          etcd-celld-strict-c6856081-control-plane                      1/1     Running     0               9m13s   172.18.0.5       celld-strict-c6856081-control-plane   <none>           <none>
+kube-system          kube-apiserver-celld-strict-c6856081-control-plane            1/1     Running     0               9m13s   172.18.0.5       celld-strict-c6856081-control-plane   <none>           <none>
+kube-system          kube-controller-manager-celld-strict-c6856081-control-plane   1/1     Running     0               9m13s   172.18.0.5       celld-strict-c6856081-control-plane   <none>           <none>
+kube-system          kube-proxy-kncq9                                              1/1     Running     0               6m2s    172.18.0.4       celld-strict-c6856081-worker          <none>           <none>
+kube-system          kube-proxy-lllsv                                              1/1     Running     0               6m2s    172.18.0.3       celld-strict-c6856081-worker2         <none>           <none>
+kube-system          kube-proxy-p6vmx                                              1/1     Running     3 (8m52s ago)   9m7s    172.18.0.5       celld-strict-c6856081-control-plane   <none>           <none>
+kube-system          kube-scheduler-celld-strict-c6856081-control-plane            1/1     Running     0               9m13s   172.18.0.5       celld-strict-c6856081-control-plane   <none>           <none>
+local-path-storage   local-path-provisioner-6fdc965494-h4r2v                       1/1     Running     0               9m7s    192.168.11.67    celld-strict-c6856081-worker          <none>           <none>
+
+apiVersion: v1
+items: []
+kind: List
+metadata:
+  resourceVersion: ""
+
+{
+    "apiVersion": "v1",
+    "items": [],
+    "kind": "List",
+    "metadata": {
+        "resourceVersion": ""
+    }
+}
+
+No resources found in fleets namespace.
+
+No resources found in fleets namespace.
+
+[kubectl --kubeconfig /var/folders/w1/9twq581x5xn7hg5sqflql2y00000gn/T/celld-strict-c68560813330368420/kubeconfig --context kind-celld-strict-c6856081 top pods -A]: error: Metrics API not available
+
+apiVersion: v1
+items: []
+kind: List
+metadata:
+  resourceVersion: ""
+
+No resources found in fleets namespace.
+
+apiVersion: v1
+items: []
+kind: List
+metadata:
+  resourceVersion: ""
+
+[kubectl --kubeconfig /var/folders/w1/9twq581x5xn7hg5sqflql2y00000gn/T/celld-strict-c68560813330368420/kubeconfig --context kind-celld-strict-c6856081 -n fleets logs alpha-0 --all-containers=true --tail=80]: error: error from server (NotFound): pods "alpha-0" not found in namespace "fleets"
+
+[kubectl --kubeconfig /var/folders/w1/9twq581x5xn7hg5sqflql2y00000gn/T/celld-strict-c68560813330368420/kubeconfig --context kind-celld-strict-c6856081 -n fleets logs beta-0 --all-containers=true --tail=80]: error: error from server (NotFound): pods "beta-0" not found in namespace "fleets"
+
+Cleaning up only cluster celld-strict-c6856081
+exit status 1
+make: *** [integration] Error 1
