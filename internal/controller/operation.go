@@ -18,16 +18,16 @@ const operationBudget = 30 * time.Minute
 // cancelRemoval first persists cancellation intent, then fences the old issuer on
 // its CAS object, then retires authority. Crashes at any boundary are replayable.
 // No second replica effect is created until the old CAS can no longer succeed.
-func (r *Reconciler) cancelRemoval(ctx context.Context, res *fleet.CelldStorageReservation, j *lifecycleJournal, w client.Object) (ctrl.Result, bool, error) {
+func (r *Reconciler) cancelRemoval(ctx context.Context, res *fleet.CelldStorageReservation, j *lifecycleJournal, w client.Object) (ctrl.Result, error) {
 	op := j.Operation
 	if w.GetAnnotations()[operationKey] == op.ID && replicas(w) == op.To {
 		// Issuance won before cancellation. Preserve its recovery authority forever
 		// if necessary; the next persistent ordinal would reactivate the victim.
 		op.Phase = "Recovering"
-		return ctrl.Result{RequeueAfter: time.Second}, true, r.saveJournal(ctx, res, j)
+		return ctrl.Result{RequeueAfter: time.Second}, r.saveJournal(ctx, res, j)
 	}
 	if replicas(w) != op.From {
-		return ctrl.Result{}, true, errors.New("cannot cancel changed workload")
+		return ctrl.Result{}, errors.New("cannot cancel changed workload")
 	}
 	if w.GetAnnotations()[canceledOperationKey] != op.ID {
 		if w.GetAnnotations() == nil {
@@ -37,9 +37,9 @@ func (r *Reconciler) cancelRemoval(ctx context.Context, res *fleet.CelldStorageR
 		// The observed RV (not a retry with a fresh object) linearizes cancellation
 		// against any delayed replica writer. The annotation is NOT a process fence.
 		if err := r.Update(ctx, w); err != nil {
-			return ctrl.Result{}, true, err
+			return ctrl.Result{}, err
 		}
-		return ctrl.Result{RequeueAfter: time.Second}, true, nil
+		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 	done := completion(op, time.Time{})
 	done.Outcome = "CanceledBeforeIssue"
@@ -57,7 +57,7 @@ func (r *Reconciler) cancelRemoval(ctx context.Context, res *fleet.CelldStorageR
 	}
 	j.Operation = nil
 	resetMaintenanceCapacity(j)
-	return ctrl.Result{RequeueAfter: time.Second}, true, r.saveJournal(ctx, res, j)
+	return ctrl.Result{RequeueAfter: time.Second}, r.saveJournal(ctx, res, j)
 }
 
 func (r *Reconciler) productionRemovalBlock(ctx context.Context, f *fleet.CelldFleet, j *lifecycleJournal) (string, string) {

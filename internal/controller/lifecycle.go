@@ -219,7 +219,6 @@ type lifecycleOutcome struct {
 // them, is the crash-safety contract of ADR 0012 and must not be reordered.
 type lifecycleRun struct {
 	r   *Reconciler
-	ctx context.Context
 	f   *fleet.CelldFleet
 	res *fleet.CelldStorageReservation
 	w   client.Object
@@ -238,20 +237,20 @@ func (s *lifecycleRun) fail(err error) *lifecycleOutcome {
 }
 
 // block ends the lifecycle by reporting a blocking condition on the fleet.
-func (s *lifecycleRun) block(reason, message string) *lifecycleOutcome {
-	result, err := s.r.report(s.ctx, s.f, reason, message, false)
+func (s *lifecycleRun) block(ctx context.Context, reason, message string) *lifecycleOutcome {
+	result, err := s.r.report(ctx, s.f, reason, message, false)
 	return s.stop(result, true, err)
 }
 
 // progress ends the lifecycle by reporting forward progress on the fleet.
-func (s *lifecycleRun) progress(message string) *lifecycleOutcome {
-	return s.block("LifecycleProgress", message)
+func (s *lifecycleRun) progress(ctx context.Context, message string) *lifecycleOutcome {
+	return s.block(ctx, "LifecycleProgress", message)
 }
 
 // persist makes the journal durable and yields a terminal outcome only on
 // failure, so a step can keep going once the write has survived the API.
-func (s *lifecycleRun) persist() *lifecycleOutcome {
-	if err := s.r.saveJournal(s.ctx, s.res, s.j); err != nil {
+func (s *lifecycleRun) persist(ctx context.Context) *lifecycleOutcome {
+	if err := s.r.saveJournal(ctx, s.res, s.j); err != nil {
 		return s.fail(err)
 	}
 	return nil
@@ -259,16 +258,16 @@ func (s *lifecycleRun) persist() *lifecycleOutcome {
 
 // save records a journal transition durably and ends the reconcile: no external
 // action may follow an intent inside the reconcile that recorded it.
-func (s *lifecycleRun) save() *lifecycleOutcome {
-	if outcome := s.persist(); outcome != nil {
+func (s *lifecycleRun) save(ctx context.Context) *lifecycleOutcome {
+	if outcome := s.persist(ctx); outcome != nil {
 		return outcome
 	}
-	return s.progress("Durable lifecycle transition recorded; inspect status.lifecycle for the operation and target")
+	return s.progress(ctx, "Durable lifecycle transition recorded; inspect status.lifecycle for the operation and target")
 }
 
 func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation, w client.Object) (ctrl.Result, bool, error) {
-	s := &lifecycleRun{r: r, ctx: ctx, f: f, res: res, w: w}
-	for _, step := range []func() *lifecycleOutcome{
+	s := &lifecycleRun{r: r, f: f, res: res, w: w}
+	for _, step := range []func(context.Context) *lifecycleOutcome{
 		s.loadOrBootstrapJournal,
 		s.verifyWorkloadIdentity,
 		s.copyWorkloadLossFence,
@@ -297,7 +296,7 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 		s.issueRemovalIntent,
 		s.confirmRemovalRecovery,
 	} {
-		if outcome := step(); outcome != nil {
+		if outcome := step(ctx); outcome != nil {
 			return outcome.result, outcome.handled, outcome.err
 		}
 	}
@@ -306,30 +305,30 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, res *fl
 
 // loadOrBootstrapJournal establishes that a loadable journal backed by a recorded
 // creation attempt exists before anything else reads or writes lifecycle state.
-func (s *lifecycleRun) loadOrBootstrapJournal() *lifecycleOutcome {
-	j, err := s.r.loadJournal(s.ctx, s.res)
+func (s *lifecycleRun) loadOrBootstrapJournal(ctx context.Context) *lifecycleOutcome {
+	j, err := s.r.loadJournal(ctx, s.res)
 	if err != nil {
-		return s.block("JournalInvalid", err.Error())
+		return s.block(ctx, "JournalInvalid", err.Error())
 	}
 	s.j = j
 	if s.res.Annotations[attemptAnnotation] == "" {
-		return s.block("LifecycleBlocked", "Missing creation journal; refusing workload adoption")
+		return s.block(ctx, "LifecycleBlocked", "Missing creation journal; refusing workload adoption")
 	}
 	if j != nil {
 		return nil
 	}
-	return s.bootstrapJournal()
+	return s.bootstrapJournal(ctx)
 }
 
 // bootstrapJournal establishes a first journal for a workload provisioned before
 // one existed, only after proving the workload is undrifted and every initial
 // retained claim still carries the exact identity creation recorded.
-func (s *lifecycleRun) bootstrapJournal() *lifecycleOutcome {
+func (s *lifecycleRun) bootstrapJournal(ctx context.Context) *lifecycleOutcome {
 	f, res, w := s.f, s.res, s.w
 	baseline := f.DeepCopy()
 	baseline.Spec.Replicas = replicas(w)
 	if !matches(workload(baseline, s.r.Options), w) || w.GetAnnotations()[operationKey] != "" {
-		return s.block("LifecycleBlocked", "Workload drift or lost lifecycle journal; manual investigation required")
+		return s.block(ctx, "LifecycleBlocked", "Workload drift or lost lifecycle journal; manual investigation required")
 	}
 	initial := res.Spec.InitialReplicas
 	if initial == 0 {
@@ -342,28 +341,28 @@ func (s *lifecycleRun) bootstrapJournal() *lifecycleOutcome {
 	var created map[string]types.UID
 	if f.Spec.Profile == "PersistentFleet" {
 		if err := json.Unmarshal([]byte(res.Annotations[creationClaimsKey]), &created); err != nil {
-			return s.block("StorageIdentityConflict", "Missing creation PVC UID inventory; retained disks require manual review")
+			return s.block(ctx, "StorageIdentityConflict", "Missing creation PVC UID inventory; retained disks require manual review")
 		}
 	}
 	for _, claim := range initialClaims(baseline, w) {
 		got := &corev1.PersistentVolumeClaim{}
-		if err := s.r.Get(s.ctx, client.ObjectKeyFromObject(claim), got); err != nil {
-			return s.block("StorageIdentityConflict", err.Error())
+		if err := s.r.Get(ctx, client.ObjectKeyFromObject(claim), got); err != nil {
+			return s.block(ctx, "StorageIdentityConflict", err.Error())
 		}
 		createdUID, recorded := created[got.Name]
 		if !recorded || createdUID != got.UID || got.Labels[FleetLabel] != string(f.UID) || got.Annotations["celld.eric.dev/storage-reservation"] != res.Name || !got.DeletionTimestamp.IsZero() {
-			return s.block("StorageIdentityConflict", "Initial retained claim binding changed")
+			return s.block(ctx, "StorageIdentityConflict", "Initial retained claim binding changed")
 		}
 		j.Claims[got.Name] = got.UID
 	}
-	return s.persist()
+	return s.persist(ctx)
 }
 
 // verifyWorkloadIdentity establishes that the journal still describes this exact
 // workload object; a replacement is never adopted.
-func (s *lifecycleRun) verifyWorkloadIdentity() *lifecycleOutcome {
+func (s *lifecycleRun) verifyWorkloadIdentity(ctx context.Context) *lifecycleOutcome {
 	if s.j.WorkloadUID != s.w.GetUID() {
-		return s.block("LifecycleBlocked", "Workload UID changed; refusing replacement adoption")
+		return s.block(ctx, "LifecycleBlocked", "Workload UID changed; refusing replacement adoption")
 	}
 	return nil
 }
@@ -372,24 +371,24 @@ func (s *lifecycleRun) verifyWorkloadIdentity() *lifecycleOutcome {
 // durably journaled before anything else. The workload fence is authoritative
 // even if a leader crashed before the reservation journal could record the loss.
 // It also invalidates old replica CASes.
-func (s *lifecycleRun) copyWorkloadLossFence() *lifecycleOutcome {
+func (s *lifecycleRun) copyWorkloadLossFence(ctx context.Context) *lifecycleOutcome {
 	if loss := s.w.GetAnnotations()[lossFenceKey]; loss != "" && s.j.Loss == "" {
 		s.j.Loss = loss
-		return s.save()
+		return s.save(ctx)
 	}
 	return nil
 }
 
 // verifyRetainedClaims establishes that every journaled PVC still has its exact
 // recorded identity, ownership and deletion state before any lifecycle action.
-func (s *lifecycleRun) verifyRetainedClaims() *lifecycleOutcome {
+func (s *lifecycleRun) verifyRetainedClaims(ctx context.Context) *lifecycleOutcome {
 	for name, uid := range s.j.Claims {
 		got := &corev1.PersistentVolumeClaim{}
-		if err := s.r.Get(s.ctx, types.NamespacedName{Namespace: s.f.Namespace, Name: name}, got); err != nil {
-			return s.block("StorageIdentityConflict", err.Error())
+		if err := s.r.Get(ctx, types.NamespacedName{Namespace: s.f.Namespace, Name: name}, got); err != nil {
+			return s.block(ctx, "StorageIdentityConflict", err.Error())
 		}
 		if got.UID != uid || !got.DeletionTimestamp.IsZero() || len(got.OwnerReferences) != 0 || got.Labels[FleetLabel] != string(s.f.UID) || got.Annotations["celld.eric.dev/storage-reservation"] != s.res.Name {
-			return s.block("StorageIdentityConflict", "Retained PVC identity, ownership or deletion state changed: "+name)
+			return s.block(ctx, "StorageIdentityConflict", "Retained PVC identity, ownership or deletion state changed: "+name)
 		}
 	}
 	return nil
@@ -397,17 +396,17 @@ func (s *lifecycleRun) verifyRetainedClaims() *lifecycleOutcome {
 
 // runMaintenanceOperation hands a recorded maintenance operation to its executor,
 // which owns the rest of the reconcile while that operation is in flight.
-func (s *lifecycleRun) runMaintenanceOperation() *lifecycleOutcome {
+func (s *lifecycleRun) runMaintenanceOperation(ctx context.Context) *lifecycleOutcome {
 	if s.j.Maintenance == nil {
 		return nil
 	}
-	return s.stop(s.r.executeMaintenance(s.ctx, s.f, s.res, s.j, s.w))
+	return s.stop(s.r.executeMaintenance(ctx, s.f, s.res, s.j, s.w))
 }
 
 // verifyJournaledInfrastructure adopts the recorded operation and establishes
 // that the live workload still equals the journaled infrastructure at the count
 // that operation authorizes; drift is never repaired here.
-func (s *lifecycleRun) verifyJournaledInfrastructure() *lifecycleOutcome {
+func (s *lifecycleRun) verifyJournaledInfrastructure(ctx context.Context) *lifecycleOutcome {
 	s.op = s.j.Operation
 	expectedCount := s.j.Applied
 	if s.op != nil && s.w.GetAnnotations()[operationKey] == s.op.ID {
@@ -417,79 +416,79 @@ func (s *lifecycleRun) verifyJournaledInfrastructure() *lifecycleOutcome {
 	expected.Spec.Replicas = expectedCount
 	expected.Spec.RuntimeImage = s.j.RuntimeImage
 	if !matches(workload(expected, s.r.Options), s.w) {
-		return s.block("LifecycleBlocked", "Workload differs from journaled infrastructure; no template mutation or replica drift repair is allowed")
+		return s.block(ctx, "LifecycleBlocked", "Workload differs from journaled infrastructure; no template mutation or replica drift repair is allowed")
 	}
 	return nil
 }
 
 // schedulePersistentMembership establishes durable PersistentFleet membership
 // scheduling, fencing a loss declaration onto the workload if one is found.
-func (s *lifecycleRun) schedulePersistentMembership() *lifecycleOutcome {
+func (s *lifecycleRun) schedulePersistentMembership(ctx context.Context) *lifecycleOutcome {
 	if s.f.Spec.Profile != "PersistentFleet" || s.r.Options.LauncherImage == "" {
 		return nil
 	}
-	if err := s.r.schedulePersistent(s.ctx, appliedRuntime(s.f, s.j), s.res, s.j); err != nil {
+	if err := s.r.schedulePersistent(ctx, appliedRuntime(s.f, s.j), s.res, s.j); err != nil {
 		if _, loss := errors.AsType[*v050.LossError](err); loss {
-			return s.stop(s.r.recordLoss(s.ctx, s.f, s.w, s.res, s.j, err.Error()))
+			return s.stop(s.r.recordLoss(ctx, s.f, s.w, s.res, s.j, err.Error()))
 		}
-		return s.block("PersistentSchedulingBlocked", err.Error())
+		return s.block(ctx, "PersistentSchedulingBlocked", err.Error())
 	}
 	return nil
 }
 
 // scheduleOrderedBucketMembership establishes ordered-Bucket session scheduling.
-func (s *lifecycleRun) scheduleOrderedBucketMembership() *lifecycleOutcome {
+func (s *lifecycleRun) scheduleOrderedBucketMembership(ctx context.Context) *lifecycleOutcome {
 	if !orderedBucket(s.f) {
 		return nil
 	}
-	if err := s.r.scheduleOrderedBucket(s.ctx, s.f, s.j); err != nil {
-		return s.block("BucketSchedulingBlocked", err.Error())
+	if err := s.r.scheduleOrderedBucket(ctx, s.f, s.j); err != nil {
+		return s.block(ctx, "BucketSchedulingBlocked", err.Error())
 	}
 	return nil
 }
 
 // observeRuntimeEvidence establishes a durably journaled runtime observation, and
 // fences any possible-loss declaration before any further lifecycle action.
-func (s *lifecycleRun) observeRuntimeEvidence() *lifecycleOutcome {
+func (s *lifecycleRun) observeRuntimeEvidence(ctx context.Context) *lifecycleOutcome {
 	if s.r.Evidence == nil {
 		return nil
 	}
-	inventory, loss := s.r.Evidence.Observe(s.ctx, appliedRuntime(s.f, s.j), s.j.Inventory)
+	inventory, loss := s.r.Evidence.Observe(ctx, appliedRuntime(s.f, s.j), s.j.Inventory)
 	s.j.Inventory = inventory
 	if loss != "" && s.j.Loss == "" {
-		return s.stop(s.r.recordLoss(s.ctx, s.f, s.w, s.res, s.j, "possible loss declaration: "+loss))
+		return s.stop(s.r.recordLoss(ctx, s.f, s.w, s.res, s.j, "possible loss declaration: "+loss))
 	}
-	return s.persist()
+	return s.persist(ctx)
 }
 
 // releaseStaleMaintenanceFence establishes that a workload fence left behind by a
 // crash is released only after maintenance capacity history is durably reset.
-func (s *lifecycleRun) releaseStaleMaintenanceFence() *lifecycleOutcome {
+func (s *lifecycleRun) releaseStaleMaintenanceFence(ctx context.Context) *lifecycleOutcome {
 	if maintenanceFence(s.f) != "" || s.w.GetAnnotations()[maintenanceFenceKey] == "" {
 		return nil
 	}
 	// A crash may have left only the workload fence. Reset history durably
 	// before releasing it, including when pause ended during that crash.
 	resetMaintenanceCapacity(s.j)
-	if outcome := s.persist(); outcome != nil {
+	if outcome := s.persist(ctx); outcome != nil {
 		return outcome
 	}
-	if err := s.r.setMaintenanceFence(s.ctx, s.f, s.w, ""); err != nil {
+	if err := s.r.setMaintenanceFence(ctx, s.f, s.w, ""); err != nil {
 		return s.fail(err)
 	}
-	return s.progress("Maintenance fence released; revalidate the recorded operation on the next reconcile")
+	return s.progress(ctx, "Maintenance fence released; revalidate the recorded operation on the next reconcile")
 }
 
 // holdUnderMaintenanceFence establishes that a fenced fleet admits no new action:
 // an unissued operation freezes with its settling observation cleared, while an
 // already issued addition is still allowed to complete.
-func (s *lifecycleRun) holdUnderMaintenanceFence() *lifecycleOutcome {
+func (s *lifecycleRun) holdUnderMaintenanceFence(ctx context.Context) *lifecycleOutcome {
 	if maintenanceFence(s.f) == "" {
 		return nil
 	}
 	f, j, op := s.f, s.j, s.op
 	if !f.DeletionTimestamp.IsZero() {
-		if _, _, err := s.r.persistDisruptionRequest(s.ctx, f, s.res, j, s.w); err != nil {
+		if _, _, err := s.r.persistDisruptionRequest(ctx, f, s.res, j, s.w); err != nil {
 			return s.fail(err)
 		}
 	}
@@ -497,12 +496,12 @@ func (s *lifecycleRun) holdUnderMaintenanceFence() *lifecycleOutcome {
 	issued := op != nil && s.w.GetAnnotations()[operationKey] == op.ID && replicas(s.w) == op.To
 	if !issued {
 		if op == nil && !f.DeletionTimestamp.IsZero() {
-			return s.stop(s.r.disruption(s.ctx, f, s.res, j, s.w))
+			return s.stop(s.r.disruption(ctx, f, s.res, j, s.w))
 		}
 		if op != nil {
 			op.SettledAt = time.Time{}
 		}
-		if outcome := s.persist(); outcome != nil {
+		if outcome := s.persist(ctx); outcome != nil {
 			return outcome
 		}
 		return s.stop(ctrl.Result{}, false, nil)
@@ -517,7 +516,7 @@ func (s *lifecycleRun) holdUnderMaintenanceFence() *lifecycleOutcome {
 	if op.To > op.From {
 		j.History = append(j.History, completion(op, time.Time{}))
 		j.Applied, j.Operation = op.To, nil
-		return s.save()
+		return s.save(ctx)
 	}
 	return nil
 }
@@ -525,21 +524,21 @@ func (s *lifecycleRun) holdUnderMaintenanceFence() *lifecycleOutcome {
 // admitOperation establishes exactly one durable intent when no operation is
 // recorded, after observational admission, disruption requests and the capacity
 // gates. Recording an intent always ends the reconcile.
-func (s *lifecycleRun) admitOperation() *lifecycleOutcome {
+func (s *lifecycleRun) admitOperation(ctx context.Context) *lifecycleOutcome {
 	if s.op != nil {
 		return nil
 	}
-	if outcome := s.admitBucketObservations(); outcome != nil {
+	if outcome := s.admitBucketObservations(ctx); outcome != nil {
 		return outcome
 	}
-	if result, handled, err := s.r.disruption(s.ctx, s.f, s.res, s.j, s.w); handled || err != nil {
+	if result, handled, err := s.r.disruption(ctx, s.f, s.res, s.j, s.w); handled || err != nil {
 		return s.stop(result, handled, err)
 	}
-	target, automatic := s.r.capacityTarget(s.ctx, s.f, s.j)
+	target, automatic := s.r.capacityTarget(ctx, s.f, s.j)
 	// Persist diagnostics even when a qualification gate will reject the request.
 	// No replica action occurs until the later atomic journal+intent write succeeds.
 	if s.j.Capacity != nil {
-		if outcome := s.persist(); outcome != nil {
+		if outcome := s.persist(ctx); outcome != nil {
 			return outcome
 		}
 	}
@@ -547,15 +546,15 @@ func (s *lifecycleRun) admitOperation() *lifecycleOutcome {
 		return s.stop(ctrl.Result{}, false, nil)
 	}
 	if automatic {
-		if outcome := s.revalidateCollectedRequest(); outcome != nil {
+		if outcome := s.revalidateCollectedRequest(ctx); outcome != nil {
 			return outcome
 		}
 	}
 	s.op = &lifecycleOperation{ID: string(uuid.NewUUID()), Phase: "Intent", StartedAt: s.r.capacityNow(), Deadline: s.r.capacityNow().Add(operationBudget), From: s.j.Applied, To: target, WorkloadVersion: s.w.GetResourceVersion(), Automatic: automatic}
-	if outcome := s.recordBlockedRemovalIntent(automatic); outcome != nil {
+	if outcome := s.recordBlockedRemovalIntent(ctx, automatic); outcome != nil {
 		return outcome
 	}
-	if outcome := s.captureRemovalTarget(); outcome != nil {
+	if outcome := s.captureRemovalTarget(ctx); outcome != nil {
 		return outcome
 	}
 	if automatic {
@@ -566,37 +565,37 @@ func (s *lifecycleRun) admitOperation() *lifecycleOutcome {
 	if s.j.Capacity != nil {
 		capacity.RecordAction(s.j.Capacity, s.r.capacityNow(), s.op.From, s.op.To)
 	}
-	return s.save() // No external action before the intent has survived an API write.
+	return s.save(ctx) // No external action before the intent has survived an API write.
 }
 
 // admitBucketObservations establishes durably admitted observational Bucket
 // history. Incomplete or uncertain admission must not prevent previously
 // supported additive capacity: removal still revalidates all history
 // independently and cannot use missing admission.
-func (s *lifecycleRun) admitBucketObservations() *lifecycleOutcome {
+func (s *lifecycleRun) admitBucketObservations(ctx context.Context) *lifecycleOutcome {
 	if s.f.Spec.Profile != "Bucket" || s.r.Evidence == nil {
 		return nil
 	}
-	changed, admissionErr := s.r.admitBucketHistory(s.ctx, s.f, s.j)
+	changed, admissionErr := s.r.admitBucketHistory(ctx, s.f, s.j)
 	if _, loss := errors.AsType[*v050.LossError](admissionErr); loss {
-		return s.stop(s.r.recordLoss(s.ctx, s.f, s.w, s.res, s.j, admissionErr.Error()))
+		return s.stop(s.r.recordLoss(ctx, s.f, s.w, s.res, s.j, admissionErr.Error()))
 	}
 	if changed {
-		return s.persist()
+		return s.persist(ctx)
 	}
 	return nil
 }
 
 // revalidateCollectedRequest establishes that the fleet did not change while the
 // capacity collector ran, so a recommendation never lands on a new request.
-func (s *lifecycleRun) revalidateCollectedRequest() *lifecycleOutcome {
+func (s *lifecycleRun) revalidateCollectedRequest(ctx context.Context) *lifecycleOutcome {
 	latest := &fleet.CelldFleet{}
-	if err := s.r.Get(s.ctx, client.ObjectKeyFromObject(s.f), latest); err != nil {
+	if err := s.r.Get(ctx, client.ObjectKeyFromObject(s.f), latest); err != nil {
 		return s.fail(err)
 	}
 	latest.Default()
 	if latest.UID != s.f.UID || !latest.DeletionTimestamp.IsZero() || !equality.Semantic.DeepEqual(latest.Spec, s.f.Spec) {
-		return s.block("CapacityChanged", "Fleet changed during collection; discard the recommendation and reconcile the new request")
+		return s.block(ctx, "CapacityChanged", "Fleet changed during collection; discard the recommendation and reconcile the new request")
 	}
 	return nil
 }
@@ -604,7 +603,7 @@ func (s *lifecycleRun) revalidateCollectedRequest() *lifecycleOutcome {
 // recordBlockedRemovalIntent establishes durable blocked authority for a removal
 // no qualified path may execute, without pretending its target or session
 // evidence is qualified. Additive operations pass straight through.
-func (s *lifecycleRun) recordBlockedRemovalIntent(automatic bool) *lifecycleOutcome {
+func (s *lifecycleRun) recordBlockedRemovalIntent(ctx context.Context, automatic bool) *lifecycleOutcome {
 	f, j, op := s.f, s.j, s.op
 	if op.To >= op.From {
 		return nil
@@ -617,7 +616,7 @@ func (s *lifecycleRun) recordBlockedRemovalIntent(automatic bool) *lifecycleOutc
 			op.ManualBaseline = f.Spec.Replicas
 		}
 		j.Operation = op
-		return s.save()
+		return s.save(ctx)
 	}
 	if s.r.Options.LocalTest && s.r.localLifecycle != nil {
 		return nil
@@ -633,46 +632,46 @@ func (s *lifecycleRun) recordBlockedRemovalIntent(automatic bool) *lifecycleOutc
 		op.ManualBaseline = f.Spec.Replicas
 	}
 	j.Operation = op
-	if outcome := s.persist(); outcome != nil {
+	if outcome := s.persist(ctx); outcome != nil {
 		return outcome
 	}
-	return s.reportRemovalBlock()
+	return s.reportRemovalBlock(ctx)
 }
 
 // reportRemovalBlock reports why production removal is unavailable, fencing a
 // possible-loss finding onto the workload before the journal records it.
-func (s *lifecycleRun) reportRemovalBlock() *lifecycleOutcome {
-	reason, message := s.r.productionRemovalBlock(s.ctx, s.f, s.j)
+func (s *lifecycleRun) reportRemovalBlock(ctx context.Context) *lifecycleOutcome {
+	reason, message := s.r.productionRemovalBlock(ctx, s.f, s.j)
 	if reason == "PossibleDataLoss" && s.j.Loss == "" {
-		return s.stop(s.r.recordLoss(s.ctx, s.f, s.w, s.res, s.j, message))
+		return s.stop(s.r.recordLoss(ctx, s.f, s.w, s.res, s.j, message))
 	}
-	return s.block(reason, message)
+	return s.block(ctx, reason, message)
 }
 
 // captureRemovalTarget establishes a complete, exact target and session inventory
 // for a contraction the in-package qualification seam may execute: the highest
 // ordinal, its pod UID and runtime generation, a live exact session, and every
 // preserved historical session. Additive operations pass straight through.
-func (s *lifecycleRun) captureRemovalTarget() *lifecycleOutcome {
+func (s *lifecycleRun) captureRemovalTarget(ctx context.Context) *lifecycleOutcome {
 	f, j, op := s.f, s.j, s.op
 	if op.To >= op.From {
 		return nil
 	}
 	if f.Spec.Profile == "Bucket" {
-		return s.block("BucketCompletionUnqualified", "Bucket completion authority is unqualified; every possible Deployment victim must pass preflight")
+		return s.block(ctx, "BucketCompletionUnqualified", "Bucket completion authority is unqualified; every possible Deployment victim must pass preflight")
 	}
 	if !s.r.Options.LocalTest || s.r.localLifecycle == nil {
-		return s.block("FencingUnqualified", "Real process fencing and AWS recovery are unqualified; PersistentFleet contraction is unavailable")
+		return s.block(ctx, "FencingUnqualified", "Real process fencing and AWS recovery are unqualified; PersistentFleet contraction is unavailable")
 	}
 	if j.Loss != "" {
-		return s.block("PossibleDataLoss", j.Loss)
+		return s.block(ctx, "PossibleDataLoss", j.Loss)
 	}
-	captured, err := s.r.localLifecycle.Capture(s.ctx, f, op.From-1, j.Sessions)
+	captured, err := s.r.localLifecycle.Capture(ctx, f, op.From-1, j.Sessions)
 	if err != nil {
-		return s.block("RecoveryBlocked", err.Error())
+		return s.block(ctx, "RecoveryBlocked", err.Error())
 	}
 	if captured == nil {
-		return s.block("RecoveryBlocked", "No target/session capture")
+		return s.block(ctx, "RecoveryBlocked", "No target/session capture")
 	}
 	captured.ID, captured.Phase, captured.From, captured.To, captured.WorkloadVersion = op.ID, "Intent", op.From, op.From-1, op.WorkloadVersion
 	captured.Automatic = op.Automatic
@@ -680,11 +679,11 @@ func (s *lifecycleRun) captureRemovalTarget() *lifecycleOutcome {
 	s.op, op = captured, captured
 	for _, previous := range j.Sessions {
 		if !slices.Contains(op.Sessions, previous) {
-			return s.block("RecoveryBlocked", "Historical session was omitted or changed")
+			return s.block(ctx, "RecoveryBlocked", "Historical session was omitted or changed")
 		}
 	}
 	if op.TargetPod != fmt.Sprintf("%s-%d", f.Name, op.To) || op.TargetUID == "" || op.TargetGeneration == "" || len(op.Sessions) == 0 {
-		return s.block("RecoveryBlocked", "Incomplete selected target/session inventory")
+		return s.block(ctx, "RecoveryBlocked", "Incomplete selected target/session inventory")
 	}
 	selected := false
 	for _, session := range op.Sessions {
@@ -693,28 +692,29 @@ func (s *lifecycleRun) captureRemovalTarget() *lifecycleOutcome {
 		}
 	}
 	if !selected {
-		return s.block("RecoveryBlocked", "Selected target lacks a live exact session")
+		return s.block(ctx, "RecoveryBlocked", "Selected target lacks a live exact session")
 	}
 	return nil
 }
 
 // backfillOperationDeadline establishes one durable deadline for a legacy
 // in-flight record, on its first resumption.
-func (s *lifecycleRun) backfillOperationDeadline() *lifecycleOutcome {
+func (s *lifecycleRun) backfillOperationDeadline(ctx context.Context) *lifecycleOutcome {
 	if !s.op.StartedAt.IsZero() && !s.op.Deadline.IsZero() {
 		return nil
 	}
 	s.op.StartedAt = s.r.capacityNow()
 	s.op.Deadline = s.op.StartedAt.Add(operationBudget)
-	return s.save()
+	return s.save(ctx)
 }
 
 // finishCancellation hands a canceling operation to the workload-CAS withdrawal.
-func (s *lifecycleRun) finishCancellation() *lifecycleOutcome {
+func (s *lifecycleRun) finishCancellation(ctx context.Context) *lifecycleOutcome {
 	if s.op.Phase != "Canceling" {
 		return nil
 	}
-	return s.stop(s.r.cancelRemoval(s.ctx, s.res, s.j, s.w))
+	result, err := s.r.cancelRemoval(ctx, s.res, s.j, s.w)
+	return s.stop(result, true, err)
 }
 
 // cancelSupersededRemoval establishes that an unissued removal nobody wants any
@@ -724,60 +724,60 @@ func (s *lifecycleRun) finishCancellation() *lifecycleOutcome {
 // merely because the policy's current target equals the applied count (cooldown,
 // stabilization); it freezes and rechecks before issuance. Every cancellation
 // goes through the workload-CAS fence, so a delayed issuer cannot still win.
-func (s *lifecycleRun) cancelSupersededRemoval() *lifecycleOutcome {
+func (s *lifecycleRun) cancelSupersededRemoval(ctx context.Context) *lifecycleOutcome {
 	op := s.op
 	if op.To >= op.From || (op.Phase != "Intent" && op.Phase != "Blocked") || maintenanceFence(s.f) != "" {
 		return nil
 	}
-	target, _ := s.r.capacityTarget(s.ctx, s.f, s.j)
+	target, _ := s.r.capacityTarget(ctx, s.f, s.j)
 	if target > op.From || (!op.Automatic && s.f.Spec.Replicas >= op.From) {
 		op.Phase = "Canceling"
-		return s.save()
+		return s.save(ctx)
 	}
 	return nil
 }
 
 // markOperationStalled records an expired deadline durably, exactly once.
-func (s *lifecycleRun) markOperationStalled() *lifecycleOutcome {
+func (s *lifecycleRun) markOperationStalled(ctx context.Context) *lifecycleOutcome {
 	if s.r.capacityNow().Before(s.op.Deadline) || s.op.Stalled {
 		return nil
 	}
 	s.op.Stalled = true
-	return s.save()
+	return s.save(ctx)
 }
 
 // executeBucketContraction hands a recorded Bucket removal to its executor. The
 // stabilization history cancelSupersededRemoval just refreshed is persisted
 // first, including negative observations: a restart must not revive the earlier
 // qualified low-demand window.
-func (s *lifecycleRun) executeBucketContraction() *lifecycleOutcome {
+func (s *lifecycleRun) executeBucketContraction(ctx context.Context) *lifecycleOutcome {
 	if s.f.Spec.Profile != "Bucket" || s.op.To >= s.op.From || s.r.Evidence == nil {
 		return nil
 	}
 	if s.j.Capacity != nil {
-		if outcome := s.persist(); outcome != nil {
+		if outcome := s.persist(ctx); outcome != nil {
 			return outcome
 		}
 	}
-	return s.stop(s.r.contractBucket(s.ctx, s.f, s.res, s.j, s.w))
+	return s.stop(s.r.contractBucket(ctx, s.f, s.res, s.j, s.w))
 }
 
 // executePersistentContraction hands a recorded PersistentFleet removal to its
 // executor, persisting negative stabilization observations even when preflight
 // fails, and routing an authorized manual 2-to-1 through coordinated downtime.
-func (s *lifecycleRun) executePersistentContraction() *lifecycleOutcome {
+func (s *lifecycleRun) executePersistentContraction(ctx context.Context) *lifecycleOutcome {
 	if s.f.Spec.Profile != "PersistentFleet" || s.op.To >= s.op.From || s.r.Options.LauncherImage == "" || s.r.Evidence == nil {
 		return nil
 	}
 	if s.j.Capacity != nil {
-		if outcome := s.persist(); outcome != nil {
+		if outcome := s.persist(ctx); outcome != nil {
 			return outcome
 		}
 	}
 	if s.coordinatedDowntimeRemoval() {
-		return s.stop(s.r.beginCoordinatedContraction(s.ctx, s.f, s.res, s.j, s.w))
+		return s.stop(s.r.beginCoordinatedContraction(ctx, s.f, s.res, s.j, s.w))
 	}
-	return s.stop(s.r.contractPersistent(s.ctx, s.f, s.res, s.j, s.w))
+	return s.stop(s.r.contractPersistent(ctx, s.f, s.res, s.j, s.w))
 }
 
 // coordinatedDowntimeRemoval reports whether the recorded removal is the manual,
@@ -796,22 +796,22 @@ func (s *lifecycleRun) coordinatedDowntimeRemoval() bool {
 
 // reportBlockedRemoval establishes that a blocked removal retains its authority
 // and evidence without any effect.
-func (s *lifecycleRun) reportBlockedRemoval() *lifecycleOutcome {
+func (s *lifecycleRun) reportBlockedRemoval(ctx context.Context) *lifecycleOutcome {
 	if s.op.Phase != "Blocked" {
 		return nil
 	}
 	if s.op.Stalled {
-		return s.block("OperationStalled", "Removal deadline exceeded; authority and evidence retained; compatible additions can supersede this unissued request")
+		return s.block(ctx, "OperationStalled", "Removal deadline exceeded; authority and evidence retained; compatible additions can supersede this unissued request")
 	}
-	return s.reportRemovalBlock()
+	return s.reportRemovalBlock(ctx)
 }
 
 // refuseStalledIssuance establishes that an expired operation has no further
 // unissued effect. Expiration never certifies recovery or cancels an issued
 // operation, so an already issued CAS is still reconstructed.
-func (s *lifecycleRun) refuseStalledIssuance() *lifecycleOutcome {
+func (s *lifecycleRun) refuseStalledIssuance(ctx context.Context) *lifecycleOutcome {
 	if s.op.Stalled && (s.w.GetAnnotations()[operationKey] != s.op.ID || replicas(s.w) != s.op.To) && s.op.Phase != "Recovering" {
-		return s.block("OperationStalled", "Operation deadline exceeded before replica issuance; authority retained")
+		return s.block(ctx, "OperationStalled", "Operation deadline exceeded before replica issuance; authority retained")
 	}
 	return nil
 }
@@ -819,14 +819,14 @@ func (s *lifecycleRun) refuseStalledIssuance() *lifecycleOutcome {
 // evaluateCapacityInFlight durably records the policy decision while an operation
 // is in flight; the recorded target never changes. External mode has no policy to
 // evaluate: its decision keeps naming the /scale writer as the owner.
-func (s *lifecycleRun) evaluateCapacityInFlight() *lifecycleOutcome {
+func (s *lifecycleRun) evaluateCapacityInFlight(ctx context.Context) *lifecycleOutcome {
 	f, j, op := s.f, s.j, s.op
 	if maintenanceFence(f) != "" || f.Spec.Capacity == nil || j.Capacity == nil || externalOwner(f) {
 		return nil
 	}
 	observation := capacity.Observation{At: s.r.capacityNow()}
 	if s.r.Collector != nil {
-		observation = s.r.Collector.Collect(s.ctx, f)
+		observation = s.r.Collector.Collect(ctx, f)
 	}
 	*j.Capacity = capacity.Evaluate(*f.Spec.Capacity, *j.Capacity, observation, max(op.From, op.To))
 	if j.Capacity.Decision.Reason != "PendingCapacity" && j.Capacity.Decision.Reason != "IneffectiveCapacity" {
@@ -834,13 +834,13 @@ func (s *lifecycleRun) evaluateCapacityInFlight() *lifecycleOutcome {
 		j.Capacity.Decision.Message = "Recorded operation retains its original target; new policy and manual requests wait"
 	}
 	j.Capacity.Decision.DesiredReplicas = op.To
-	return s.persist()
+	return s.persist(ctx)
 }
 
 // refreshWorkloadVersion durably replaces an obsolete workload version before any
 // effect. An obsolete version cannot still win a CAS; the operation revalidates
 // on another reconcile before attempting anything.
-func (s *lifecycleRun) refreshWorkloadVersion() *lifecycleOutcome {
+func (s *lifecycleRun) refreshWorkloadVersion(ctx context.Context) *lifecycleOutcome {
 	op := s.op
 	if op.Phase != "Intent" && op.Phase != "Prepared" {
 		return nil
@@ -849,35 +849,35 @@ func (s *lifecycleRun) refreshWorkloadVersion() *lifecycleOutcome {
 		return nil
 	}
 	op.WorkloadVersion = s.w.GetResourceVersion()
-	return s.save()
+	return s.save(ctx)
 }
 
 // executeExpansion hands an additive operation to the scale-out executor.
-func (s *lifecycleRun) executeExpansion() *lifecycleOutcome {
+func (s *lifecycleRun) executeExpansion(ctx context.Context) *lifecycleOutcome {
 	if s.op.To <= s.op.From {
 		return nil
 	}
-	return s.stop(s.r.expand(s.ctx, s.f, s.res, s.j, s.w))
+	return s.stop(s.r.expand(ctx, s.f, s.res, s.j, s.w))
 }
 
 // requireQualifiedFencing establishes that only the in-package qualification seam
 // executes a removal, and never after a possible-loss finding.
-func (s *lifecycleRun) requireQualifiedFencing() *lifecycleOutcome {
+func (s *lifecycleRun) requireQualifiedFencing(ctx context.Context) *lifecycleOutcome {
 	if !s.r.Options.LocalTest || s.r.localLifecycle == nil {
-		return s.block("FencingUnqualified", "Operation retained; qualified process fencing is unavailable")
+		return s.block(ctx, "FencingUnqualified", "Operation retained; qualified process fencing is unavailable")
 	}
 	if s.j.Loss != "" {
-		return s.block("PossibleDataLoss", s.j.Loss)
+		return s.block(ctx, "PossibleDataLoss", s.j.Loss)
 	}
 	return nil
 }
 
 // adoptIssuedRemoval reconstructs a replica CAS that won before the journal could
 // record it, moving the recorded intent into recovery.
-func (s *lifecycleRun) adoptIssuedRemoval() *lifecycleOutcome {
+func (s *lifecycleRun) adoptIssuedRemoval(ctx context.Context) *lifecycleOutcome {
 	if s.op.Phase == "Intent" && replicas(s.w) == s.op.To && s.w.GetAnnotations()[operationKey] == s.op.ID {
 		s.op.Phase = "Recovering"
-		return s.save()
+		return s.save(ctx)
 	}
 	return nil
 }
@@ -885,7 +885,7 @@ func (s *lifecycleRun) adoptIssuedRemoval() *lifecycleOutcome {
 // issueRemovalIntent establishes revalidated membership and fresh preflight (and,
 // for an automatic removal, low-demand) evidence, then issues the single replica
 // CAS this operation is authorized to win.
-func (s *lifecycleRun) issueRemovalIntent() *lifecycleOutcome {
+func (s *lifecycleRun) issueRemovalIntent(ctx context.Context) *lifecycleOutcome {
 	if s.op.Phase != "Intent" {
 		return nil
 	}
@@ -893,53 +893,53 @@ func (s *lifecycleRun) issueRemovalIntent() *lifecycleOutcome {
 	// Desired count changes never retarget an existing operation. Before issue,
 	// freeze rather than cancel: a delayed previous leader could still issue it.
 	if !op.Automatic && f.Spec.Replicas >= op.From {
-		return s.block("DesiredChanged", "Existing removal intent retained; no new removal authorized")
+		return s.block(ctx, "DesiredChanged", "Existing removal intent retained; no new removal authorized")
 	}
-	if err := s.r.localLifecycle.Validate(s.ctx, f, op); err != nil {
-		return s.block("RecoveryBlocked", err.Error())
+	if err := s.r.localLifecycle.Validate(ctx, f, op); err != nil {
+		return s.block(ctx, "RecoveryBlocked", err.Error())
 	}
 	adapter, err := catalog.New(j.RuntimeImage)
 	if err != nil {
 		return s.fail(err)
 	}
-	evidence, err := adapter.Inspect(s.ctx, s.r.localLifecycle.Reader(f), v050.Request{OperationID: op.ID, Sessions: op.Sessions, InventoryComplete: true, CapturedAt: s.r.localLifecycle.Now(), MaxAge: 5 * time.Second, PageBudget: 1000}, s.r.localLifecycle.Now)
+	evidence, err := adapter.Inspect(ctx, s.r.localLifecycle.Reader(f), v050.Request{OperationID: op.ID, Sessions: op.Sessions, InventoryComplete: true, CapturedAt: s.r.localLifecycle.Now(), MaxAge: 5 * time.Second, PageBudget: 1000}, s.r.localLifecycle.Now)
 	if err != nil {
 		if _, ok := errors.AsType[*v050.LossError](err); ok {
-			return s.stop(s.r.recordLoss(s.ctx, f, s.w, s.res, j, err.Error()))
+			return s.stop(s.r.recordLoss(ctx, f, s.w, s.res, j, err.Error()))
 		}
-		return s.block("RecoveryBlocked", err.Error())
+		return s.block(ctx, "RecoveryBlocked", err.Error())
 	}
-	if err := s.r.localLifecycle.Validate(s.ctx, f, op); err != nil {
-		return s.block("RecoveryBlocked", err.Error())
+	if err := s.r.localLifecycle.Validate(ctx, f, op); err != nil {
+		return s.block(ctx, "RecoveryBlocked", err.Error())
 	}
 	if !evidenceFresh(evidence, s.r.localLifecycle.Now()) {
-		return s.block("RecoveryBlocked", "Preflight evidence expired during membership revalidation")
+		return s.block(ctx, "RecoveryBlocked", "Preflight evidence expired during membership revalidation")
 	}
 	if op.Automatic {
-		if outcome := s.revalidateAutomaticRemoval(evidence); outcome != nil {
+		if outcome := s.revalidateAutomaticRemoval(ctx, evidence); outcome != nil {
 			return outcome
 		}
 	}
-	if err := s.r.applyReplicas(s.ctx, s.w, op); err != nil {
-		return s.block("ReplicaUpdateBlocked", err.Error())
+	if err := s.r.applyReplicas(ctx, s.w, op); err != nil {
+		return s.block(ctx, "ReplicaUpdateBlocked", err.Error())
 	}
 	op.Phase = "Recovering"
-	return s.save()
+	return s.save(ctx)
 }
 
 // revalidateAutomaticRemoval establishes that an automatic removal is still the
 // one the policy recorded, and that complete fresh low-demand evidence supports
 // it, immediately before issuance.
-func (s *lifecycleRun) revalidateAutomaticRemoval(evidence v050.Evidence) *lifecycleOutcome {
+func (s *lifecycleRun) revalidateAutomaticRemoval(ctx context.Context, evidence v050.Evidence) *lifecycleOutcome {
 	if !s.automaticIntentAuthorized() {
-		return s.block("CapacityChanged", "Automatic removal intent retained; changed policy/manual request requires review")
+		return s.block(ctx, "CapacityChanged", "Automatic removal intent retained; changed policy/manual request requires review")
 	}
-	observation := s.r.Collector.Collect(s.ctx, s.f)
+	observation := s.r.Collector.Collect(ctx, s.f)
 	if !s.lowDemandEstablished(observation) {
-		return s.block("CapacityUncertain", "Fresh complete low-demand evidence is required before automatic removal")
+		return s.block(ctx, "CapacityUncertain", "Fresh complete low-demand evidence is required before automatic removal")
 	}
 	if !evidenceFresh(evidence, s.r.localLifecycle.Now()) {
-		return s.block("RecoveryBlocked", "Recovery evidence expired during capacity revalidation")
+		return s.block(ctx, "RecoveryBlocked", "Recovery evidence expired during capacity revalidation")
 	}
 	return nil
 }
@@ -976,27 +976,27 @@ func (s *lifecycleRun) lowDemandEstablished(observation capacity.Observation) bo
 
 // recoveryBlock reports a blocking recovery condition after durably clearing any
 // settling observation: uncertainty restarts settling, never completes it.
-func (s *lifecycleRun) recoveryBlock(reason, message string) *lifecycleOutcome {
+func (s *lifecycleRun) recoveryBlock(ctx context.Context, reason, message string) *lifecycleOutcome {
 	if !s.op.SettledAt.IsZero() {
 		s.op.SettledAt = time.Time{}
-		if outcome := s.persist(); outcome != nil {
+		if outcome := s.persist(ctx); outcome != nil {
 			return outcome
 		}
 	}
-	return s.block(reason, message)
+	return s.block(ctx, reason, message)
 }
 
 // confirmRemovalRecovery establishes an exact process fence plus two complete,
 // revalidated assessments at least the settling interval apart before the removal
 // is recorded as complete with its full session history retained.
-func (s *lifecycleRun) confirmRemovalRecovery() *lifecycleOutcome {
+func (s *lifecycleRun) confirmRemovalRecovery(ctx context.Context) *lifecycleOutcome {
 	f, j, op := s.f, s.j, s.op
-	if err := s.r.localLifecycle.Validate(s.ctx, f, op); err != nil {
-		return s.recoveryBlock("RecoveryBlocked", err.Error())
+	if err := s.r.localLifecycle.Validate(ctx, f, op); err != nil {
+		return s.recoveryBlock(ctx, "RecoveryBlocked", err.Error())
 	}
-	stopped, err := s.r.localLifecycle.Stopped(s.ctx, f, op)
+	stopped, err := s.r.localLifecycle.Stopped(ctx, f, op)
 	if err != nil || !stopped {
-		return s.recoveryBlock("FencingRequired", "Exact selected process termination is unconfirmed; retain disk and investigate fencing")
+		return s.recoveryBlock(ctx, "FencingRequired", "Exact selected process termination is unconfirmed; retain disk and investigate fencing")
 	}
 	sessions := append([]v050.Session(nil), op.Sessions...)
 	found := false
@@ -1007,39 +1007,39 @@ func (s *lifecycleRun) confirmRemovalRecovery() *lifecycleOutcome {
 		}
 	}
 	if !found {
-		return s.block("RecoveryBlocked", "Selected runtime session is absent from durable inventory")
+		return s.block(ctx, "RecoveryBlocked", "Selected runtime session is absent from durable inventory")
 	}
 	adapter, err := catalog.New(j.RuntimeImage)
 	if err != nil {
 		return s.fail(err)
 	}
-	evidence, err := adapter.Assess(s.ctx, s.r.localLifecycle.Reader(f), v050.Request{OperationID: op.ID, Sessions: sessions, InventoryComplete: true, CapturedAt: s.r.localLifecycle.Now(), MaxAge: 5 * time.Second, PageBudget: 1000}, s.r.localLifecycle.Now)
+	evidence, err := adapter.Assess(ctx, s.r.localLifecycle.Reader(f), v050.Request{OperationID: op.ID, Sessions: sessions, InventoryComplete: true, CapturedAt: s.r.localLifecycle.Now(), MaxAge: 5 * time.Second, PageBudget: 1000}, s.r.localLifecycle.Now)
 	if err != nil {
 		if _, ok := errors.AsType[*v050.LossError](err); ok {
-			return s.stop(s.r.recordLoss(s.ctx, f, s.w, s.res, j, err.Error()))
+			return s.stop(s.r.recordLoss(ctx, f, s.w, s.res, j, err.Error()))
 		}
 		op.SettledAt = time.Time{} // uncertainty restarts settling, never completes it
-		if outcome := s.persist(); outcome != nil {
+		if outcome := s.persist(ctx); outcome != nil {
 			return outcome
 		}
-		return s.block("RecoveryBlocked", err.Error())
+		return s.block(ctx, "RecoveryBlocked", err.Error())
 	}
-	if err := s.r.localLifecycle.Validate(s.ctx, f, op); err != nil {
-		return s.recoveryBlock("RecoveryBlocked", err.Error())
+	if err := s.r.localLifecycle.Validate(ctx, f, op); err != nil {
+		return s.recoveryBlock(ctx, "RecoveryBlocked", err.Error())
 	}
 	if !evidenceFresh(evidence, s.r.localLifecycle.Now()) {
-		return s.recoveryBlock("RecoveryBlocked", "Recovery evidence expired during membership revalidation")
+		return s.recoveryBlock(ctx, "RecoveryBlocked", "Recovery evidence expired during membership revalidation")
 	}
 	if op.SettledAt.IsZero() {
 		op.SettledAt = evidence.ObservedAt
-		return s.save()
+		return s.save(ctx)
 	}
 	if evidence.ObservedAt.Sub(op.SettledAt) < 10*time.Second {
-		return s.progress("Recovery evidence revalidated; waiting for another full assessment after settling")
+		return s.progress(ctx, "Recovery evidence revalidated; waiting for another full assessment after settling")
 	}
 	j.History = append(j.History, completion(op, evidence.ObservedAt))
 	j.Sessions, j.Applied, j.Operation = sessions, op.To, nil
-	return s.save()
+	return s.save(ctx)
 }
 
 // A delayed old leader can only replay this exact CAS once. Never fetch a fresh
