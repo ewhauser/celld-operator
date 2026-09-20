@@ -55,14 +55,12 @@ func validateBucketMigration(j *lifecycleJournal) error {
 
 // Migration keeps the original immutable reservation hash and every admitted
 // writer. Only workload kind/UID changes; no bucket, fleet, or disk is adopted.
-func (r *Reconciler) migrateBucket(ctx context.Context, f *fleet.CelldFleet, res *fleet.CelldStorageReservation) (ctrl.Result, bool, error) {
-	j, err := r.loadJournal(ctx, res)
-	if err != nil {
-		result, reportErr := r.report(ctx, f, "StorageScopeConflict", "Cannot load retained lifecycle authority: "+err.Error(), false)
-		return result, true, reportErr
-	}
-	if j == nil {
-		return ctrl.Result{}, false, nil
+func (r *Reconciler) migrateBucket(ctx context.Context, f *fleet.CelldFleet, h *hydratedJournal) (ctrl.Result, bool, error) {
+	// The caller hydrated the journal for this reconcile and has already
+	// reported an unreadable one; migration decides on that same copy.
+	res, j := h.res, h.j
+	if h.err != nil || j == nil {
+		return ctrl.Result{}, false, h.err
 	}
 	m := j.BucketMigration
 	if m == nil && (f.Spec.Profile != "Bucket" || f.Spec.BucketWorkload != "Ordered" || f.Spec.Maintenance == nil || f.Spec.Maintenance.OrderedMigrationToken == "") {
@@ -72,14 +70,14 @@ func (r *Reconciler) migrateBucket(ctx context.Context, f *fleet.CelldFleet, res
 		return ctrl.Result{}, false, nil
 	}
 	block := func(e error) (ctrl.Result, bool, error) {
-		result, err := r.report(ctx, f, "MigrationBlocked", e.Error(), false)
+		result, err := r.report(ctx, f, h, "MigrationBlocked", e.Error(), false)
 		return result, true, err
 	}
 	old := f.DeepCopy()
 	old.Spec.BucketWorkload = "Deployment"
 	old.Spec.Replicas = j.Applied
 	old.Spec.RuntimeImage = j.RuntimeImage
-	if !r.migrationAuthorityIntact(ctx, f, old, res, j, m) {
+	if !r.migrationAuthorityIntact(ctx, f, old, h, m) {
 		return block(errors.New("migration requires the unchanged v0.5.0 Bucket reservation and loss-free history"))
 	}
 	save := func() (ctrl.Result, bool, error) {
@@ -108,7 +106,7 @@ func (r *Reconciler) migrateBucket(ctx context.Context, f *fleet.CelldFleet, res
 		return r.createMigratedBucket(ctx, f, res, j)
 	}
 	w := &appsv1.Deployment{}
-	err = r.Get(ctx, client.ObjectKeyFromObject(f), w)
+	err := r.Get(ctx, client.ObjectKeyFromObject(f), w)
 	if apierrors.IsNotFound(err) && m.Phase == "DeleteOld" {
 		m.Phase = "CreateNew"
 		return save()
@@ -143,14 +141,15 @@ func (r *Reconciler) migrateBucket(ctx context.Context, f *fleet.CelldFleet, res
 // migrationAuthorityIntact reports whether the retained reservation and journal
 // are still exactly the unowned, loss-free v0.5.0 Bucket authority a migration
 // may run against, and that the fleet still requests the Ordered layout. The
-// checks keep their original order: the reservation is only re-read once the
-// cheap identity checks have passed.
-func (r *Reconciler) migrationAuthorityIntact(ctx context.Context, f, old *fleet.CelldFleet, res *fleet.CelldStorageReservation, j *lifecycleJournal, m *bucketMigration) bool {
+// checks keep their original order: the reservation spec is only rehashed once
+// the cheap identity checks have passed.
+func (r *Reconciler) migrationAuthorityIntact(ctx context.Context, f, old *fleet.CelldFleet, h *hydratedJournal, m *bucketMigration) bool {
+	res, j := h.res, h.j
 	if len(res.OwnerReferences) != 0 || !res.DeletionTimestamp.IsZero() {
 		return false
 	}
 	want := fleet.ReservationSpec{Bucket: f.Spec.Storage.Bucket, FleetNamespace: f.Namespace, FleetName: f.Name, FleetUID: string(f.UID)}
-	if !r.reservationMatches(ctx, old, res, want) || j.RuntimeImage != Image {
+	if !r.reservationMatches(ctx, old, h, want) || j.RuntimeImage != Image {
 		return false
 	}
 	// Before capture, a runtime image the request changed underneath the
@@ -462,7 +461,7 @@ func (r *Reconciler) migrationFailure(ctx context.Context, f *fleet.CelldFleet, 
 	if loss {
 		reason = "PossibleDataLoss"
 	}
-	result, err := r.report(ctx, f, reason, cause.Error(), false)
+	result, err := r.report(ctx, f, hydrated(res, j), reason, cause.Error(), false)
 	return result, true, err
 }
 

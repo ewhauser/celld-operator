@@ -93,7 +93,7 @@ func (x *reactivationFixture) reconcileLifecycle(t *testing.T) error {
 	if err := x.r.Get(ctx, client.ObjectKeyFromObject(x.w), x.w); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = x.r.lifecycle(ctx, x.f, x.res, x.w)
+	_, _, err = x.r.lifecycle(ctx, x.f, x.r.hydrate(ctx, x.res), x.w)
 	return err
 }
 

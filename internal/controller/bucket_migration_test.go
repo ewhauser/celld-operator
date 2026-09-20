@@ -61,7 +61,7 @@ func TestBucketMigrationRequiresPositiveExpiryAndRetainsHistory(t *testing.T) {
 		if err := r.Get(t.Context(), client.ObjectKeyFromObject(res), res); err != nil {
 			t.Fatal(err)
 		}
-		_, handled, err := r.migrateBucket(t.Context(), f, res)
+		_, handled, err := r.migrateBucket(t.Context(), f, r.hydrate(t.Context(), res))
 		if err != nil || !handled {
 			t.Fatalf("migration handled=%v err=%v", handled, err)
 		}
@@ -134,7 +134,7 @@ func TestBucketMigrationRequiresPositiveExpiryAndRetainsHistory(t *testing.T) {
 		}
 	}
 	want := res.Spec
-	if !r.reservationMatches(t.Context(), f, res, want) {
+	if !r.reservationMatches(t.Context(), f, r.hydrate(t.Context(), res), want) {
 		t.Fatal("original reservation binding lost")
 	}
 }
@@ -224,7 +224,7 @@ func (p *migrationFixture) step(t *testing.T) {
 	if err := p.r.Get(t.Context(), client.ObjectKeyFromObject(p.res), p.res); err != nil {
 		t.Fatal(err)
 	}
-	_, handled, err := p.r.migrateBucket(t.Context(), p.f, p.res)
+	_, handled, err := p.r.migrateBucket(t.Context(), p.f, p.r.hydrate(t.Context(), p.res))
 	if err != nil || !handled {
 		t.Fatalf("handled=%v err=%v", handled, err)
 	}
@@ -442,7 +442,7 @@ func TestBucketMigrationCannotActivateReplacedTarget(t *testing.T) {
 	if err := p.r.Create(t.Context(), target); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := p.r.migrateBucket(t.Context(), p.f, p.res); err == nil {
+	if _, _, err := p.r.migrateBucket(t.Context(), p.f, p.r.hydrate(t.Context(), p.res)); err == nil {
 		t.Fatal("activated another UID")
 	}
 	if err := p.r.Get(t.Context(), client.ObjectKeyFromObject(target), target); err != nil {

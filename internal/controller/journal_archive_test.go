@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
@@ -159,5 +160,61 @@ func TestArchiveCASFailureLeavesOriginalAuthorityReadable(t *testing.T) {
 	}
 	if len(got.History) != 4000 {
 		t.Fatal("orphan archive published uncommitted operation")
+	}
+}
+
+// One reconcile hydrates the journal once (ADR 0021 phase 1). Before that, the
+// same pass loaded it in migrateBucket, in reservationMatches, in the lifecycle
+// run and once more in every report, re-reading every archive page each time.
+func TestJournalHydratedOncePerReconcile(t *testing.T) {
+	for _, layout := range []string{"inline", "paged"} {
+		t.Run(layout, func(t *testing.T) {
+			r, f := lifecycleSetup(t, "Bucket")
+			res := &fleet.CelldStorageReservation{}
+			if err := r.Get(t.Context(), types.NamespacedName{Name: reservationName(f)}, res); err != nil {
+				t.Fatal(err)
+			}
+			if layout == "paged" {
+				// Archive pages are bound to the reservation UID, which the fake
+				// client does not assign on create.
+				res.UID = "reservation-uid"
+				if err := r.Update(t.Context(), res); err != nil {
+					t.Fatal(err)
+				}
+				j, err := r.loadJournal(t.Context(), res)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for i := range 6000 {
+					j.CompletedRestarts = append(j.CompletedRestarts, fmt.Sprintf("restart-%d-%s", i, strings.Repeat("t", 48)))
+				}
+				if err := r.saveJournal(t.Context(), res, j); err != nil {
+					t.Fatal(err)
+				}
+			}
+			pages := &corev1.ConfigMapList{}
+			if err := r.List(t.Context(), pages); err != nil {
+				t.Fatal(err)
+			}
+			if (len(pages.Items) > 0) != (layout == "paged") {
+				t.Fatalf("%s fixture produced %d archive pages", layout, len(pages.Items))
+			}
+			reservationReads, pageReads := 0, 0
+			base := r.Client
+			r.Client = interceptor.NewClient(base.(client.WithWatch), interceptor.Funcs{Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				switch obj.(type) {
+				case *fleet.CelldStorageReservation:
+					reservationReads++
+				case *corev1.ConfigMap:
+					pageReads++
+				}
+				return c.Get(ctx, key, obj, opts...)
+			}})
+			reconcile(t, r, f)
+			r.Client = base
+			if reservationReads != 1 || pageReads != len(pages.Items) {
+				t.Fatalf("%d reservation reads and %d page reads for %d archive pages; one reconcile must hydrate the journal exactly once", reservationReads, pageReads, len(pages.Items))
+			}
+		})
 	}
 }

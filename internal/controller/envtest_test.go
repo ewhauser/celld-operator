@@ -514,7 +514,7 @@ func TestEnvtestCorruptJournalBlocksWithoutRewrite(t *testing.T) {
 	}
 	for range 3 {
 		r = envtestFreshReconciler(r)
-		reason(t, reconcile(t, r, x.fleet), "StorageScopeConflict")
+		reason(t, reconcile(t, r, x.fleet), "JournalInvalid")
 	}
 	again := envtestReservation(t, r, x.fleet)
 	if again.Annotations[journalKey] != res.Annotations[journalKey] || again.ResourceVersion != res.ResourceVersion {

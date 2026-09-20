@@ -54,6 +54,18 @@ The operator emits Events only when the blocker status or reason changes.
 Prometheus series are labeled by namespace/fleet and removed when deletion is
 observed. These operational observations never substitute for fencing evidence.
 
+The retained journal's own size is published as `celld_fleet_journal_bytes` —
+the encoded journal as written, meaning the reservation annotation while it is
+inline and the hydrated size once it is paged — and
+`celld_fleet_journal_archive_pages`, the immutable ConfigMap pages behind it.
+Both carry the same namespace/fleet labels as the other fleet series. The
+`JournalSizeWarning` condition turns true once the journal passes half of either
+budget that fails closed, 16 MiB hydrated or the 200 KiB archive index, and its
+message states the measured bytes and the cap. It warns only; nothing blocks on
+it. Act on it well before the cap, because a journal that reaches the cap can no
+longer be written at all and the fleet then fails closed (see
+[journal archives](journal-archives.md)).
+
 Inspect `kubectl describe celldfleet NAME -n NAMESPACE`, its durable reservation,
 and Events before intervening. A sticky `possibleLoss` condition requires
 investigation and recovery; do not clear the journal to force progress. Retained

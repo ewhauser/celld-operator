@@ -445,7 +445,7 @@ func TestPersistentPauseCannotCompleteReactivation(t *testing.T) {
 				t.Fatal(err)
 			}
 			p.f.Spec.Maintenance = &fleet.MaintenanceSpec{Paused: true}
-			if _, _, err := p.r.lifecycle(t.Context(), p.f, p.res, p.w); err != nil {
+			if _, _, err := p.r.lifecycle(t.Context(), p.f, p.r.hydrate(t.Context(), p.res), p.w); err != nil {
 				t.Fatal(err)
 			}
 			if err := p.r.Get(t.Context(), client.ObjectKeyFromObject(p.res), p.res); err != nil {

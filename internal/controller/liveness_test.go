@@ -43,7 +43,7 @@ func lifecycleOnce(t *testing.T, p *persistentFixture) *lifecycleJournal {
 	if err := p.r.Get(ctx, client.ObjectKeyFromObject(p.w), p.w); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := p.r.lifecycle(ctx, p.f, p.res, p.w); err != nil {
+	if _, _, err := p.r.lifecycle(ctx, p.f, p.r.hydrate(ctx, p.res), p.w); err != nil {
 		t.Fatal(err)
 	}
 	if err := p.r.Get(ctx, client.ObjectKeyFromObject(p.res), p.res); err != nil {

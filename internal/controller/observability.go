@@ -44,6 +44,8 @@ func init() {
 		"possible_loss":             "One when the durable journal records possible data loss.",
 		"operation_age_seconds":     "Age of the current durable operation, zero when none.",
 		"blocked_age_seconds":       "Age of the current continuously reported blocker, zero when none.",
+		"journal_bytes":             "Encoded lifecycle journal bytes as written: the reservation annotation while inline, the hydrated size once paged. The hydrated cap is 16 MiB.",
+		"journal_archive_pages":     "Immutable ConfigMap pages the lifecycle journal is currently paged across, zero while it is inline.",
 	} {
 		gauge := prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "celld_fleet_" + name, Help: help}, []string{"namespace", "fleet"})
 		metrics.Registry.MustRegister(gauge)
@@ -69,8 +71,9 @@ func boolean(value bool) float64 {
 	}
 	return 0
 }
-func publishFleetMetrics(f *fleet.CelldFleet, now time.Time) {
+func publishFleetMetrics(f *fleet.CelldFleet, journal journalFootprint, now time.Time) {
 	values := map[string]float64{
+		"journal_bytes": float64(journal.bytes), "journal_archive_pages": float64(journal.pages),
 		"desired_replicas": float64(f.Status.DesiredReplicas), "applied_replicas": float64(f.Status.AppliedReplicas),
 		"observed_replicas": float64(f.Status.ObservedReplicas), "ready_replicas": float64(f.Status.ReadyReplicas),
 		"joining_replicas": float64(f.Status.JoiningReplicas), "terminating_replicas": float64(f.Status.TerminatingReplicas),

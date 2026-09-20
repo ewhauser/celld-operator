@@ -363,7 +363,7 @@ func TestBucketStatusSeparatesRetiredLivenessFromUnresolvedHistory(t *testing.T)
 		if err := r.saveJournal(t.Context(), res, j); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := r.report(t.Context(), f, "LifecycleProgress", "test observation", false); err != nil {
+		if _, err := r.report(t.Context(), f, nil, "LifecycleProgress", "test observation", false); err != nil {
 			t.Fatal(err)
 		}
 		if f.Status.Lifecycle.RetiredBucketSessions != 1 {

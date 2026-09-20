@@ -15,6 +15,7 @@ import (
 
 const archivePageBytes = 128 * 1024
 const archiveMaxBytes = 16 * 1024 * 1024
+const archiveIndexBytes = 200 * 1024
 const archiveIdentityKey = "celld.eric.dev/journal-reservation-uid"
 const archiveDigestKey = "celld.eric.dev/journal-page-digest"
 
@@ -82,7 +83,7 @@ func (r *Reconciler) archiveJournal(ctx context.Context, res *fleet.CelldStorage
 	if err != nil {
 		return nil, err
 	}
-	if len(envelope) > 200*1024 {
+	if len(envelope) > archiveIndexBytes {
 		return nil, errors.New("journal archive index budget exhausted")
 	}
 	return envelope, nil
@@ -142,4 +143,73 @@ func (r *Reconciler) loadJournal(ctx context.Context, res *fleet.CelldStorageRes
 	restoredReservation := res.DeepCopy()
 	restoredReservation.Annotations[journalKey] = string(restored)
 	return readJournal(restoredReservation)
+}
+
+// hydratedJournal is one reconcile's single hydration of the lifecycle journal:
+// the reservation it was read from, the journal itself, and the error that read
+// returned. ADR 0021 phase 1 hydrates once per reconcile and hands this to
+// Bucket migration, reservation matching, the lifecycle run and every status
+// report, instead of each of them loading a copy of its own and re-reading
+// every archive page. j is the live journal the lifecycle mutates, so a report
+// projects what the pass has already written rather than a re-read snapshot.
+type hydratedJournal struct {
+	res *fleet.CelldStorageReservation
+	j   *lifecycleJournal
+	err error
+}
+
+// hydrate reads the journal once for this reconcile. res is the same object
+// every saveJournal of the pass CASes against, so a consumer can never write a
+// journal that was loaded from an earlier reservation resourceVersion.
+func (r *Reconciler) hydrate(ctx context.Context, res *fleet.CelldStorageReservation) *hydratedJournal {
+	h := &hydratedJournal{res: res}
+	h.j, h.err = r.loadJournal(ctx, res)
+	return h
+}
+
+// hydrated wraps the reservation and journal an executor is already holding, so
+// that its reports project those instead of hydrating the journal again.
+func hydrated(res *fleet.CelldStorageReservation, j *lifecycleJournal) *hydratedJournal {
+	return &hydratedJournal{res: res, j: j}
+}
+
+// journalFootprint is the size of the stored journal: the encoded bytes
+// saveJournal wrote (the annotation itself while it is inline, the hydrated
+// size the index records once it is paged), the archive index size, and the
+// number of pages behind it. It is read from the reservation annotation rather
+// than re-encoded, so observing it costs nothing on a pass that writes nothing.
+type journalFootprint struct{ bytes, index, pages int }
+
+func measureJournal(res *fleet.CelldStorageReservation) journalFootprint {
+	raw := res.Annotations[journalKey]
+	if raw == "" {
+		return journalFootprint{}
+	}
+	var archive journalArchive
+	if err := json.Unmarshal([]byte(raw), &archive); err != nil || archive.ArchiveFormat == 0 {
+		return journalFootprint{bytes: len(raw)}
+	}
+	measured := journalFootprint{bytes: archive.Bytes, index: len(raw)}
+	for _, pages := range archive.Fields {
+		measured.pages += len(pages)
+	}
+	return measured
+}
+
+// nearCapacity reports whether the journal has consumed half of either budget
+// that fails closed: the 16 MiB hydrated cap, beyond which no journal can be
+// written at all, or the 200 KiB archive index. It warns; it blocks nothing.
+func (m journalFootprint) nearCapacity() bool {
+	return m.bytes > archiveMaxBytes/2 || m.index > archiveIndexBytes/2
+}
+
+func journalSizeReason(m journalFootprint) string {
+	if m.nearCapacity() {
+		return "JournalNearCapacity"
+	}
+	return "JournalWithinBudget"
+}
+
+func journalSizeMessage(m journalFootprint) string {
+	return fmt.Sprintf("Lifecycle journal is %d bytes of the %d byte hydrated cap; archive index %d bytes of %d across %d pages", m.bytes, archiveMaxBytes, m.index, archiveIndexBytes, m.pages)
 }
