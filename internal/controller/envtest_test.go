@@ -180,6 +180,12 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 	if err := c.Create(ctx, mirrored); err != nil {
 		t.Fatalf("mirrored runtime pin rejected: %v", err)
 	}
+	withTelemetry := base()
+	withTelemetry.Name = "telemetry-valid"
+	withTelemetry.Spec.Telemetry = &fleet.TelemetrySpec{CollectorURL: "http://collector:4318", Egress: fleet.CollectorEgress{PodLabels: map[string]string{"app": "otel"}}, Sampler: "traceidratio", SamplerArg: "0.25"}
+	if err := c.Create(ctx, withTelemetry); err != nil {
+		t.Fatalf("valid telemetry rejected: %v", err)
+	}
 
 	// CEL cross-field rules reject at creation time.
 	invalid := []struct {
@@ -205,6 +211,12 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 			f.Spec.Env = []fleet.FleetEnvVar{{Name: "CELLD_LOG", Value: &v}, {Name: "CELLD_LOG", Value: &v}}
 		}},
 		{"missing env value", func(f *fleet.CelldFleet) { f.Spec.Env = []fleet.FleetEnvVar{{Name: "CELLD_LOG"}} }},
+		{"telemetry missing egress", func(f *fleet.CelldFleet) {
+			f.Spec.Telemetry = &fleet.TelemetrySpec{CollectorURL: "http://collector:4318"}
+		}},
+		{"telemetry invalid ratio", func(f *fleet.CelldFleet) {
+			f.Spec.Telemetry = &fleet.TelemetrySpec{CollectorURL: "http://collector:4318", Egress: fleet.CollectorEgress{PodLabels: map[string]string{"app": "otel"}}, Sampler: "traceidratio", SamplerArg: "2.0"}
+		}},
 		{"capacity minimum below azCount", func(f *fleet.CelldFleet) {
 			f.Spec.Placement = fleet.PlacementSpec{AZCount: 2, Zones: []string{"us-east-1a", "us-east-1b"}}
 			f.Spec.Capacity = &fleet.CapacityPolicy{MinReplicas: 1}
@@ -237,6 +249,9 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 		{"env", func(f *fleet.CelldFleet) {
 			value := "debug"
 			f.Spec.Env = []fleet.FleetEnvVar{{Name: "CELLD_LOG", Value: &value}}
+		}},
+		{"telemetry", func(f *fleet.CelldFleet) {
+			f.Spec.Telemetry = &fleet.TelemetrySpec{CollectorURL: "http://collector:4318", Egress: fleet.CollectorEgress{PodLabels: map[string]string{"app": "otel"}}}
 		}},
 	} {
 		t.Run("immutable "+tc.name, func(t *testing.T) {

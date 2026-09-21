@@ -28,7 +28,7 @@ var AddToScheme = SchemeBuilder.AddToScheme
 type CelldFleet struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	// +kubebuilder:validation:XValidation:rule="self.qualification == oldSelf.qualification && self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement && has(self.execution) == has(oldSelf.execution) && (!has(self.execution) || self.execution == oldSelf.execution) && has(self.lifecycle) == has(oldSelf.lifecycle) && (!has(self.lifecycle) || self.lifecycle == oldSelf.lifecycle) && has(self.env) == has(oldSelf.env) && (!has(self.env) || self.env == oldSelf.env) && self.bucketWorkload == oldSelf.bucketWorkload",message="only replicas, capacity, runtimeImage and maintenance may change; layout, execution, lifecycle and env are fixed at creation"
+	// +kubebuilder:validation:XValidation:rule="self.qualification == oldSelf.qualification && self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement && has(self.execution) == has(oldSelf.execution) && (!has(self.execution) || self.execution == oldSelf.execution) && has(self.lifecycle) == has(oldSelf.lifecycle) && (!has(self.lifecycle) || self.lifecycle == oldSelf.lifecycle) && has(self.env) == has(oldSelf.env) && (!has(self.env) || self.env == oldSelf.env) && has(self.telemetry) == has(oldSelf.telemetry) && (!has(self.telemetry) || self.telemetry == oldSelf.telemetry) && self.bucketWorkload == oldSelf.bucketWorkload",message="only replicas, capacity, runtimeImage and maintenance may change; layout, execution, lifecycle, env and telemetry are fixed at creation"
 	Spec   CelldFleetSpec   `json:"spec"`
 	Status CelldFleetStatus `json:"status,omitempty"`
 }
@@ -89,6 +89,10 @@ type CelldFleetSpec struct {
 	// +listMapKey=name
 	// +kubebuilder:validation:XValidation:rule="self.all(e, !(['CELLD_NODE','CELLD_ADVERTISE','CELLD_BUCKET','CELLD_DURABILITY','CELLD_ADDR','CELLD_INTERNAL_ADDR','CELLD_WATCH','CELLD_TTL_MS','CELLD_SHUTDOWN_TOTAL_MS','CELLD_TOKIO_THREADS','CELLD_MAX_RESIDENT_CELLS','CELLD_IDLE_EVICT_S'].exists(n, n == e.name) || e.name.startsWith('CELLD_REEXEC_') || e.name.startsWith('CELLD_OTEL') || e.name.startsWith('CELLD_UNSAFE_') || e.name.startsWith('CELLD_TEST_') || e.name.startsWith('CELLD_STRICT_')))",message="env may not override operator-owned or reserved celld variables"
 	Env []FleetEnvVar `json:"env,omitempty"`
+	// Optional OTLP collector; omission leaves telemetry disabled. Immutable
+	// because the operator does not roll out ordinary pod-template changes.
+	// +optional
+	Telemetry *TelemetrySpec `json:"telemetry,omitempty"`
 }
 
 // +kubebuilder:validation:XValidation:rule="has(self.value) != has(self.secretKeyRef)",message="exactly one of value or secretKeyRef is required"
@@ -112,6 +116,53 @@ type SecretKeyRef struct {
 	Name string `json:"name"`
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[-._a-zA-Z0-9]+$`
+	Key string `json:"key"`
+}
+
+// TelemetrySpec maps to celld's current OTLP environment contract. The
+// collector destination is explicitly permitted by a narrow NetworkPolicy rule.
+// +kubebuilder:validation:XValidation:rule="has(self.sampler) && (self.sampler == 'traceidratio' || self.sampler == 'parentbased_traceidratio') ? has(self.samplerArg) : !has(self.samplerArg)",message="samplerArg is required only for ratio samplers"
+type TelemetrySpec struct {
+	// HTTP(S) collector base URL; celld appends /v1/traces and /v1/logs.
+	// +kubebuilder:validation:Pattern=`^https?://[^/?#@]+(/[^?#]*)?$`
+	CollectorURL string          `json:"collectorURL"`
+	Egress       CollectorEgress `json:"egress"`
+	// +optional
+	// +kubebuilder:validation:Enum=always_on;always_off;parentbased_always_on;parentbased_always_off;traceidratio;parentbased_traceidratio
+	Sampler string `json:"sampler,omitempty"`
+	// +optional
+	// Decimal ratio in [0,1], serialized as a string for portable CRD clients.
+	// +kubebuilder:validation:Pattern=`^(0(\.[0-9]+)?|1(\.0+)?)$`
+	SamplerArg string `json:"samplerArg,omitempty"`
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	FlushMilliseconds int64 `json:"flushMilliseconds,omitempty"`
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	FlushBytes int64 `json:"flushBytes,omitempty"`
+	// Secret value contains comma-separated OTLP headers; it never enters status.
+	// +optional
+	HeadersSecretKeyRef *TelemetrySecretKeyRef `json:"headersSecretKeyRef,omitempty"`
+}
+
+// +kubebuilder:validation:XValidation:rule="has(self.cidr) != has(self.podLabels)",message="exactly one of cidr or podLabels is required"
+type CollectorEgress struct {
+	// Single collector address, /32 for IPv4 or /128 for IPv6.
+	// +optional
+	CIDR string `json:"cidr,omitempty"`
+	// Labels on collector pods. A namespace is optional for same-namespace pods.
+	// +optional
+	// +kubebuilder:validation:MinProperties=1
+	PodLabels map[string]string `json:"podLabels,omitempty"`
+	// Collector namespace; only valid with podLabels.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+}
+
+type TelemetrySecretKeyRef struct {
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
+	Name string `json:"name"`
 	// +kubebuilder:validation:Pattern=`^[-._a-zA-Z0-9]+$`
 	Key string `json:"key"`
 }
