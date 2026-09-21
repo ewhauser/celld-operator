@@ -167,6 +167,12 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 	if f.Spec.Replicas != 3 || f.Spec.Storage.SizeGiB != 10 || f.Spec.Placement.Mode != "Strict" {
 		t.Fatalf("CRD defaults not applied by the API server: %+v", f.Spec)
 	}
+	mirrored := base()
+	mirrored.Name = "mirrored"
+	mirrored.Spec.RuntimeImage = "123456789012.dkr.ecr.us-east-1.amazonaws.com/cache/celld@sha256:" + strings.Repeat("a", 64)
+	if err := c.Create(ctx, mirrored); err != nil {
+		t.Fatalf("mirrored runtime pin rejected: %v", err)
+	}
 
 	// CEL cross-field rules reject at creation time.
 	invalid := []struct {
@@ -182,6 +188,7 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 		{"storageClassName on Bucket", func(f *fleet.CelldFleet) { f.Spec.Storage.StorageClassName = "disposable" }},
 		{"PersistentFleet without storageClassName", func(f *fleet.CelldFleet) { f.Spec.Profile = "PersistentFleet" }},
 		{"production qualification", func(f *fleet.CelldFleet) { f.Spec.Qualification = "Production" }},
+		{"runtime tag", func(f *fleet.CelldFleet) { f.Spec.RuntimeImage = "example.com/celld:latest" }},
 		{"capacity minimum below azCount", func(f *fleet.CelldFleet) {
 			f.Spec.Placement = fleet.PlacementSpec{AZCount: 2, Zones: []string{"us-east-1a", "us-east-1b"}}
 			f.Spec.Capacity = &fleet.CapacityPolicy{MinReplicas: 1}
