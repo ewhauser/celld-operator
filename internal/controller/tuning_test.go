@@ -42,6 +42,32 @@ func TestTuningDefaultsPreserveHistoricalTemplate(t *testing.T) {
 	}
 }
 
+func TestAdditionalEnvironmentTemplateAndHash(t *testing.T) {
+	f := fixture("alpha", "bucket-alpha", "Bucket")
+	baseline := specHash(f)
+	value := "debug"
+	f.Spec.Env = []fleet.FleetEnvVar{{Name: "CELLD_LOG", Value: &value}, {Name: "CELLD_API_TOKEN", SecretKeyRef: &fleet.SecretKeyRef{Name: "runtime-auth", Key: "token"}}}
+	if specHash(f) == baseline {
+		t.Fatal("environment missing from immutable reservation hash")
+	}
+	if err := f.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	env := podTemplate(f, Options{}).Spec.Containers[0].Env
+	if got, _ := envValue(env, "CELLD_LOG"); got != "debug" {
+		t.Fatalf("literal env = %q", got)
+	}
+	for _, item := range env {
+		if item.Name == "CELLD_API_TOKEN" {
+			if item.Value != "" || item.ValueFrom == nil || item.ValueFrom.SecretKeyRef == nil || item.ValueFrom.SecretKeyRef.Name != "runtime-auth" || item.ValueFrom.SecretKeyRef.Key != "token" {
+				t.Fatalf("secret reference missing: %+v", item)
+			}
+			return
+		}
+	}
+	t.Fatal("secret reference missing")
+}
+
 func TestTuningIsAppliedToTheTemplate(t *testing.T) {
 	f := fixture("alpha", "bucket-alpha", "PersistentFleet")
 	f.Spec.Execution = &fleet.ExecutionSpec{CPURequest: "2", CPULimit: "2", MemoryRequest: "4Gi", MemoryLimit: "4Gi", MaxResidentCells: 400, IdleEvictSeconds: 60}

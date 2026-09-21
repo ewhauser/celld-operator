@@ -76,6 +76,37 @@ func TestMirroredRuntimeImage(t *testing.T) {
 	}
 }
 
+func TestAdditionalEnvironmentValidation(t *testing.T) {
+	value := "debug"
+	validEntries := []FleetEnvVar{
+		{Name: "CELLD_LOG", Value: &value},
+		{Name: "CELLD_API_TOKEN", SecretKeyRef: &SecretKeyRef{Name: "runtime-auth", Key: "token"}},
+	}
+	f := valid()
+	f.Spec.Env = validEntries
+	if err := f.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for name, entries := range map[string][]FleetEnvVar{
+		"override bucket":   {{Name: "CELLD_BUCKET", Value: &value}},
+		"override launcher": {{Name: "CELLD_REEXEC_PROBE_SIGNING_KEY", Value: &value}},
+		"override otel":     {{Name: "CELLD_OTEL", Value: &value}},
+		"duplicate":         {{Name: "CELLD_LOG", Value: &value}, {Name: "CELLD_LOG", Value: &value}},
+		"both sources":      {{Name: "CELLD_LOG", Value: &value, SecretKeyRef: &SecretKeyRef{Name: "s", Key: "k"}}},
+		"no source":         {{Name: "CELLD_LOG"}},
+		"bad key":           {{Name: "CELLD_LOG", SecretKeyRef: &SecretKeyRef{Name: "s", Key: "bad/key"}}},
+		"unrelated env":     {{Name: "AWS_REGION", Value: &value}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := valid()
+			f.Spec.Env = entries
+			if err := f.Validate(); err == nil {
+				t.Fatal("accepted invalid environment")
+			}
+		})
+	}
+}
+
 func TestTuningValidation(t *testing.T) {
 	good := valid()
 	good.Spec.Execution = &ExecutionSpec{CPURequest: "500m", CPULimit: "1", MemoryRequest: "1Gi", MemoryLimit: "2Gi", MaxResidentCells: 400, IdleEvictSeconds: 60}

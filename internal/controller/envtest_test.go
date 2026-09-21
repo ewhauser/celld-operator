@@ -189,6 +189,15 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 		{"PersistentFleet without storageClassName", func(f *fleet.CelldFleet) { f.Spec.Profile = "PersistentFleet" }},
 		{"production qualification", func(f *fleet.CelldFleet) { f.Spec.Qualification = "Production" }},
 		{"runtime tag", func(f *fleet.CelldFleet) { f.Spec.RuntimeImage = "example.com/celld:latest" }},
+		{"owned env", func(f *fleet.CelldFleet) {
+			v := "bad"
+			f.Spec.Env = []fleet.FleetEnvVar{{Name: "CELLD_BUCKET", Value: &v}}
+		}},
+		{"duplicate env", func(f *fleet.CelldFleet) {
+			v := "debug"
+			f.Spec.Env = []fleet.FleetEnvVar{{Name: "CELLD_LOG", Value: &v}, {Name: "CELLD_LOG", Value: &v}}
+		}},
+		{"missing env value", func(f *fleet.CelldFleet) { f.Spec.Env = []fleet.FleetEnvVar{{Name: "CELLD_LOG"}} }},
 		{"capacity minimum below azCount", func(f *fleet.CelldFleet) {
 			f.Spec.Placement = fleet.PlacementSpec{AZCount: 2, Zones: []string{"us-east-1a", "us-east-1b"}}
 			f.Spec.Capacity = &fleet.CapacityPolicy{MinReplicas: 1}
@@ -218,6 +227,10 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 		{"bucket", func(f *fleet.CelldFleet) { f.Spec.Storage.Bucket = "other-" + ns }},
 		{"zones", func(f *fleet.CelldFleet) { f.Spec.Placement.Zones = []string{"us-east-1b"} }},
 		{"serviceAccountName", func(f *fleet.CelldFleet) { f.Spec.ServiceAccountName = "other" }},
+		{"env", func(f *fleet.CelldFleet) {
+			value := "debug"
+			f.Spec.Env = []fleet.FleetEnvVar{{Name: "CELLD_LOG", Value: &value}}
+		}},
 	} {
 		t.Run("immutable "+tc.name, func(t *testing.T) {
 			got := &fleet.CelldFleet{}

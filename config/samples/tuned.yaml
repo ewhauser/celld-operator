@@ -7,6 +7,14 @@ metadata:
   name: agents
   namespace: agents-prod
 spec:
+  # Optional additional celld settings are immutable after fleet creation.
+  # env:
+  #   - name: CELLD_LOG
+  #     value: debug
+  #   - name: CELLD_API_TOKEN
+  #     secretKeyRef:
+  #       name: runtime-auth
+  #       key: token
   qualification: Experimental
   profile: Bucket
   replicas: 3

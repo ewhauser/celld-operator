@@ -219,6 +219,55 @@ spec:
                 - message: invalid sampling windows
                   rule: self.minWindowSeconds <= self.maxWindowSeconds && self.sampleIntervalSeconds
                     <= self.maxAgeSeconds
+              env:
+                description: |-
+                  Additional celld settings, fixed at creation. Secret values stay in the
+                  referenced Secret; changes to Secret data take effect only in new Pods.
+                items:
+                  properties:
+                    name:
+                      maxLength: 128
+                      pattern: ^CELLD_[A-Z][A-Z0-9_]*$
+                      type: string
+                    secretKeyRef:
+                      description: Secret in the same namespace as the fleet.
+                      properties:
+                        key:
+                          maxLength: 253
+                          minLength: 1
+                          pattern: ^[-._a-zA-Z0-9]+$
+                          type: string
+                        name:
+                          maxLength: 253
+                          minLength: 1
+                          pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                          type: string
+                      required:
+                      - key
+                      - name
+                      type: object
+                    value:
+                      description: Literal, including an empty string. Use secretKeyRef
+                        for credentials.
+                      maxLength: 4096
+                      type: string
+                  required:
+                  - name
+                  type: object
+                  x-kubernetes-validations:
+                  - message: exactly one of value or secretKeyRef is required
+                    rule: has(self.value) != has(self.secretKeyRef)
+                maxItems: 32
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+                x-kubernetes-validations:
+                - message: env may not override operator-owned or reserved celld variables
+                  rule: self.all(e, !(['CELLD_NODE','CELLD_ADVERTISE','CELLD_BUCKET','CELLD_DURABILITY','CELLD_ADDR','CELLD_INTERNAL_ADDR','CELLD_WATCH','CELLD_TTL_MS','CELLD_SHUTDOWN_TOTAL_MS','CELLD_TOKIO_THREADS','CELLD_MAX_RESIDENT_CELLS','CELLD_IDLE_EVICT_S'].exists(n,
+                    n == e.name) || e.name.startsWith('CELLD_REEXEC_') || e.name.startsWith('CELLD_OTEL')
+                    || e.name.startsWith('CELLD_UNSAFE_') || e.name.startsWith('CELLD_TEST_')
+                    || e.name.startsWith('CELLD_STRICT_')))
               execution:
                 description: |-
                   Per-fleet runtime sizing. Immutable after creation: the operator never rolls
@@ -434,14 +483,15 @@ spec:
             type: object
             x-kubernetes-validations:
             - message: only replicas, capacity, runtimeImage and maintenance may change;
-                layout, execution and lifecycle tuning are fixed at creation
+                layout, execution, lifecycle and env are fixed at creation
               rule: self.qualification == oldSelf.qualification && self.profile ==
                 oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName
                 && self.storage == oldSelf.storage && self.placement == oldSelf.placement
                 && has(self.execution) == has(oldSelf.execution) && (!has(self.execution)
                 || self.execution == oldSelf.execution) && has(self.lifecycle) ==
                 has(oldSelf.lifecycle) && (!has(self.lifecycle) || self.lifecycle
-                == oldSelf.lifecycle) && self.bucketWorkload == oldSelf.bucketWorkload
+                == oldSelf.lifecycle) && has(self.env) == has(oldSelf.env) && (!has(self.env)
+                || self.env == oldSelf.env) && self.bucketWorkload == oldSelf.bucketWorkload
             - message: Ordered bucketWorkload requires Bucket profile
               rule: self.bucketWorkload != 'Ordered' || self.profile == 'Bucket'
             - message: azCount must equal the zones count

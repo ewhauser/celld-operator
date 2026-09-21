@@ -109,6 +109,17 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 	if opts.LocalTest {
 		env = append(env, corev1.EnvVar{Name: "S3_ENDPOINT", Value: "http://minio.celld-test-store.svc:9000"}, corev1.EnvVar{Name: "AWS_ALLOW_HTTP", Value: "true"}, corev1.EnvVar{Name: "AWS_ACCESS_KEY_ID", Value: "qualification"}, corev1.EnvVar{Name: "AWS_SECRET_ACCESS_KEY", Value: "qualification-only"})
 	}
+	for _, entry := range s.Env {
+		v := corev1.EnvVar{Name: entry.Name}
+		if entry.Value != nil {
+			v.Value = *entry.Value
+		} else if entry.SecretKeyRef != nil {
+			ref := &corev1.SecretKeySelector{Key: entry.SecretKeyRef.Key}
+			ref.Name = entry.SecretKeyRef.Name
+			v.ValueFrom = &corev1.EnvVarSource{SecretKeyRef: ref}
+		}
+		env = append(env, v)
+	}
 	spread := corev1.TopologySpreadConstraint{
 		MaxSkew:            1,
 		TopologyKey:        corev1.LabelTopologyZone,

@@ -17,9 +17,19 @@ IAM roles, worker nodes and EBS CSI, remains administrator-owned.
 
 The mutable request fields are `replicas`, `capacity`, `runtimeImage` and
 `maintenance`. Storage, layout, placement, execution sizing and lifecycle budgets
-are fixed at creation. `maintenance.paused` stops new and unissued work;
+and `env` are fixed at creation. `maintenance.paused` stops new and unissued work;
 `allowCoordinatedDowntime` permits a whole-fleet restart or upgrade. A new
 `restartToken` requests a same-version restart.
+
+`spec.env` adds up to 32 `CELLD_` variables with either a literal `value` or a
+same-namespace `secretKeyRef` (`name` and `key`). Operator-owned identity,
+network, durability, storage and launcher settings cannot be overridden. The
+OpenTelemetry namespace is reserved for its dedicated API. Environment entries
+cannot be edited after fleet creation because the operator does not roll out
+ordinary pod-template changes. Secret values never enter the fleet API, status,
+or operator logs; Kubernetes resolves references when a Pod starts. Rotating a
+Secret does not update running processes: schedule coordinated maintenance to
+restart the fleet after a rotation.
 
 A bucket reservation permanently binds the bucket to the fleet UID. Recreating
 a fleet with the same name does not transfer ownership. Its current-operation

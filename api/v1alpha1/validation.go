@@ -47,6 +47,9 @@ func (f *CelldFleet) Validate() error {
 	if err := validateTuning(&s); err != nil {
 		return err
 	}
+	if err := validateFleetEnv(s.Env); err != nil {
+		return err
+	}
 	switch {
 	case s.BucketWorkload != "" && s.BucketWorkload != "Deployment" && s.BucketWorkload != "Ordered":
 		return fmt.Errorf("bucketWorkload must be Deployment or Ordered")

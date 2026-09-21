@@ -28,7 +28,7 @@ var AddToScheme = SchemeBuilder.AddToScheme
 type CelldFleet struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	// +kubebuilder:validation:XValidation:rule="self.qualification == oldSelf.qualification && self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement && has(self.execution) == has(oldSelf.execution) && (!has(self.execution) || self.execution == oldSelf.execution) && has(self.lifecycle) == has(oldSelf.lifecycle) && (!has(self.lifecycle) || self.lifecycle == oldSelf.lifecycle) && self.bucketWorkload == oldSelf.bucketWorkload",message="only replicas, capacity, runtimeImage and maintenance may change; layout, execution and lifecycle tuning are fixed at creation"
+	// +kubebuilder:validation:XValidation:rule="self.qualification == oldSelf.qualification && self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement && has(self.execution) == has(oldSelf.execution) && (!has(self.execution) || self.execution == oldSelf.execution) && has(self.lifecycle) == has(oldSelf.lifecycle) && (!has(self.lifecycle) || self.lifecycle == oldSelf.lifecycle) && has(self.env) == has(oldSelf.env) && (!has(self.env) || self.env == oldSelf.env) && self.bucketWorkload == oldSelf.bucketWorkload",message="only replicas, capacity, runtimeImage and maintenance may change; layout, execution, lifecycle and env are fixed at creation"
 	Spec   CelldFleetSpec   `json:"spec"`
 	Status CelldFleetStatus `json:"status,omitempty"`
 }
@@ -81,6 +81,39 @@ type CelldFleetSpec struct {
 	// Per-fleet shutdown and termination budgets. Immutable after creation.
 	// +optional
 	Lifecycle *LifecycleSpec `json:"lifecycle,omitempty"`
+	// Additional celld settings, fixed at creation. Secret values stay in the
+	// referenced Secret; changes to Secret data take effect only in new Pods.
+	// +optional
+	// +kubebuilder:validation:MaxItems=32
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:XValidation:rule="self.all(e, !(['CELLD_NODE','CELLD_ADVERTISE','CELLD_BUCKET','CELLD_DURABILITY','CELLD_ADDR','CELLD_INTERNAL_ADDR','CELLD_WATCH','CELLD_TTL_MS','CELLD_SHUTDOWN_TOTAL_MS','CELLD_TOKIO_THREADS','CELLD_MAX_RESIDENT_CELLS','CELLD_IDLE_EVICT_S'].exists(n, n == e.name) || e.name.startsWith('CELLD_REEXEC_') || e.name.startsWith('CELLD_OTEL') || e.name.startsWith('CELLD_UNSAFE_') || e.name.startsWith('CELLD_TEST_') || e.name.startsWith('CELLD_STRICT_')))",message="env may not override operator-owned or reserved celld variables"
+	Env []FleetEnvVar `json:"env,omitempty"`
+}
+
+// +kubebuilder:validation:XValidation:rule="has(self.value) != has(self.secretKeyRef)",message="exactly one of value or secretKeyRef is required"
+type FleetEnvVar struct {
+	// +kubebuilder:validation:Pattern=`^CELLD_[A-Z][A-Z0-9_]*$`
+	// +kubebuilder:validation:MaxLength=128
+	Name string `json:"name"`
+	// Literal, including an empty string. Use secretKeyRef for credentials.
+	// +optional
+	// +kubebuilder:validation:MaxLength=4096
+	Value *string `json:"value,omitempty"`
+	// Secret in the same namespace as the fleet.
+	// +optional
+	SecretKeyRef *SecretKeyRef `json:"secretKeyRef,omitempty"`
+}
+
+type SecretKeyRef struct {
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
+	Name string `json:"name"`
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[-._a-zA-Z0-9]+$`
+	Key string `json:"key"`
 }
 
 // ExecutionSpec sizes the celld container and bounds its residency. Values are
