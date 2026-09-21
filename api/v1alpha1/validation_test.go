@@ -107,6 +107,33 @@ func TestAdditionalEnvironmentValidation(t *testing.T) {
 	}
 }
 
+func TestTelemetryValidation(t *testing.T) {
+	f := valid()
+	f.Spec.Telemetry = &TelemetrySpec{CollectorURL: "http://collector.fleets.svc:4318", Egress: CollectorEgress{PodLabels: map[string]string{"app": "otel"}}, Sampler: "traceidratio", SamplerArg: "0.25", FlushMilliseconds: 5000, FlushBytes: 4096, HeadersSecretKeyRef: &TelemetrySecretKeyRef{Name: "otel-auth", Key: "headers"}}
+	if err := f.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for name, edit := range map[string]func(*TelemetrySpec){
+		"missing egress": func(s *TelemetrySpec) { s.Egress = CollectorEgress{} },
+		"broad CIDR":     func(s *TelemetrySpec) { s.Egress = CollectorEgress{CIDR: "10.0.0.0/8"} },
+		"query":          func(s *TelemetrySpec) { s.CollectorURL += "?token=secret" },
+		"credentials":    func(s *TelemetrySpec) { s.CollectorURL = "https://user:pass@collector.example.com" },
+		"bad sampler":    func(s *TelemetrySpec) { s.Sampler = "unknown" },
+		"bad ratio":      func(s *TelemetrySpec) { s.SamplerArg = "2.0" },
+		"missing ratio":  func(s *TelemetrySpec) { s.SamplerArg = "" },
+		"bad secret":     func(s *TelemetrySpec) { s.HeadersSecretKeyRef.Key = "bad/key" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := valid()
+			f.Spec.Telemetry = &TelemetrySpec{CollectorURL: "http://collector.fleets.svc:4318", Egress: CollectorEgress{PodLabels: map[string]string{"app": "otel"}}, Sampler: "traceidratio", SamplerArg: "0.25", HeadersSecretKeyRef: &TelemetrySecretKeyRef{Name: "otel-auth", Key: "headers"}}
+			edit(f.Spec.Telemetry)
+			if err := f.Validate(); err == nil {
+				t.Fatal("accepted invalid telemetry")
+			}
+		})
+	}
+}
+
 func TestTuningValidation(t *testing.T) {
 	good := valid()
 	good.Spec.Execution = &ExecutionSpec{CPURequest: "500m", CPULimit: "1", MemoryRequest: "1Gi", MemoryLimit: "2Gi", MaxResidentCells: 400, IdleEvictSeconds: 60}

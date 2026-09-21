@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 
@@ -119,6 +120,26 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 			v.ValueFrom = &corev1.EnvVarSource{SecretKeyRef: ref}
 		}
 		env = append(env, v)
+	}
+	if t := s.Telemetry; t != nil {
+		env = append(env, corev1.EnvVar{Name: "CELLD_OTEL", Value: t.CollectorURL})
+		if t.Sampler != "" {
+			env = append(env, corev1.EnvVar{Name: "OTEL_TRACES_SAMPLER", Value: t.Sampler})
+		}
+		if t.SamplerArg != "" {
+			env = append(env, corev1.EnvVar{Name: "OTEL_TRACES_SAMPLER_ARG", Value: t.SamplerArg})
+		}
+		if t.FlushMilliseconds > 0 {
+			env = append(env, corev1.EnvVar{Name: "CELLD_OTEL_FLUSH_MS", Value: strconv.FormatInt(t.FlushMilliseconds, 10)})
+		}
+		if t.FlushBytes > 0 {
+			env = append(env, corev1.EnvVar{Name: "CELLD_OTEL_FLUSH_BYTES", Value: strconv.FormatInt(t.FlushBytes, 10)})
+		}
+		if t.HeadersSecretKeyRef != nil {
+			ref := &corev1.SecretKeySelector{Key: t.HeadersSecretKeyRef.Key}
+			ref.Name = t.HeadersSecretKeyRef.Name
+			env = append(env, corev1.EnvVar{Name: "OTEL_EXPORTER_OTLP_HEADERS", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: ref}})
+		}
 	}
 	spread := corev1.TopologySpreadConstraint{
 		MaxSkew:            1,
@@ -342,6 +363,27 @@ func prerequisites(f *fleet.CelldFleet, opts Options) []client.Object {
 			},
 			Ports: []networkingv1.NetworkPolicyPort{port(9000)},
 		})
+	}
+	if t := f.Spec.Telemetry; t != nil {
+		u, _ := url.Parse(t.CollectorURL) // validated before provisioning
+		p := int32(80)
+		if u.Scheme == "https" {
+			p = 443
+		}
+		if u.Port() != "" {
+			parsed, _ := strconv.Atoi(u.Port())
+			p = int32(parsed)
+		}
+		peer := networkingv1.NetworkPolicyPeer{}
+		if t.Egress.CIDR != "" {
+			peer.IPBlock = &networkingv1.IPBlock{CIDR: t.Egress.CIDR}
+		} else {
+			peer.PodSelector = &metav1.LabelSelector{MatchLabels: t.Egress.PodLabels}
+			if t.Egress.Namespace != "" {
+				peer.NamespaceSelector = &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": t.Egress.Namespace}}
+			}
+		}
+		policy.Spec.Egress = append(policy.Spec.Egress, networkingv1.NetworkPolicyEgressRule{To: []networkingv1.NetworkPolicyPeer{peer}, Ports: []networkingv1.NetworkPolicyPort{port(p)}})
 	}
 	pdb := &policyv1.PodDisruptionBudget{
 		ObjectMeta: metadata(f, f.Name),
