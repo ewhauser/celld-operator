@@ -39,7 +39,7 @@ PersistentFleet advertises each stable StatefulSet Pod DNS name through the
 headless peer Service, which publishes addresses before readiness. celld consults
 the predecessor lease address while recovering retained follower logs, before it
 can publish a new lease. Advertising an ephemeral Pod IP makes those old peer
-addresses unreachable after replacement and block recovery. Older `.2` builds
+addresses unreachable after replacement and blocks recovery. Older `.2` builds
 could declare bounded loss despite those retained disks. Bucket uses a fresh
 runtime identity and Pod address.
 

@@ -73,6 +73,7 @@ export default defineConfig({
                     { label: 'Installation and access', slug: 'troubleshoot/installation' },
                     { label: 'Pending or unready pods', slug: 'troubleshoot/scheduling' },
                     { label: 'Blocked operations', slug: 'troubleshoot/lifecycle' },
+                    { label: 'Runtime exit and recovery', slug: 'troubleshoot/recovery' },
                 ] },
                 { label: 'Reference', collapsed: true, items: [
                     { label: 'Capabilities and limitations', slug: 'reference/limitations' },

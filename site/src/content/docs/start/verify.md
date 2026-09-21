@@ -21,7 +21,7 @@ A healthy first run has the operator Deployment available, three ready runtime P
 | `Blocked=True`, `NamespaceAccessDenied` | Check `fleets` RoleBinding and its subject. For Helm release `celld`, it must name `celld-system/celld-celld-operator`. |
 | `Blocked=True`, NetworkPolicy not attested | Verify CNI enforcement, then set chart `networkPolicyEnforced=true`. |
 | Pods Pending | `kubectl --context YOUR_CONTEXT -n fleets describe pod POD_NAME` shows zone, capacity or pull errors. Strict placement will not silently relax. |
-| Pods start but are not ready | Inspect Pod logs and confirm the runtime ServiceAccount can access the bucket through Pod Identity or IRSA. |
+| Pods start but are not ready | Inspect Pod logs and bucket access. A live launcher can have a stopped child; see [runtime recovery](../../troubleshoot/recovery/). |
 | `Ready=True` but application request fails | Confirm `celld deploy` used the fleet bucket, inspect runtime logs, and use an authorized client label for in-cluster traffic. |
 | `Blocked=True`, storage reservation conflict | Use a new, dedicated bucket. A reservation is bound to a fleet UID and is not released by routine deletion. |
 

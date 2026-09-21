@@ -30,6 +30,6 @@ If you enable a capacity policy, capacity.minReplicas must be at least azCount. 
 
 Use `spec.execution` to set CPU and memory requests and limits for the celld container. Defaults are a `250m` CPU request with no CPU limit, a `512Mi` memory request, and a `1Gi` memory limit. Limits must be at least their requests. Optional `maxResidentCells` and `idleEvictSeconds` bound resident cells and idle hibernation; neither is a throughput guarantee.
 
-Use `spec.lifecycle` to set shutdown time: `shutdownSeconds` defaults to 20 and `terminationGraceSeconds` to 30. The Pod termination grace must leave at least five seconds beyond the shutdown budget. A longer budget allows more time for handoff but does not prove that shutdown completed safely.
+Use `spec.lifecycle` to set shutdown time: `shutdownSeconds` defaults to 20 and `terminationGraceSeconds` to 30. The Pod termination grace must leave at least five seconds beyond the shutdown budget. These values configure celld's shutdown budget and the Pod's termination grace. They do not change the controller's fixed 30-minute current-operation deadline or establish that shutdown completed safely.
 
 Both blocks are immutable after fleet creation. Choose values using application measurements before creating the fleet; existing fleets cannot adopt new settings through a template rollout. See the [tuned sample](../../api/samples/#tuned) and [API fields](../../api/celldfleet/#specexecution). Capacity policy thresholds use absolute CPU and memory values, so review them separately when choosing resource sizes.

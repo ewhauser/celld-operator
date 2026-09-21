@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 490" role="img" aria-labelledby="title description">
   <title id="title">How an application, the operator, and storage connect</title>
-  <desc id="description">An application client sends requests through the port 8080 Service to celld pods. A CelldFleet manifest tells the operator to placement + lifecycle those pods. The pods store data in S3 and, for PersistentFleet, disposable CSI volumes. The operator obtains strict safety proof from the launcher and saves one current operation in Kubernetes.</desc>
+  <desc id="description">An application client sends requests through the port 8080 Service to celld pods. A CelldFleet manifest tells the operator to place those pods and coordinate their lifecycle. The pods store data in S3 and, for PersistentFleet, disposable CSI volumes. The operator obtains strict safety proof from the launcher and saves one current operation in Kubernetes.</desc>
   <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#37684f"/></marker></defs>
   <rect width="880" height="490" rx="16" fill="#f6f7f2"/>
   <g font-family="system-ui, sans-serif" fill="#20382d" text-anchor="middle">

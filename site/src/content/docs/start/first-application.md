@@ -7,7 +7,7 @@ sidebar:
 
 A ready fleet serves an application deployed into **that fleet's S3 bucket**. This guide uses [hello-world](https://github.com/ewhauser/celld-operator/tree/main/examples/hello-world), a small Worker that stores a named ID in a Durable Object and returns JSON.
 
-Use a verified native CLI from the [compatible fork release](https://github.com/ewhauser/celld/releases/tag/v0.5.1-ewhauser.2). This Worker also needs the `esbuild` executable on `PATH`; with Node.js and npm installed, run `npm install --global esbuild@0.25.12` and check `esbuild --version`. The pinned [deployment instructions](https://github.com/ewhauser/celld/blob/main/docs/README.md#deploy-an-application) describe the CLI flags and Wrangler support. Use an approved AWS profile that can deploy to the fleet bucket.
+Use a verified native CLI from the [compatible fork release](https://github.com/ewhauser/celld/releases/tag/v0.5.1-ewhauser.3). This Worker also needs the `esbuild` executable on `PATH`; with Node.js and npm installed, run `npm install --global esbuild@0.25.12` and check `esbuild --version`. The pinned [deployment instructions](https://github.com/ewhauser/celld/blob/v0.5.1-ewhauser.3/docs/README.md#deploy-an-application) describe the CLI flags and Wrangler support. Use an approved AWS profile that can deploy to the fleet bucket.
 
 ## Deploy the app
 

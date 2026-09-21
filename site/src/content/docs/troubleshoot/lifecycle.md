@@ -20,6 +20,9 @@ kubectl --context YOUR_CONTEXT -n fleets get events --sort-by=.lastTimestamp
 | Disk cleanup | Exact PVC/PV/driver/handle, PVC protection, CSI deletion finalizer and attachments. |
 | Joining | Fresh claims, scheduling gates, Pod events and readiness. |
 
+The current-operation deadline is fixed at 30 minutes from intent. It is not
+`spec.lifecycle.shutdownSeconds`, and a later reconcile cannot extend it.
+
 A timed-out Requesting operation may have reached the runtime. The controller
 observes it without granting a fresh deadline; it cannot safely forget it. A
 launcher crash before persisted proof can require manual recovery investigation.

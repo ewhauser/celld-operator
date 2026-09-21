@@ -65,6 +65,19 @@ are written by hand, except for the generated `reference/limitations.md` page.
 `make site` builds it and fails on
 broken internal links; `make site-dev` serves it locally.
 
+Chart validation also needs Helm and the pinned Python dependencies used by CI:
+
+```sh
+python3 -m venv .qualification-venv
+.qualification-venv/bin/pip install -r hack/chart-requirements.txt
+make chart-check
+```
+
+The runtime digest in `hack/runtime-image.txt` is the integration default. When
+changing the recommended fork artifact, update `docs/runtime-versions.md`, the
+website compatibility page, first-fleet manifest and native CLI release link
+together. Keep older qualification receipts pinned to the artifacts they tested.
+
 ## Containers
 
 ```sh
@@ -87,7 +100,7 @@ actionlint .github/workflows/ci.yaml
 
 CI has separate build, race-test, and lint jobs using the same Make targets.
 The kind integration suites need Docker and a three-node kind cluster. Every
-pull request runs the `base` suite; the full matrix runs nightly, on demand from
+pull request runs the `lifecycle` suite; the full matrix runs nightly, on demand from
 the Integration workflow (`workflow_dispatch` with a suite name), and on a pull
 request carrying the `integration` label. Run a suite locally with
 `make integration` or `make integration-<suite>`.
@@ -97,8 +110,10 @@ The module pins controller-runtime and Kubernetes dependencies in `go.mod` and
 CRD/deepcopy reproducibility and `make integration` for a disposable kind cluster
 with real runtime startup and enforced isolation; see [fleet API](docs/fleet-api.md).
 Helm checks, local and Kind integration suites, and gated image/release publication
-remain separate validation layers. Supply `CELLD_RUNTIME_IMAGE` with an actual
-fork digest for integration; no stock-runtime fallback is permitted.
+remain separate validation layers. The Make targets use the published fork digest
+in `hack/runtime-image.txt`;
+`CELLD_RUNTIME_IMAGE` overrides it with another qualified fork digest. No
+stock-runtime fallback is permitted.
 Describe exactly which local, cluster, and AWS checks ran; a passing baseline
 does not qualify celld durability or scaling behavior.
 

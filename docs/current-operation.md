@@ -29,7 +29,7 @@ Its `celld.eric.dev/current-operation` annotation contains:
 
 - Current fleet/workload UIDs, applied replica count and runtime image, plus the
   current PVC UID bindings (at most 100).
-- One operation ID, kind, phase and absolute deadline; source/target replica
+- One operation ID, kind, phase and absolute deadline (30 minutes from intent); source/target replica
   counts and images; the captured desired-request and capacity-policy identity.
 - The current target, or at most 100 targets for coordinated maintenance. Each
   binds Pod UID, container incarnation, endpoint, host UID/boot, launcher
@@ -163,3 +163,8 @@ binary, SHA256 `f9b68e9e9608d74c40a9d8e9dab1846c3532f4f51762dc25e863c0986f2146db
 It uses an empty runtime disk and simulated Kubernetes/CSI resources. Envtest
 separately exercises a real API server and etcd. Neither qualifies replicated
 workload recovery, Kind's full workload controllers, EKS/EBS or real disk cleanup.
+
+The [September 21 `.3` qualification](qualification/native-peer-startup/README.md)
+repeats both real-binary handshakes and adds populated native recovery, hosted
+Kind faults and a [real version upgrade](qualification/runtime-upgrade/README.md).
+The earlier `.2` handshake is historical evidence, not a runtime recommendation.

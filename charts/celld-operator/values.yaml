@@ -6,7 +6,7 @@ image:
   digest: ''
   pullPolicy: IfNotPresent
 imagePullSecrets: []
-# Pin this image by digest to enable launcher-managed PersistentFleet workloads.
+# Required for both Bucket and PersistentFleet; pin the matching operator/launcher image by digest.
 launcherImage: ''
 networkPolicyEnforced: false
 # Namespaces that will hold CelldFleet resources. The chart renders the
