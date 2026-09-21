@@ -7,5 +7,9 @@ docs/
 coverage.out
 *.test
 .qualification-venv/
+.security-venv/
+site/node_modules/
+site/dist/
+site/.astro/
 .qualification-runs/
 **/__pycache__/

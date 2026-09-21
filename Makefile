@@ -11,6 +11,10 @@ GOLANGCI_LINT_BIN := bin/tools/golangci-lint
 RUNTIME_IMAGE ?= $(shell cat hack/runtime-image.txt)
 export CELLD_RUNTIME_IMAGE ?= $(RUNTIME_IMAGE)
 HOST_GOARCH := $(shell go env GOARCH)
+ACTIONLINT_VERSION := v1.7.12
+GOVULNCHECK_VERSION := v1.8.0
+SECURITY_PYTHON := .security-venv/bin/python
+SECURITY_ENV_STAMP := .security-venv/.installed
 
 .PHONY: check check-full build test vet fmt lint lint-linux lint-new test-linux image clean
 
@@ -20,6 +24,23 @@ check: build test lint lint-linux
 
 # Everything check does plus the suites that need Docker or envtest binaries.
 check-full: check test-linux test-envtest
+
+# Online zizmor audits include impostor-commit and ref-version-mismatch when
+# GH_TOKEN is available. CI supplies only its read-only, job-scoped token.
+.PHONY: security-check vuln-check
+$(SECURITY_ENV_STAMP): hack/security-requirements.txt
+	python3 -m venv .security-venv
+	$(SECURITY_PYTHON) -m pip install --require-hashes --only-binary=:all: -r $<
+	touch $@
+
+security-check: $(SECURITY_ENV_STAMP)
+	go run github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION)
+	.security-venv/bin/zizmor --persona pedantic --strict-collection --config .github/zizmor.yaml .github/workflows
+	$(SECURITY_PYTHON) -m unittest discover -s hack -p 'test_*.py'
+
+vuln-check:
+	go mod verify
+	go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
 
 build:
 	go build -o /dev/null $(GO_PACKAGES)

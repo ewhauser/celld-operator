@@ -20,8 +20,7 @@ on:
       - .github/workflows/site.yaml
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: site-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -29,21 +28,25 @@ concurrency:
 
 jobs:
   build:
+    name: site-build
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
       run:
         working-directory: site
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           package_json_file: site/package.json
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version-file: site/.node-version
-          cache: pnpm
-          cache-dependency-path: site/pnpm-lock.yaml
+          package-manager-cache: false
       - run: pnpm install --frozen-lockfile
       # The sync step regenerates every page from ../docs, ../config, ../charts
       # and ../cmd; the links validator fails the build on a broken internal link.
@@ -59,13 +62,14 @@ jobs:
           path: site/dist
 
   deploy:
+    name: site-deploy
     needs: build
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      pages: write
-      id-token: write
+      pages: write # Deploy the validated documentation artifact.
+      id-token: write # Authenticate the Pages deployment with OIDC.
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

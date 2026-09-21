@@ -1,0 +1,19 @@
+{
+  "helm": {
+    "url": "https://get.helm.sh/helm-v4.2.4-linux-amd64.tar.gz",
+    "sha256": "c306b46f719b0a4da32d0f78ee21bf90ce8d602f15b22ab753f0674d1670a7f3",
+    "member": "linux-amd64/helm"
+  },
+  "kind": {
+    "url": "https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64",
+    "sha256": "aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d"
+  },
+  "kubectl": {
+    "url": "https://dl.k8s.io/release/v1.31.4/bin/linux/amd64/kubectl",
+    "sha256": "298e19e9c6c17199011404278f0ff8168a7eca4217edad9097af577023a5620f"
+  },
+  "buildx": {
+    "url": "https://github.com/docker/buildx/releases/download/v0.37.1/buildx-v0.37.1.linux-amd64",
+    "sha256": "9447199cdb435f25880548343c128a4b6650e8891ee598905d8d29d39a8e359b"
+  }
+}
