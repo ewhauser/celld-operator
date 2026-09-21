@@ -24,17 +24,13 @@ canonical = list(yaml.safe_load_all((ROOT / 'config/manager/operator.yaml').read
 assert role['rules'] == next(doc['rules'] for doc in canonical if doc['kind'] == 'ClusterRole')
 # Namespaced privileges never leak into the cluster role, and the per-namespace
 # Role renders exactly the canonical rules into each configured fleet namespace.
-# Pods are the one exception: EC2 fencing must prove a node hosts nothing but the
-# admitted target before terminating the whole instance, which no namespaced Role
-# can authorize. That grant is read-only and limited to list.
-namespaced_kinds = {('', 'secrets'), ('apps', 'deployments'), ('apps', 'statefulsets')}
+namespaced_kinds = {('', 'pods'), ('', 'secrets'), ('', 'configmaps'), ('apps', 'deployments'), ('apps', 'statefulsets')}
 for rule in role['rules']:
     for group in rule['apiGroups']:
         for resource in rule['resources']:
             assert (group, resource) not in namespaced_kinds, f'cluster-wide grant on {group}/{resource}'
             if (group, resource) == ('', 'pods'):
                 assert rule['verbs'] == ['list'], f"cluster-wide pod verbs beyond list: {rule['verbs']}"
-assert any('pods' in rule['resources'] and '' in rule['apiGroups'] for rule in role['rules']), 'EC2 fencing needs a cluster-wide pod list'
 assert not any(doc['kind'] == 'Role' and doc['metadata']['name'].endswith('-fleet') for doc in base)
 fleet_canonical = list(yaml.safe_load_all((ROOT / 'config/rbac/fleet-namespace.yaml').read_text()))
 scoped = render('--set', 'fleetNamespaces={agents-prod,agents-staging}')
@@ -55,11 +51,7 @@ fullpod = next(doc for doc in full if doc['kind'] == 'Deployment')['spec']['temp
 assert fullpod['containers'][0]['image'].endswith('@sha256:' + 'a' * 64)
 assert any(arg.startswith('--launcher-image=') for arg in fullpod['containers'][0]['args'])
 assert not any(doc['kind'] == 'PodDisruptionBudget' for doc in render('--set', 'replicaCount=1'))
-fenced = render('--set-string', 'ec2Fencing.account=123456789012,ec2Fencing.region=us-east-1')
-fenceargs = next(doc for doc in fenced if doc['kind'] == 'Deployment')['spec']['template']['spec']['containers'][0]['args']
-assert '--ec2-fencing-account=123456789012' in fenceargs
-assert '--ec2-fencing-region=us-east-1' in fenceargs
-for bad in ('fleetNamespaces={Bad_Name}', 'ec2Fencing.region=us-east-1', 'ec2Fencing.account=bad', 'replicaCount=0', 'metrics.serviceMonitor.enabled=true', 'metrics.port=8082', 'launcherImage=mutable:latest', 'image.digest=sha256:bad'):
+for bad in ('fleetNamespaces={Bad_Name}', 'replicaCount=0', 'metrics.serviceMonitor.enabled=true', 'metrics.port=8082', 'launcherImage=mutable:latest', 'image.digest=sha256:bad'):
     result = subprocess.run(['helm', 'template', 'example', CHART, '--set', bad], text=True, capture_output=True)
     assert result.returncode != 0, f'invalid chart values accepted: {bad}'
 print('Helm rendering, canonical RBAC, HA, monitoring and invalid-value checks passed.')

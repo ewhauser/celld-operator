@@ -16,21 +16,7 @@ import (
 
 var fleetGauges = map[string]*prometheus.GaugeVec{}
 
-// bucketCollectionSeconds records how long one complete Bucket assessment spent
-// collecting evidence: the Metrics Server and per-pod /state fan-out plus the
-// closing identity sweep. A collection that routinely approaches the five
-// second freshness window blocks every contraction, restart and deletion, so
-// the latency has to be visible on a dashboard before it becomes a blocker.
-// Fleet labels are deliberately omitted: this measures shared cluster latency,
-// and a histogram per fleet would multiply series for no extra diagnosis.
-var bucketCollectionSeconds = prometheus.NewHistogram(prometheus.HistogramOpts{
-	Name:    "celld_bucket_assessment_collection_seconds",
-	Help:    "Duration of evidence collection within one Bucket assessment, against a five second freshness window.",
-	Buckets: []float64{0.1, 0.25, 0.5, 1, 2, 3, 4, 5, 7.5, 10, 15},
-})
-
 func init() {
-	metrics.Registry.MustRegister(bucketCollectionSeconds)
 	for name, help := range map[string]string{
 		"desired_replicas":          "Latest requested replica count (shadow policy recommendations are informational).",
 		"applied_replicas":          "Replica target currently applied to the owned workload.",
@@ -41,11 +27,9 @@ func init() {
 		"replica_observation_valid": "One when the fleet Pod inventory is complete.",
 		"blocked":                   "One when the latest reconcile reports a blocker.",
 		"operation_stalled":         "One when the persisted lifecycle operation exceeded its deadline.",
-		"possible_loss":             "One when the durable journal records possible data loss.",
 		"operation_age_seconds":     "Age of the current durable operation, zero when none.",
 		"blocked_age_seconds":       "Age of the current continuously reported blocker, zero when none.",
-		"journal_bytes":             "Encoded lifecycle journal bytes as written: the reservation annotation while inline, the hydrated size once paged. The hydrated cap is 16 MiB.",
-		"journal_archive_pages":     "Immutable ConfigMap pages the lifecycle journal is currently paged across, zero while it is inline.",
+		"operation_bytes":           "Bounded current operation and policy state bytes, capped at 180 KiB.",
 	} {
 		gauge := prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "celld_fleet_" + name, Help: help}, []string{"namespace", "fleet"})
 		metrics.Registry.MustRegister(gauge)
@@ -71,17 +55,17 @@ func boolean(value bool) float64 {
 	}
 	return 0
 }
-func publishFleetMetrics(f *fleet.CelldFleet, journal journalFootprint, now time.Time) {
+func publishFleetMetrics(f *fleet.CelldFleet, state stateFootprint, now time.Time) {
 	values := map[string]float64{
-		"journal_bytes": float64(journal.bytes), "journal_archive_pages": float64(journal.pages),
+		"operation_bytes":  float64(state.bytes),
 		"desired_replicas": float64(f.Status.DesiredReplicas), "applied_replicas": float64(f.Status.AppliedReplicas),
 		"observed_replicas": float64(f.Status.ObservedReplicas), "ready_replicas": float64(f.Status.ReadyReplicas),
 		"joining_replicas": float64(f.Status.JoiningReplicas), "terminating_replicas": float64(f.Status.TerminatingReplicas),
 		"replica_observation_valid": boolean(f.Status.ReplicaObservationValid),
 		"blocked":                   boolean(meta.IsStatusConditionTrue(f.Status.Conditions, "Blocked")),
-		"operation_stalled":         boolean(f.Status.Lifecycle.Stalled), "possible_loss": boolean(f.Status.Lifecycle.PossibleLoss != ""),
-		"operation_age_seconds": secondsSince(f.Status.Lifecycle.StartedAt, now),
-		"blocked_age_seconds":   secondsSince(f.Status.BlockedSince, now),
+		"operation_stalled":         boolean(f.Status.Lifecycle.Stalled),
+		"operation_age_seconds":     secondsSince(f.Status.Lifecycle.StartedAt, now),
+		"blocked_age_seconds":       secondsSince(f.Status.BlockedSince, now),
 	}
 	for name, value := range values {
 		fleetGauges[name].WithLabelValues(f.Namespace, f.Name).Set(value)

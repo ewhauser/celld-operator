@@ -11,7 +11,7 @@ spec:
   storage:
     bucket: replace-with-another-dedicated-bucket
     region: us-east-1
-    storageClassName: ebs-retain
+    storageClassName: ebs-delete
     sizeGiB: 10
   placement:
     azCount: 3

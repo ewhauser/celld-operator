@@ -13,7 +13,7 @@ import (
 
 // initialClaims binds each deterministic ordinal name by atomic Create before
 // the StatefulSet can consume it. No existing claim is trusted based on labels
-// alone, even if its labels happen to match this fleet. The creation journal
+// alone, even if its labels happen to match this fleet. The creation intent
 // blocks retries after a crash or a partial allocation, preserving every claim.
 func initialClaims(f *fleet.CelldFleet, workload client.Object) []*corev1.PersistentVolumeClaim {
 	sts, ok := workload.(*appsv1.StatefulSet)

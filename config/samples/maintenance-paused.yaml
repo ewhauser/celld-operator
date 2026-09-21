@@ -12,12 +12,13 @@ spec:
     # Change restartToken to request a same-version restart after unpausing.
     # Strict placement must remain valid; small PersistentFleets need explicit downtime.
     # restartToken: maintenance-2026-09
-  # Omission of runtimeImage selects the original immutable v0.5.0 pin.
+  # Set runtimeImage to an independently qualified ghcr.io/ewhauser/celld digest.
+  # There is no default compatible pin; omission blocks provisioning.
   serviceAccountName: runtime
   storage:
     bucket: replace-with-dedicated-bucket
     region: us-east-1
-    storageClassName: retained-ebs
+    storageClassName: ebs-delete
   placement:
     azCount: 3
     zones: [us-east-1a, us-east-1b, us-east-1c]

@@ -17,7 +17,7 @@ var SchemeBuilder = runtime.NewSchemeBuilder(func(s *runtime.Scheme) error {
 })
 var AddToScheme = SchemeBuilder.AddToScheme
 
-// CelldFleet supports journaled capacity and maintenance requests. The /scale
+// CelldFleet supports serialized capacity and maintenance requests. The /scale
 // subresource declared below exposes spec.replicas for external capacity mode.
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
@@ -28,7 +28,7 @@ var AddToScheme = SchemeBuilder.AddToScheme
 type CelldFleet struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	// +kubebuilder:validation:XValidation:rule="self.qualification == oldSelf.qualification && self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement && has(self.execution) == has(oldSelf.execution) && (!has(self.execution) || self.execution == oldSelf.execution) && has(self.lifecycle) == has(oldSelf.lifecycle) && (!has(self.lifecycle) || self.lifecycle == oldSelf.lifecycle) && (self.bucketWorkload == oldSelf.bucketWorkload || (oldSelf.bucketWorkload == 'Deployment' && self.bucketWorkload == 'Ordered' && has(self.maintenance) && has(self.maintenance.orderedMigrationToken) && size(self.maintenance.orderedMigrationToken) > 0 && has(self.maintenance.allowCoordinatedDowntime) && self.maintenance.allowCoordinatedDowntime))",message="only replicas, capacity, runtimeImage, maintenance and an authorized Deployment-to-Ordered migration may change; execution and lifecycle tuning are fixed at creation"
+	// +kubebuilder:validation:XValidation:rule="self.qualification == oldSelf.qualification && self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement && has(self.execution) == has(oldSelf.execution) && (!has(self.execution) || self.execution == oldSelf.execution) && has(self.lifecycle) == has(oldSelf.lifecycle) && (!has(self.lifecycle) || self.lifecycle == oldSelf.lifecycle) && self.bucketWorkload == oldSelf.bucketWorkload",message="only replicas, capacity, runtimeImage and maintenance may change; layout, execution and lifecycle tuning are fixed at creation"
 	Spec   CelldFleetSpec   `json:"spec"`
 	Status CelldFleetStatus `json:"status,omitempty"`
 }
@@ -40,22 +40,22 @@ type CelldFleet struct {
 // +kubebuilder:validation:XValidation:rule="self.placement.zones.all(z, z.startsWith(self.storage.region) && size(z) == size(self.storage.region) + 1 && z.matches('.*[a-z]$'))",message="zones must be standard AZ names in storage.region"
 // +kubebuilder:validation:XValidation:rule="!has(self.capacity) || self.capacity.minReplicas >= self.placement.azCount",message="capacity minimum must cover requested AZs"
 type CelldFleetSpec struct {
-	// Bucket workload layout. Defaults to Deployment; Ordered uses deterministic ordinal removal. Existing fleets require an explicit migration token and downtime permission to change to Ordered.
+	// Bucket workload layout. Defaults to Deployment; Ordered uses deterministic ordinal removal. Layout is immutable.
 	// +kubebuilder:default=Deployment
 	// +kubebuilder:validation:Enum=Deployment;Ordered
 	BucketWorkload string `json:"bucketWorkload,omitempty"`
-	// Requested immutable runtime digest. Omission selects the original v0.5.0 pin.
-	// Unsupported transitions are durably blocked, including rollback.
+	// Requested immutable runtime digest. Required for provisioning; no default release is assumed.
+	// Use a homogeneous compatible fork; release and recovery qualification remain required.
 	// +optional
-	// +kubebuilder:validation:Pattern=`^ghcr.io/denoland/celld@sha256:[a-f0-9]{64}$`
+	// +kubebuilder:validation:Pattern=`^ghcr.io/ewhauser/celld@sha256:[a-f0-9]{64}$`
 	RuntimeImage string `json:"runtimeImage,omitempty"`
-	// Maintenance requests share the retained lifecycle journal.
+	// Maintenance requests share the bounded current operation.
 	Maintenance *MaintenanceSpec `json:"maintenance,omitempty"`
 
 	// A required acknowledgment of the qualification boundary; production is unavailable.
 	// +kubebuilder:validation:Enum=Experimental
 	Qualification string `json:"qualification"`
-	// Storage profile: Bucket uses temporary local disk and S3; PersistentFleet adds retained peer disks. Immutable after creation.
+	// Storage profile: Bucket uses temporary local disk and S3; PersistentFleet adds peer disks disposed after strict shutdown. Immutable after creation.
 	// +kubebuilder:validation:Enum=Bucket;PersistentFleet
 	Profile string `json:"profile"`
 	// Manual replica target. Capacity policy can choose a different applied count without editing this field. Must cover every configured availability zone.
@@ -188,12 +188,9 @@ func (s *CelldFleetSpec) EffectiveLifecycle() LifecycleSpec {
 type MaintenanceSpec struct {
 	// Explicitly permit an operation that stops the entire fleet.
 	AllowCoordinatedDowntime bool `json:"allowCoordinatedDowntime,omitempty"`
-	// Request one-way Deployment-to-Ordered migration together with bucketWorkload: Ordered.
-	// +kubebuilder:validation:MaxLength=128
-	OrderedMigrationToken string `json:"orderedMigrationToken,omitempty"`
 	// Pause new actions and unissued operations; continue recovery of issued actions.
 	Paused bool `json:"paused,omitempty"`
-	// Change to a new nonempty token to request a same-version restart. Completed tokens are not replayed. Placement and verified shutdown prerequisites must pass.
+	// Change to a new nonempty token to request a same-version restart. The current completed token is not replayed. Placement and verified shutdown prerequisites must pass.
 	// +kubebuilder:validation:MaxLength=128
 	RestartToken string `json:"restartToken,omitempty"`
 }
@@ -210,7 +207,7 @@ type StorageSpec struct {
 	// +kubebuilder:validation:MaxLength=32
 	// +kubebuilder:validation:Pattern=`^[a-z]{2}(-[a-z]+)+-[0-9]+$`
 	Region string `json:"region"`
-	// Required only for PersistentFleet; must reference an existing Retain/WaitForFirstConsumer class.
+	// Required only for PersistentFleet; must reference an existing CSI Delete/WaitForFirstConsumer class. Disks are disposed only after strict shutdown proof; CSI deletion protection is required.
 	// +optional
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:validation:MinLength=1
@@ -241,33 +238,27 @@ type PlacementSpec struct {
 	Mode string `json:"mode,omitempty"`
 }
 
-// LifecycleStatus is an informational projection of the retained reservation journal.
+// LifecycleStatus is an informational projection of the bounded current operation.
 // Clearing status never cancels an operation or removes recovery evidence.
 type LifecycleStatus struct {
 	// RFC3339 start time of the active operation, when available.
 	StartedAt string `json:"startedAt,omitempty"`
-	// RFC3339 evidence time of the most recent lifecycle history entry, when available.
+	// RFC3339 completion time of the last completed operation, when available.
 	LastCompletionAt string `json:"lastCompletionAt,omitempty"`
-	// Outcome recorded in the most recent lifecycle history entry.
+	// Outcome recorded in the last completed operation.
 	LastOutcome string `json:"lastOutcome,omitempty"`
 
-	// RetiredBucketSessions left logical membership; physical liveness is unknown.
-	RetiredBucketSessions int32 `json:"retiredBucketSessions,omitempty"`
-	// Reason the most recent recovery metadata assessment could not establish the required state.
-	EvidenceBlocker string `json:"evidenceBlocker,omitempty"`
-	// RFC3339 time of the most recent recorded recovery metadata assessment.
-	EvidenceCheckedAt string `json:"evidenceCheckedAt,omitempty"`
-	// Number of runtime sessions in the most recent recorded evidence inventory.
-	SessionCount int32 `json:"sessionCount,omitempty"`
+	// Reason the current operation cannot progress.
+	Blocker string `json:"blocker,omitempty"`
 	// RFC3339 operation deadline. Passing it reports a stall; it does not cancel recovery.
 	Deadline string `json:"deadline,omitempty"`
 	// Whether the active operation has exceeded its persisted deadline.
 	Stalled bool `json:"stalled,omitempty"`
-	// Kind of a retained maintenance or runtime-transition request.
+	// Kind of a current maintenance or runtime-transition request.
 	RequestKind string `json:"requestKind,omitempty"`
-	// Identifier or token of the retained request.
+	// Identifier or token of the current request.
 	RequestID string `json:"requestID,omitempty"`
-	// Requested runtime image of a retained transition request.
+	// Requested runtime image of a current transition request.
 	TargetImage string `json:"targetImage,omitempty"`
 	// Identifier of the active capacity or maintenance operation.
 	OperationID string `json:"operationID,omitempty"`
@@ -283,8 +274,6 @@ type LifecycleStatus struct {
 	TargetUID string `json:"targetUID,omitempty"`
 	// Runtime session generation of the selected target.
 	TargetGeneration string `json:"targetGeneration,omitempty"`
-	// Retained runtime data-loss finding. Preserve storage and recovery records and investigate; editing status does not clear it.
-	PossibleLoss string `json:"possibleLoss,omitempty"`
 }
 
 type CelldFleetStatus struct {
@@ -313,13 +302,13 @@ type CelldFleetStatus struct {
 	BlockedSince string `json:"blockedSince,omitempty"`
 	// Latest capacity policy recommendation and observation coverage.
 	Capacity CapacityStatus `json:"capacity,omitempty"`
-	// Progress and retained findings for capacity and maintenance operations.
+	// Progress and current findings for capacity and maintenance operations.
 	Lifecycle LifecycleStatus `json:"lifecycle,omitempty"`
 	// Fleet metadata.generation reflected by this status update.
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 	// Ready count from the owned workload status, provided it covers the current workload generation.
 	ReadyReplicas int32 `json:"readyReplicas,omitempty"`
-	// Name of the cluster-scoped storage reservation holding this fleet's recovery records.
+	// Name of the cluster-scoped storage reservation holding this fleet's bucket ownership and current operation.
 	Reservation string `json:"reservation,omitempty"`
 	// Current readiness, progress, blocked, maintenance, and experimental-validation conditions.
 	// +listType=map

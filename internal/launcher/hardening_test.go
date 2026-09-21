@@ -14,9 +14,9 @@ import (
 
 func stopRequest(t *testing.T, s *supervisor, op string, notAfter time.Time) (int, State) {
 	t.Helper()
-	q := Request{Nonce: Nonce(), Operation: op, Generation: "g", NotAfterMS: notAfter.UnixMilli()}
+	q := Request{Nonce: Nonce(), Operation: op, Generation: "g", NotAfterMS: notAfter.UnixMilli(), DeadlineMS: time.Now().Add(time.Minute).UnixMilli()}
 	b, _ := json.Marshal(q)
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1", bytes.NewReader(b))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v2", bytes.NewReader(b))
 	req.Header.Set("X-Celld-MAC", MAC(s.key, "request", q))
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
@@ -30,7 +30,7 @@ func stopRequest(t *testing.T, s *supervisor, op string, notAfter time.Time) (in
 }
 
 func TestStopRequestExpiryIsEnforcedInEveryPhase(t *testing.T) {
-	for _, phase := range []string{"Running", "Stopping", "Stopped"} {
+	for _, phase := range []string{"Running", "Draining", "Stopped"} {
 		t.Run(phase, func(t *testing.T) {
 			s := &supervisor{key: bytes.Repeat([]byte{1}, 32), state: State{Phase: phase, Generation: "g", Operation: "op"}, stop: make(chan struct{}), stopping: phase != "Running"}
 			if code, _ := stopRequest(t, s, "op", time.Now().Add(-time.Second)); code != http.StatusConflict {
@@ -47,7 +47,7 @@ func TestStopRequestExpiryIsEnforcedInEveryPhase(t *testing.T) {
 }
 
 func TestOperationBindsOnlyToRunningChild(t *testing.T) {
-	for _, phase := range []string{"Terminating", "Stopping", "Stopped", "ReleasingInheritedLock", "ExitedUnrequested", "Blocked"} {
+	for _, phase := range []string{"Terminating", "Draining", "Stopped", "ReleasingInheritedLock", "ExitedUnrequested", "Blocked"} {
 		t.Run(phase, func(t *testing.T) {
 			// No operation was accepted while Running; this exit belongs to nobody.
 			s := &supervisor{key: bytes.Repeat([]byte{1}, 32), state: State{Phase: phase, Generation: "g"}, stop: make(chan struct{}), stopping: true}
@@ -151,7 +151,7 @@ func TestReplacedLockFileNeverCertifies(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := awaitPhase(t, c.Address, c.Key, "Blocked")
-	if !strings.Contains(st.Error, "replaced") || st.RestartDenied {
+	if !strings.Contains(st.Error, "replaced") || st.InheritedLockReleased || st.RemovalReady() {
 		t.Fatalf("expected replaced-lock block without a certificate: %+v", st)
 	}
 }

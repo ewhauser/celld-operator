@@ -124,24 +124,6 @@
           }
         }
       ]
-    },
-    "ec2Fencing": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "account",
-        "region"
-      ],
-      "properties": {
-        "account": {
-          "type": "string",
-          "pattern": "^([0-9]{12})?$"
-        },
-        "region": {
-          "type": "string",
-          "pattern": "^([a-z]{2}(-[a-z]+)+-[0-9]+)?$"
-        }
-      }
     }
   }
 }

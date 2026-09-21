@@ -20,16 +20,12 @@ import (
 const (
 	FleetLabel = "celld.eric.dev/fleet-uid"
 	Finalizer  = "celld.eric.dev/lifecycle-protection"
-	Image      = "ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8"
-	// Wait on every container start, including the first restart. exec makes celld PID 1.
-	// This is spacing, not fencing an old process on an unreachable node.
-	launch = "trap 'exit 0' TERM INT; sleep 10 & wait $!; trap - TERM INT; exec /usr/local/bin/celld"
 )
 
 type Options struct {
-	OperatorNamespace             string
-	LauncherImage                 string
-	FencingAccount, FencingRegion string
+	OperatorNamespace string
+	LauncherImage     string
+
 	// Explicit test-only configuration; never inferred from kubeconfig or AWS environment.
 	LocalTest bool
 	// FaultPoint names a lifecycle boundary at which the disposable harness manager
@@ -45,7 +41,7 @@ type Options struct {
 const localCSIDriver = "hostpath.csi.k8s.io"
 
 // faultPoint terminates the manager at a named lifecycle boundary so the kind
-// harness can prove crash-consistency of the journal and workload CAS. It is a
+// harness can prove crash-consistency of the current operation and workload CAS. It is a
 // test-only injector honored solely with --local-test; controller-runtime
 // recovers panics, so a real process exit is required.
 func (r *Reconciler) faultPoint(name string) {
@@ -80,14 +76,20 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 	}
 	mode := "bucket"
 	nodeField := "metadata.uid"
+	advertise := "$(POD_IP):8081"
 	if s.Profile == "PersistentFleet" {
 		mode = "fleet"
 		nodeField = "metadata.name"
+		// Predecessor recovery consults the previous lease's peer address before
+		// publishing a new lease. Stable ordinal DNS reaches retained follower
+		// disks even when replacement Pods receive different IPs. The peers
+		// Service publishes addresses before readiness for this recovery path.
+		advertise = "$(CELLD_NODE)." + f.Name + "-peers." + f.Namespace + ".svc:8081"
 	}
 	env := []corev1.EnvVar{
 		{Name: "POD_IP", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "status.podIP"}}},
 		{Name: "CELLD_NODE", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: nodeField}}},
-		{Name: "CELLD_ADVERTISE", Value: "$(POD_IP):8081"},
+		{Name: "CELLD_ADVERTISE", Value: advertise},
 		{Name: "CELLD_BUCKET", Value: "s3://" + s.Storage.Bucket},
 		{Name: "AWS_REGION", Value: s.Storage.Region},
 		{Name: "CELLD_DURABILITY", Value: mode},
@@ -103,10 +105,6 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 	}
 	if execution.IdleEvictSeconds > 0 {
 		env = append(env, corev1.EnvVar{Name: "CELLD_IDLE_EVICT_S", Value: strconv.Itoa(int(execution.IdleEvictSeconds))})
-	}
-	if runtimeImage(f) != Image {
-		// v0.4.1 requires an explicit drain-token wait under the total stop budget.
-		env = append(env, corev1.EnvVar{Name: "CELLD_DRAIN_TOKEN_WAIT_MS", Value: strconv.Itoa(int(lifecycle.ShutdownSeconds) * 750)})
 	}
 	if opts.LocalTest {
 		env = append(env, corev1.EnvVar{Name: "S3_ENDPOINT", Value: "http://minio.celld-test-store.svc:9000"}, corev1.EnvVar{Name: "AWS_ALLOW_HTTP", Value: "true"}, corev1.EnvVar{Name: "AWS_ACCESS_KEY_ID", Value: "qualification"}, corev1.EnvVar{Name: "AWS_SECRET_ACCESS_KEY", Value: "qualification-only"})
@@ -155,7 +153,6 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 				Name:            "celld",
 				Image:           runtimeImage(f),
 				ImagePullPolicy: corev1.PullIfNotPresent,
-				Command:         []string{"/bin/sh", "-c", launch},
 				Env:             env,
 				SecurityContext: &corev1.SecurityContext{AllowPrivilegeEscalation: new(false), Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}},
 				Ports:           []corev1.ContainerPort{{Name: "application", ContainerPort: 8080}, {Name: "peer", ContainerPort: 8081}},
@@ -184,8 +181,10 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 		pod.Containers[0].Resources.Requests[corev1.ResourceEphemeralStorage] = size
 		pod.Containers[0].Resources.Limits[corev1.ResourceEphemeralStorage] = size
 	}
-	if s.Profile == "PersistentFleet" && opts.LauncherImage != "" {
-		pod.SchedulingGates = []corev1.PodSchedulingGate{{Name: launcherGate}}
+	if opts.LauncherImage != "" {
+		if s.Profile == "PersistentFleet" {
+			pod.SchedulingGates = []corev1.PodSchedulingGate{{Name: launcherGate}}
+		}
 		pod.InitContainers = []corev1.Container{{Name: "install-launcher", Image: opts.LauncherImage, ImagePullPolicy: corev1.PullIfNotPresent, Command: []string{"/celld-launcher", "install", "/launcher/celld-launcher"}, VolumeMounts: []corev1.VolumeMount{{Name: "launcher", MountPath: "/launcher"}}, SecurityContext: pod.Containers[0].SecurityContext.DeepCopy()}}
 		pod.Volumes = append(pod.Volumes, corev1.Volume{Name: "launcher", EmptyDir: &corev1.EmptyDirVolumeSource{}}, corev1.Volume{Name: "launcher-key", Secret: &corev1.SecretVolumeSource{SecretName: launcherSecretName(f), DefaultMode: new(int32(0o440))}})
 		c := &pod.Containers[0]
@@ -225,7 +224,9 @@ func workload(f *fleet.CelldFleet, opts Options) client.Object {
 		}
 	}
 	if orderedBucket(f) {
-		return &appsv1.StatefulSet{ObjectMeta: metadata(f, f.Name), Spec: appsv1.StatefulSetSpec{Replicas: new(f.Spec.Replicas), Selector: selector(f), ServiceName: f.Name + "-peers", PodManagementPolicy: appsv1.OrderedReadyPodManagement, PersistentVolumeClaimRetentionPolicy: &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{WhenDeleted: appsv1.RetainPersistentVolumeClaimRetentionPolicyType, WhenScaled: appsv1.RetainPersistentVolumeClaimRetentionPolicyType}, Template: template, UpdateStrategy: appsv1.StatefulSetUpdateStrategy{Type: appsv1.OnDeleteStatefulSetStrategyType}}}
+		// Ordinal identity determines contraction targets. Parallel management
+		// lets coordinated maintenance remove every already-stopped, unready pod.
+		return &appsv1.StatefulSet{ObjectMeta: metadata(f, f.Name), Spec: appsv1.StatefulSetSpec{Replicas: new(f.Spec.Replicas), Selector: selector(f), ServiceName: f.Name + "-peers", PodManagementPolicy: appsv1.ParallelPodManagement, PersistentVolumeClaimRetentionPolicy: &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{WhenDeleted: appsv1.RetainPersistentVolumeClaimRetentionPolicyType, WhenScaled: appsv1.RetainPersistentVolumeClaimRetentionPolicyType}, Template: template, UpdateStrategy: appsv1.StatefulSetUpdateStrategy{Type: appsv1.OnDeleteStatefulSetStrategyType}}}
 	}
 	return &appsv1.StatefulSet{
 		ObjectMeta: metadata(f, f.Name),
@@ -242,8 +243,9 @@ func workload(f *fleet.CelldFleet, opts Options) client.Object {
 			},
 			VolumeClaimTemplates: []corev1.PersistentVolumeClaim{
 				{
-					Name:   "data",
-					Labels: labels(f),
+					Name:        "data",
+					Labels:      labels(f),
+					Annotations: map[string]string{"celld.eric.dev/storage-reservation": reservationName(f)},
 					Spec: corev1.PersistentVolumeClaimSpec{
 						AccessModes:      persistentAccessModes(opts),
 						StorageClassName: new(f.Spec.Storage.StorageClassName),
@@ -316,7 +318,7 @@ func prerequisites(f *fleet.CelldFleet, opts Options) []client.Object {
 			},
 		},
 	}
-	if f.Spec.Profile == "PersistentFleet" && opts.LauncherImage != "" {
+	if opts.LauncherImage != "" {
 		policy.Spec.Ingress = append(policy.Spec.Ingress, networkingv1.NetworkPolicyIngressRule{From: []networkingv1.NetworkPolicyPeer{operator}, Ports: []networkingv1.NetworkPolicyPort{port(8083)}})
 	}
 	if opts.LocalTest {

@@ -29,7 +29,7 @@ kubectl --context YOUR_CONTEXT -n fleets get celldfleet my-fleet \
   -o json | jq '.status.capacity'
 ```
 
-`ScaleOut` can add bounded capacity after a stable high-demand window. `spec.replicas` remains your manual target; the applied count can exceed it. `Automatic` also asks for reductions, but production automatic contraction reports `BucketAutomaticUnqualified` or `PersistentAutomaticUnqualified` until its release gate is closed. Do not use that mode expecting production scale-in.
+`ScaleOut` can add bounded capacity after a stable high-demand window. `spec.replicas` remains your manual target; the applied count can exceed it. `Automatic` also requests reductions. Every request uses the same strict current-operation executor as manual scaling; only Ordered Bucket and PersistentFleet support exact contraction. Cloud qualification remains outstanding. `External` instead assigns `spec.replicas` to one `/scale` writer and disables built-in demand collection.
 
 `PendingCapacity` means a requested addition has not become useful. `IneffectiveCapacity` means it passed its provisioning deadline; inspect Pods, PVCs, and node capacity. `IncompleteMetrics` and `RepeatedSamples` reset stabilization. `ObservingRedistribution` waits to see whether additions relieve incumbents; `LoadNotRedistributed` holds further pressure-driven batches. The operator does not count an idle new Pod as useful redistribution. These reasons are explained in [conditions](../../reference/conditions/) and [capacity troubleshooting](../../troubleshoot/scheduling/).
 

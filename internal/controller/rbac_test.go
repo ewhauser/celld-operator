@@ -98,31 +98,26 @@ func TestFleetNamespaceWithoutRoleIsReportedNotReconciled(t *testing.T) {
 // ClusterRole in config/manager/operator.yaml. Unit tests run against the fake
 // client, which never enforces RBAC, so a missing verb stays invisible until the
 // operator is Forbidden in a real cluster. This test reads the shipped manifest
-// and asserts the grants the reconciler depends on, including the cluster-wide
-// Pod list EC2 fencing performs before terminating a whole instance
-// (internal/controller/aws_fencing.go).
+// and asserts the grants the current-operation reconciler depends on.
 func TestClusterRoleGrantsTheVerbsTheReconcilerUses(t *testing.T) {
 	role := clusterRole(t)
 	for _, want := range []struct{ group, resource, verb string }{
 		{"celld.eric.dev", "celldfleets", "list"},
 		{"celld.eric.dev", "celldfleets", "patch"},
 		{"celld.eric.dev", "celldstoragereservations", "update"},
-		{"", "pods", "list"},
 		{"", "persistentvolumes", "get"},
 		{"", "nodes", "get"},
-		{"", "nodes", "patch"},
-		{"storage.k8s.io", "volumeattachments", "list"},
 		{"storage.k8s.io", "storageclasses", "get"},
+		{"storage.k8s.io", "volumeattachments", "list"},
 	} {
 		if !grantedByClusterRole(role, want.group, want.resource, want.verb) {
 			t.Errorf("ClusterRole does not grant %q on %s/%s; the reconciler would be Forbidden in a real cluster", want.verb, want.group, want.resource)
 		}
 	}
-	// Pods are read cluster-wide only to prove node dedication before
-	// TerminateInstances. Every Pod write stays in the per-namespace Role.
-	for _, verb := range []string{"get", "watch", "create", "update", "patch", "delete", "deletecollection"} {
+	// No Pod access belongs at cluster scope after removal of EC2 fencing.
+	for _, verb := range []string{"get", "list", "watch", "create", "update", "patch", "delete", "deletecollection"} {
 		if grantedByClusterRole(role, "", "pods", verb) {
-			t.Errorf("ClusterRole grants %q on pods; only list belongs at cluster scope", verb)
+			t.Errorf("ClusterRole grants %q on pods; pod access belongs in the fleet namespace", verb)
 		}
 	}
 	if grantedByClusterRole(role, "", "secrets", "get") {
@@ -266,23 +261,4 @@ func (c *manifestSubresource) Update(ctx context.Context, obj client.Object, opt
 func (c *manifestSubresource) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
 	c.parent.check(obj, obj.GetNamespace(), "patch", c.name)
 	return c.SubResourceClient.Patch(ctx, obj, patch, opts...)
-}
-
-func TestManifestsAuthorizeIssuedFencingCalls(t *testing.T) {
-	p, m, api := infrastructureSetup(t)
-	audited := auditManifestClient(t, p.r.Client)
-	p.r.Client = audited
-	for range 3 {
-		if _, err := p.r.ensureInfrastructureFence(t.Context(), p.f, p.res, p.j, m, "removal"); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if len(api.terminations) != 1 {
-		t.Fatal("fencing effect not exercised")
-	}
-	for _, key := range []string{"/pods/list/", "/nodes/patch/", "celld.eric.dev/celldstoragereservations/update/"} {
-		if !audited.seen[key] {
-			t.Errorf("required API path not exercised: %s", key)
-		}
-	}
 }

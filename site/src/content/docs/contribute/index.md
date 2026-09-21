@@ -1,28 +1,34 @@
 ---
-title: Contribute to celld operator
-description: Build the operator, improve its documentation, and find architecture and test records.
+title: Contribute
+description: Build the operator and maintain its strict lifecycle contracts and documentation.
 ---
 
-Start here to change the operator or its documentation. If you are deploying a fleet,
-use [Get started](../start/overview/) or the [operation guides](../operate/scaling/).
-
-## Build and test
-
-Clone the [repository](https://github.com/ewhauser/celld-operator), install the Go
-version in `go.mod` and a C compiler, then run from the repository root:
+Use the Go version in `go.mod`, a C compiler and Docker, then run:
 
 ```bash
 make check
+make test-envtest
+make test-linux
 ```
 
-This builds the binaries and runs race-enabled tests and lint. Follow
-[CONTRIBUTING.md](https://github.com/ewhauser/celld-operator/blob/main/CONTRIBUTING.md)
-for generated manifests, container images, and integration tests. Integration tests
-create disposable local clusters; local results do not validate EKS or EBS behavior.
+See [CONTRIBUTING.md](https://github.com/ewhauser/celld-operator/blob/main/CONTRIBUTING.md)
+for generated manifests, lint and integration commands. Read
+[qualification](../qualification/) before extending test claims.
 
-## Work on the documentation
+## Contracts
 
-With Node 24–26 and the pnpm version in `site/package.json`:
+- [Architecture](../concepts/architecture/) and [current operations](../contracts/current-operation/).
+- [celld wire protocol](../contracts/runtime-control-plane/) and [launcher supervision](../contracts/launcher-supervision/).
+- [Disposable disks](../contracts/disposable-disks/) and [capacity policy](../contracts/capacity-policy/).
+- [Current decision](../decisions/0022-celld-control-plane/).
+
+The old private-S3 adapters, journal archive, EC2 fencing and disk-reuse harness
+are removed. Their source and past reports remain in Git history, not in current
+operating instructions.
+
+## Documentation
+
+Use Node 24–26 and the pnpm version in `site/package.json`:
 
 ```bash
 cd site
@@ -30,40 +36,11 @@ pnpm install --frozen-lockfile
 pnpm dev --background
 ```
 
-Open `http://localhost:4321/celld-operator/`. Stop the server with
-`pnpm exec astro dev stop`. Before submitting a change, run `pnpm build`; it
-generates references, builds search, and checks internal links.
+Stop with `pnpm exec astro dev stop`. Run `pnpm build` to generate references,
+build search and validate links. Edit user guides in `site/src/content/docs`;
+implementation pages are synced from `docs/`, while API and chart references
+come from generated CRDs and chart sources.
 
-User guides live in `site/src/content/docs/`. Write each guide around a task:
-its prerequisites, commands, expected results, completion checks, and ways to
-resolve failures. Check commands against the chart, API, and controller. Describe
-current behavior separately from what was tested.
-
-API fields come from the Go API comments and generated CRDs; update those sources
-and run `make generate` and `make chart-sync`. The current capability matrix comes
-from `docs/critical-features.md`. Engineering records below are copied into the site
-at build time. Edit their repository sources, not the ignored generated copies.
-
-## Understand the implementation
-
-- [Architecture](../concepts/architecture/): components, workloads, and data flow.
-- [How operations resume](../concepts/lifecycle-journal/): persisted operations and retained recovery records.
-- [How removal is checked](../concepts/safety-model/): why uncertain operations stop for investigation.
-- The [fleet API and installation contract](../contracts/fleet-api/) and the protocol pages it links to describe controller behavior in detail; they are reachable from the guides and design records rather than the navigation.
-
-## Design and test archive
-
-[Design records](../decisions/) explain past decisions.
-[Test reports](../qualification/) describe the versions and environments used in
-each run. They are historical evidence, not installation instructions or a live
-support matrix. These records are excluded from user search so old results cannot
-masquerade as current guidance; use the expandable contributor navigation to browse them.
-
-Historical investigations include [runtime behavior](../history/runtime-qualification/),
-[shutdown](../history/shutdown-evidence/), [S3 recovery records](../history/s3-recovery-evidence/),
-[shared lifecycle behavior](../history/shared-lifecycle-safety/),
-[persistent storage](../history/persistent-fleet-implementation-gap/), and the
-[early implementation review](../history/pre-release-review/).
-
-For current behavior and outstanding validation, use
-[Capabilities and limitations](../reference/limitations/).
+Validate commands against current code and distinguish implementation, local
+tests, real cluster tests and AWS qualification. A local site build does not
+publish documentation or validate the installation guide on EKS.

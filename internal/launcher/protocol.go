@@ -1,4 +1,4 @@
-// Package launcher supervises the pinned, unmodified celld invocation.
+// Package launcher supervises one exact celld invocation and captures its strict shutdown result.
 package launcher
 
 import (
@@ -11,14 +11,17 @@ import (
 
 type Request struct {
 	Nonce, Operation, Generation string
-	NotAfterMS                   int64
-	Handoff                      *Handoff `json:",omitempty"`
+	// NotAfterMS bounds request replay; DeadlineMS bounds the first accepted
+	// operation. Retries cannot extend that operation deadline.
+	NotAfterMS, DeadlineMS int64
 }
 type State struct {
 	PodUID, Node, Host, Invocation, Generation, Phase, Operation, Error string
 	PID                                                                 int
-	BootID, DiskID, PreviousHost                                        string `json:",omitempty"`
-	RestartDenied                                                       bool   `json:",omitempty"`
+	BootID, DiskID                                                      string
+	DeadlineMS                                                          int64
+	Removal                                                             RemovalResult
+	ChildExited, InheritedLockReleased, RestartDenied                   bool
 }
 type Response struct {
 	Nonce string
@@ -43,8 +46,24 @@ func Verify(key []byte, domain string, value any, signature string) bool {
 	return e == nil && hmac.Equal(want, got)
 }
 
-// Handoff authorizes one waiting invocation, never an arbitrary future opener.
-// The controller obtains positive predecessor termination before sending it.
-type Handoff struct {
-	Invocation, Generation, PodUID, Host, BootID, DiskID, PreviousHost string `json:",omitempty"`
+// RemovalResult is the one current runtime operation, captured through the typed
+// client. It is volatile: a disk restart-deny marker never reconstructs it.
+// Mode is fixed by the strict request and validated by the control-plane client.
+type RemovalResult struct {
+	Operation, Generation, Mode, Phase, Blocker string
+	ControlOnly, DataSafe                       bool
+}
+
+func (s State) RuntimeDataSafe() bool {
+	r := s.Removal
+	return s.Operation != "" && s.Generation != "" && r.Operation == s.Operation &&
+		r.Generation == s.Generation && r.Mode == "remove-disk" && r.Phase == "data_safe" &&
+		r.ControlOnly && r.Blocker == "" && r.DataSafe
+}
+
+// RemovalReady requires independent runtime, process, lock and restart proofs.
+// Callers must also bind the response to the expected Kubernetes invocation.
+func (s State) RemovalReady() bool {
+	return s.Phase == "Stopped" && s.RuntimeDataSafe() && s.ChildExited &&
+		s.InheritedLockReleased && s.RestartDenied
 }

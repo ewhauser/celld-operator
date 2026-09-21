@@ -1,60 +1,55 @@
 ---
 title: Create your first fleet
-description: Apply a Bucket CelldFleet and wait for its runtime Service to become ready.
-sidebar:
-  order: 4
+description: Create an Ordered Bucket fleet with an explicit compatible runtime digest.
 ---
 
-import { Steps } from '@astrojs/starlight/components';
+Complete [installation](../install/) and give `fleets/celld-runtime` access to a
+new dedicated bucket. Choose actual zones in the bucket's region. This example explicitly pins the
+published compatible fork; no runtime image default exists.
 
-The operator is installed, `fleets/celld-runtime` has access to your dedicated bucket, and the operator has its separate read-only identity. This example creates three Bucket replicas across three real zones in the bucket's region. Use a **new bucket** for this fleet; a reservation stays associated with its fleet UID.
+```yaml title="my-fleet.yaml"
+apiVersion: celld.eric.dev/v1alpha1
+kind: CelldFleet
+metadata:
+  name: my-fleet
+  namespace: fleets
+spec:
+  qualification: Experimental
+  profile: Bucket
+  bucketWorkload: Ordered
+  runtimeImage: ghcr.io/ewhauser/celld@sha256:a00da2bcaeaee6879d658477cd1bdb354a5de55fa9e7f0ab5e2fd95e6e0ce080
+  replicas: 3
+  serviceAccountName: celld-runtime
+  storage:
+    bucket: YOUR_DEDICATED_BUCKET
+    region: YOUR_AWS_REGION
+    sizeGiB: 10
+  placement:
+    azCount: 3
+    zones: [YOUR_REGION_ZONE_A, YOUR_REGION_ZONE_B, YOUR_REGION_ZONE_C]
+    mode: Strict
+```
 
-<Steps>
+Apply it to your explicit context:
 
-1. **Save the fleet manifest as `my-fleet.yaml`.** Replace the bucket, region and zones with your own values. The listed zones must exist in your cluster and region; at least one eligible node is needed for each replica. The runtime image is omitted so the operator selects its pinned celld v0.5.0 digest.
+```bash
+kubectl --context YOUR_CONTEXT apply -f my-fleet.yaml
+kubectl --context YOUR_CONTEXT -n fleets wait celldfleet/my-fleet   --for=condition=InfrastructureReady=True --timeout=180s
+kubectl --context YOUR_CONTEXT -n fleets rollout status statefulset/my-fleet --timeout=300s
+kubectl --context YOUR_CONTEXT -n fleets get statefulset/my-fleet,service/my-fleet
+kubectl --context YOUR_CONTEXT -n fleets get celldfleet my-fleet -o yaml
+```
 
-   ```yaml title="my-fleet.yaml"
-   apiVersion: celld.eric.dev/v1alpha1
-   kind: CelldFleet
-   metadata:
-     name: my-fleet
-     namespace: fleets
-   spec:
-     qualification: Experimental
-     profile: Bucket
-     replicas: 3
-     serviceAccountName: celld-runtime
-     storage:
-       bucket: YOUR_DEDICATED_BUCKET
-       region: YOUR_AWS_REGION
-       sizeGiB: 10
-     placement:
-       azCount: 3
-       zones: [YOUR_REGION_ZONE_A, YOUR_REGION_ZONE_B, YOUR_REGION_ZONE_C]
-       mode: Strict
-   ```
+This Ordered Bucket fleet has temporary disks and exact highest-ordinal
+contraction. The default Deployment layout cannot safely choose a single scale-in
+victim. Layout is immutable after creation.
 
-2. **Apply it to the explicit context.**
+Look for three ready replicas, `Ready=True` and `Blocked=False`.
+`InfrastructureReady=True` alone does not mean Pods have scheduled.
+`ProductionQualified=False` is expected. See [verification](../verify/) if the
+workload does not become ready.
 
-   ```bash
-   kubectl --context YOUR_CONTEXT apply -f my-fleet.yaml
-   kubectl --context YOUR_CONTEXT -n fleets get celldfleet my-fleet
-   ```
-
-3. **Wait for the workload and inspect status.** The Bucket profile creates a Deployment named `my-fleet` and an application Service of the same name on port 8080. The workload should have three ready replicas when all nodes and bucket credentials work.
-
-   ```bash
-   kubectl --context YOUR_CONTEXT -n fleets wait celldfleet/my-fleet \
-     --for=condition=InfrastructureReady=True --timeout=180s
-   kubectl --context YOUR_CONTEXT -n fleets rollout status deployment/my-fleet --timeout=300s
-   kubectl --context YOUR_CONTEXT -n fleets get deployment/my-fleet,service/my-fleet
-   kubectl --context YOUR_CONTEXT -n fleets get celldfleet my-fleet -o yaml
-   ```
-
-</Steps>
-
-Look for `Ready=True`, `Blocked=False`, and `readyReplicas: 3` after reconciliation. `InfrastructureReady=True` only means the Kubernetes objects match; it can be true while Pods are Pending. `ProductionQualified=False` is expected for this experimental release. [Verify and observe](../verify/) explains those signals and where to look if they do not appear.
-
-The application Service is internal. Only client Pods in `fleets` labeled `celld.eric.dev/client-of: my-fleet` can reach it through the generated NetworkPolicy. Port 8081 is private to peers and the operator. For a retained-disk setup, read [PersistentFleet profile](../../concepts/profiles/) before creating it; it needs EBS CSI, a retained StorageClass and a digest-pinned launcher image.
-
-Next: [deploy an application and send a request](../first-application/).
+The application Service uses port 8080. In-cluster clients need the label
+`celld.eric.dev/client-of: my-fleet` in the fleet namespace. Internal port 8081
+and launcher port 8083 stay private. Continue with
+[your first application](../first-application/).

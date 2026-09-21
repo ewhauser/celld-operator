@@ -1,0 +1,76 @@
+go run ./hack/integration --suite faults
+Creating isolated cluster celld-strict-a5c4933e
+Pulling into disposable nodes: ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af
+Pulled image: ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af on celld-strict-a5c4933e-control-plane
+Pulled image: ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af on celld-strict-a5c4933e-worker2
+Pulled image: ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af on celld-strict-a5c4933e-worker
+Loaded cached image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+Loaded cached image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+Loaded cached image: curlimages/curl:8.12.1
+Loaded cached image: registry.k8s.io/metrics-server/metrics-server:v0.8.0
+Loaded cached image: ghcr.io/shopify/toxiproxy:2.12.0
+Loaded cached image: registry.k8s.io/sig-storage/csi-provisioner:v6.3.0
+Loaded cached image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.17.0
+Loaded cached image: registry.k8s.io/sig-storage/hostpathplugin:v1.17.1
+Loaded cached image: registry.k8s.io/sig-storage/livenessprobe:v2.19.0
+PASS: create two isolated test buckets
+PASS: qualification app deployed to bucket-alpha
+PASS: qualification app deployed to bucket-beta
+PASS: pre-existing PVC blocks initial StatefulSet creation
+PASS: both runtime profiles ready through operator reconciliation
+PASS: strict replicas use distinct nodes within the configured zone
+PASS: strict placement blocks a missing eligible zone
+PASS: probe same-fleet running
+PASS: probe client running
+PASS: probe client-beta running
+PASS: probe untrusted running
+PASS: probe operator running
+PASS: application writes readable only in their own fleet storage scope
+PASS: same-fleet/operator peer access, cross-fleet/untrusted/client peer denial, ClusterIP health routing
+PASS: cross-namespace storage conflict blocked
+PASS: fleet in a namespace without the fleet Role is reported, not reconciled
+PASS: schema rejects invalid specs and lifecycle mutations
+PASS: additional probe and bucket override are reported as unsafe drift
+PASS: restored original template matches normalized API defaults
+PASS: alpha strict scale to 3
+PASS: one manager Pod with the requested fault configuration
+PASS: manager crashes at before-effect: alpha
+PASS: one manager Pod with the requested fault configuration
+PASS: manager resumes exact operation: alpha
+PASS: alpha 12/12 acknowledged writes readable
+PASS: alpha strict scale to 3
+PASS: one manager Pod with the requested fault configuration
+PASS: manager crashes at after-effect: alpha
+PASS: one manager Pod with the requested fault configuration
+PASS: manager resumes exact operation: alpha
+PASS: alpha 12/12 acknowledged writes readable
+PASS: alpha strict scale to 3
+PASS: alpha strict scale to 2
+PASS: beta strict scale to 3
+PASS: one manager Pod with the requested fault configuration
+PASS: manager crashes at before-effect: beta
+PASS: one manager Pod with the requested fault configuration
+PASS: manager resumes exact operation: beta
+PASS: beta 12/12 acknowledged writes readable
+PASS: beta strict scale to 3
+PASS: one manager Pod with the requested fault configuration
+PASS: manager crashes at after-effect: beta
+PASS: one manager Pod with the requested fault configuration
+PASS: manager resumes exact operation: beta
+PASS: beta 12/12 acknowledged writes readable
+PASS: beta strict scale to 3
+PASS: beta strict scale to 2
+PASS: alpha strict scale to 3
+PASS: alpha strict scale to 2
+PASS: alpha 12/12 acknowledged writes readable
+PASS: probe launcher-inspector running
+PASS: S3 lease expiry stops every runtime without removal authority
+PASS: restoring S3 does not restart failed children or delete disks held for 12 s
+PASS: lease-loss fail-stop preserves all Pod/PVC/PV identities; no strict proof or automatic restart
+PASS: explicit administrative Pod replacement restores both fleets
+PASS: alpha 12/12 acknowledged writes readable
+PASS: beta 12/12 acknowledged writes readable
+PASS: explicit administrative recovery uses new Pod/runtime identities and retains same-host PersistentFleet disks and every acknowledged write
+PASS: both profiles preserve acknowledged writes across before/after-effect manager crashes, storage latency and explicit administrative recovery after lease loss
+PASS: strict control-plane integration suite faults runtime ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af
+Cleaning up only cluster celld-strict-a5c4933e

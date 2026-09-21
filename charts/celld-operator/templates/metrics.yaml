@@ -55,11 +55,6 @@ spec:
           labels: {severity: warning}
           annotations:
             summary: Fleet lifecycle exceeded its operation deadline
-        - alert: CelldFleetPossibleDataLoss
-          expr: celld_fleet_possible_loss == 1
-          labels: {severity: critical}
-          annotations:
-            summary: Runtime reported possible data loss; controlled disruption is blocked
         - alert: CelldFleetUnavailable
           expr: (celld_fleet_ready_replicas == 0) and (celld_fleet_applied_replicas > 0)
           for: 5m

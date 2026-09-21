@@ -1,21 +1,20 @@
 # Documentation
 
-For deployment and operations, start with the [documentation website](https://ewhauser.github.io/celld-operator/)
-or the [user guide sources](../site/src/content/docs/start/overview.md).
+The [user guide](../site/src/content/docs/start/overview.md) covers installation,
+configuration and operations. The [capability matrix](critical-features.md)
+distinguishes implemented behavior from qualification.
 
-- [Install the operator](../site/src/content/docs/start/install.mdx).
-- [Create a fleet](../site/src/content/docs/start/first-fleet.mdx) and [run an application](../site/src/content/docs/start/first-application.md).
-- [Configure storage and AWS access](../site/src/content/docs/configure/profiles.md).
-- [Scale](../site/src/content/docs/operate/scaling.md), [restart](../site/src/content/docs/operate/restart.md), and [monitor](../site/src/content/docs/operate/monitoring.md) a fleet.
-- [Troubleshoot](../site/src/content/docs/troubleshoot/index.md).
-- [Current capabilities and limitations](critical-features.md).
+The implementation has three authority boundaries:
 
-This directory contains implementation details, architecture decisions, and
-recorded test evidence for contributors. These records describe different points
-in the project's development. Use the current capability matrix for supported
-operations and validation limits; a historical passing test is not a production
-support claim.
+- [celld control plane](runtime-control-plane.md): generation-bound data safety.
+- [Launcher](launcher-supervision.md): exact process exit and restart exclusion.
+- [Current operation](current-operation.md): bounded Kubernetes authority and conditional infrastructure changes.
 
-[Contribute](../site/src/content/docs/contribute/index.md) explains the code and
-site workflows. [Design records](decisions/README.md) preserve decisions and
-[qualification reports](qualification/README.md) preserve test results.
+Additional contributor references:
+
+- [Fleet API](fleet-api.md), [operations](operations.md) and [capacity policy](capacity-policy.md).
+- [Ordered Bucket layout](ordered-bucket.md) and [runtime requirements](runtime-versions.md).
+- [Architecture decision](decisions/README.md) and [qualification](qualification/README.md).
+
+Superseded journal, recovery-metadata and fencing implementations and their test
+artifacts are available in Git history. They are not supported deployment paths.

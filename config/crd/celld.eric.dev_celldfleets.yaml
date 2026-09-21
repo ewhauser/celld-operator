@@ -24,7 +24,7 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          CelldFleet supports journaled capacity and maintenance requests. The /scale
+          CelldFleet supports serialized capacity and maintenance requests. The /scale
           subresource declared below exposes spec.replicas for external capacity mode.
         properties:
           apiVersion:
@@ -49,8 +49,7 @@ spec:
               bucketWorkload:
                 default: Deployment
                 description: Bucket workload layout. Defaults to Deployment; Ordered
-                  uses deterministic ordinal removal. Existing fleets require an explicit
-                  migration token and downtime permission to change to Ordered.
+                  uses deterministic ordinal removal. Layout is immutable.
                 enum:
                 - Deployment
                 - Ordered
@@ -300,25 +299,20 @@ spec:
                   rule: has(self.shutdownSeconds) || !has(self.terminationGraceSeconds)
                     || self.terminationGraceSeconds >= 25
               maintenance:
-                description: Maintenance requests share the retained lifecycle journal.
+                description: Maintenance requests share the bounded current operation.
                 properties:
                   allowCoordinatedDowntime:
                     description: Explicitly permit an operation that stops the entire
                       fleet.
                     type: boolean
-                  orderedMigrationToken:
-                    description: 'Request one-way Deployment-to-Ordered migration
-                      together with bucketWorkload: Ordered.'
-                    maxLength: 128
-                    type: string
                   paused:
                     description: Pause new actions and unissued operations; continue
                       recovery of issued actions.
                     type: boolean
                   restartToken:
                     description: Change to a new nonempty token to request a same-version
-                      restart. Completed tokens are not replayed. Placement and verified
-                      shutdown prerequisites must pass.
+                      restart. The current completed token is not replayed. Placement
+                      and verified shutdown prerequisites must pass.
                     maxLength: 128
                     type: string
                 type: object
@@ -359,7 +353,8 @@ spec:
                 type: object
               profile:
                 description: 'Storage profile: Bucket uses temporary local disk and
-                  S3; PersistentFleet adds retained peer disks. Immutable after creation.'
+                  S3; PersistentFleet adds peer disks disposed after strict shutdown.
+                  Immutable after creation.'
                 enum:
                 - Bucket
                 - PersistentFleet
@@ -381,9 +376,9 @@ spec:
                 type: integer
               runtimeImage:
                 description: |-
-                  Requested immutable runtime digest. Omission selects the original v0.5.0 pin.
-                  Unsupported transitions are durably blocked, including rollback.
-                pattern: ^ghcr.io/denoland/celld@sha256:[a-f0-9]{64}$
+                  Requested immutable runtime digest. Required for provisioning; no default release is assumed.
+                  Use a homogeneous compatible fork; release and recovery qualification remain required.
+                pattern: ^ghcr.io/ewhauser/celld@sha256:[a-f0-9]{64}$
                 type: string
               serviceAccountName:
                 description: Existing ServiceAccount in the fleet namespace with the
@@ -419,7 +414,9 @@ spec:
                     type: integer
                   storageClassName:
                     description: Required only for PersistentFleet; must reference
-                      an existing Retain/WaitForFirstConsumer class.
+                      an existing CSI Delete/WaitForFirstConsumer class. Disks are
+                      disposed only after strict shutdown proof; CSI deletion protection
+                      is required.
                     maxLength: 253
                     minLength: 1
                     pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
@@ -436,20 +433,15 @@ spec:
             - storage
             type: object
             x-kubernetes-validations:
-            - message: only replicas, capacity, runtimeImage, maintenance and an authorized
-                Deployment-to-Ordered migration may change; execution and lifecycle
-                tuning are fixed at creation
+            - message: only replicas, capacity, runtimeImage and maintenance may change;
+                layout, execution and lifecycle tuning are fixed at creation
               rule: self.qualification == oldSelf.qualification && self.profile ==
                 oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName
                 && self.storage == oldSelf.storage && self.placement == oldSelf.placement
                 && has(self.execution) == has(oldSelf.execution) && (!has(self.execution)
                 || self.execution == oldSelf.execution) && has(self.lifecycle) ==
                 has(oldSelf.lifecycle) && (!has(self.lifecycle) || self.lifecycle
-                == oldSelf.lifecycle) && (self.bucketWorkload == oldSelf.bucketWorkload
-                || (oldSelf.bucketWorkload == 'Deployment' && self.bucketWorkload
-                == 'Ordered' && has(self.maintenance) && has(self.maintenance.orderedMigrationToken)
-                && size(self.maintenance.orderedMigrationToken) > 0 && has(self.maintenance.allowCoordinatedDowntime)
-                && self.maintenance.allowCoordinatedDowntime))
+                == oldSelf.lifecycle) && self.bucketWorkload == oldSelf.bucketWorkload
             - message: Ordered bucketWorkload requires Bucket profile
               rule: self.bucketWorkload != 'Ordered' || self.profile == 'Bucket'
             - message: azCount must equal the zones count
@@ -585,32 +577,26 @@ spec:
                   the /scale subresource.
                 type: string
               lifecycle:
-                description: Progress and retained findings for capacity and maintenance
+                description: Progress and current findings for capacity and maintenance
                   operations.
                 properties:
+                  blocker:
+                    description: Reason the current operation cannot progress.
+                    type: string
                   deadline:
                     description: RFC3339 operation deadline. Passing it reports a
                       stall; it does not cancel recovery.
-                    type: string
-                  evidenceBlocker:
-                    description: Reason the most recent recovery metadata assessment
-                      could not establish the required state.
-                    type: string
-                  evidenceCheckedAt:
-                    description: RFC3339 time of the most recent recorded recovery
-                      metadata assessment.
                     type: string
                   from:
                     description: Starting replica count of the active capacity operation.
                     format: int32
                     type: integer
                   lastCompletionAt:
-                    description: RFC3339 evidence time of the most recent lifecycle
-                      history entry, when available.
+                    description: RFC3339 completion time of the last completed operation,
+                      when available.
                     type: string
                   lastOutcome:
-                    description: Outcome recorded in the most recent lifecycle history
-                      entry.
+                    description: Outcome recorded in the last completed operation.
                     type: string
                   operationID:
                     description: Identifier of the active capacity or maintenance
@@ -620,28 +606,13 @@ spec:
                     description: Current phase of the active operation; use the condition
                       message for the next action.
                     type: string
-                  possibleLoss:
-                    description: Retained runtime data-loss finding. Preserve storage
-                      and recovery records and investigate; editing status does not
-                      clear it.
-                    type: string
                   requestID:
-                    description: Identifier or token of the retained request.
+                    description: Identifier or token of the current request.
                     type: string
                   requestKind:
-                    description: Kind of a retained maintenance or runtime-transition
+                    description: Kind of a current maintenance or runtime-transition
                       request.
                     type: string
-                  retiredBucketSessions:
-                    description: RetiredBucketSessions left logical membership; physical
-                      liveness is unknown.
-                    format: int32
-                    type: integer
-                  sessionCount:
-                    description: Number of runtime sessions in the most recent recorded
-                      evidence inventory.
-                    format: int32
-                    type: integer
                   stalled:
                     description: Whether the active operation has exceeded its persisted
                       deadline.
@@ -654,8 +625,7 @@ spec:
                     description: Runtime session generation of the selected target.
                     type: string
                   targetImage:
-                    description: Requested runtime image of a retained transition
-                      request.
+                    description: Requested runtime image of a current transition request.
                     type: string
                   targetPod:
                     description: Pod selected for the active capacity operation, when
@@ -698,7 +668,7 @@ spec:
                 type: integer
               reservation:
                 description: Name of the cluster-scoped storage reservation holding
-                  this fleet's recovery records.
+                  this fleet's bucket ownership and current operation.
                 type: string
               terminatingReplicas:
                 description: Observed Pods with a deletion timestamp.

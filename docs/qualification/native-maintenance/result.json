@@ -1,0 +1,75 @@
+{
+  "date": "2026-09-20",
+  "source_commit": "2a65a4df99bed5254bdd679df57ed98556454dec",
+  "artifact": "CI release macOS arm64 binary",
+  "version": "0.5.1-ewhauser.2",
+  "binary_sha256": "f9b68e9e9608d74c40a9d8e9dab1846c3532f4f51762dc25e863c0986f2146db",
+  "qualification": "native runtime with healthy digest-pinned Docker MinIO; Kubernetes/CSI/cloud qualification is separate",
+  "scenarios": [
+    {
+      "name": "bucket-sequential",
+      "result": "PASS",
+      "shutdown_total_ms": 20000,
+      "acknowledged_writes": 28,
+      "verified_through_each_fresh_node": [
+        "a",
+        "b",
+        "c"
+      ],
+      "all_original_disks_deleted_after_exact_data_safe_and_exit_0": true,
+      "loss_markers": 0,
+      "last_member_occupied_before_shutdown": 8
+    },
+    {
+      "name": "bucket-concurrent",
+      "result": "PASS",
+      "shutdown_total_ms": 20000,
+      "acknowledged_writes": 20,
+      "verified_through_each_fresh_node": [
+        "a",
+        "b",
+        "c"
+      ],
+      "all_original_disks_deleted_after_exact_data_safe_and_exit_0": true,
+      "loss_markers": 0
+    },
+    {
+      "name": "fleet-concurrent",
+      "result": "PASS",
+      "shutdown_total_ms": 20000,
+      "acknowledged_writes": 21,
+      "verified_through_each_fresh_node": [
+        "a",
+        "b",
+        "c"
+      ],
+      "all_original_disks_deleted_after_exact_data_safe_and_exit_0": true,
+      "loss_markers": 0,
+      "peer_only_ack_while_minio_paused": true
+    },
+    {
+      "name": "one-millisecond-deadline",
+      "result": "PASS",
+      "shutdown_total_ms": 1,
+      "terminal_status": {
+        "capabilities": {
+          "strict_disk_removal": true
+        },
+        "control_only": true,
+        "operation": {
+          "blocker": "follower admission deadline",
+          "expected_generation": "1bcb7f0789bbf6d37f77400fd1c92e702209e7c1184baa9044c14169808989c1",
+          "mode": "remove-disk",
+          "operation_id": "store-outage",
+          "phase": "failed"
+        },
+        "runtime_generation": "1bcb7f0789bbf6d37f77400fd1c92e702209e7c1184baa9044c14169808989c1",
+        "schema_version": 1
+      },
+      "disk_retained": true,
+      "failed_result_remains_immutable": true
+    }
+  ],
+  "harness": "https://github.com/ewhauser/celld/blob/v0.5.1-ewhauser.2/examples/disk-removal/demo.py",
+  "local_evidence_directory": "/Users/ewhauser/.codex/artifacts/celld/0.5.1-ewhauser.2/released-native"
+}

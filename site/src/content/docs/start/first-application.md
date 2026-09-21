@@ -7,7 +7,7 @@ sidebar:
 
 A ready fleet serves an application deployed into **that fleet's S3 bucket**. This guide uses [hello-world](https://github.com/ewhauser/celld-operator/tree/main/examples/hello-world), a small Worker that stores a named ID in a Durable Object and returns JSON.
 
-Install the celld v0.5.0 CLI using the [pinned release's installation instructions](https://github.com/denoland/celld/blob/12d5b6333fe52717325addcfe1e99e9fd4f77bcd/docs/README.md#install). This Worker also needs the `esbuild` executable on `PATH`; with Node.js and npm installed, run `npm install --global esbuild@0.25.12` and check `esbuild --version`. The pinned [deployment instructions](https://github.com/denoland/celld/blob/12d5b6333fe52717325addcfe1e99e9fd4f77bcd/docs/README.md#deploy-an-application) describe the CLI flags and Wrangler support. Use an approved AWS profile that can deploy to the fleet bucket.
+Use a verified native CLI from the [compatible fork release](https://github.com/ewhauser/celld/releases/tag/v0.5.1-ewhauser.2). This Worker also needs the `esbuild` executable on `PATH`; with Node.js and npm installed, run `npm install --global esbuild@0.25.12` and check `esbuild --version`. The pinned [deployment instructions](https://github.com/ewhauser/celld/blob/main/docs/README.md#deploy-an-application) describe the CLI flags and Wrangler support. Use an approved AWS profile that can deploy to the fleet bucket.
 
 ## Deploy the app
 
@@ -20,7 +20,7 @@ AWS_PROFILE=YOUR_AWS_PROFILE celld deploy ./examples/hello-world \
   --region YOUR_AWS_REGION
 ```
 
-The deployment identity has bucket write permissions; it is separate from the operator's read-only role. No credentials are copied into the fleet manifest. Deploying a different app to this bucket replaces the fleet's current application, so use a dedicated nonproduction bucket for this guide.
+The deployment identity has bucket write permissions; the operator itself needs no AWS role. No credentials are copied into the fleet manifest. Deploying a different app to this bucket replaces the fleet's current application, so use a dedicated nonproduction bucket for this guide.
 
 ## Write and read through the fleet
 

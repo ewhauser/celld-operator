@@ -1,0 +1,1534 @@
+go run ./hack/integration --suite all
+Creating isolated cluster celld-strict-f16e1e45
+Pulling into disposable node: ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af
+Pulled image: ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af on celld-strict-f16e1e45-control-plane
+Pulled image: ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af on celld-strict-f16e1e45-worker
+Pulled image: ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af on celld-strict-f16e1e45-worker2
+Loaded cached image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+Loaded cached image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+Loaded cached image: curlimages/curl:8.12.1
+Loaded cached image: registry.k8s.io/metrics-server/metrics-server:v0.8.0
+Loaded cached image: ghcr.io/shopify/toxiproxy:2.12.0
+Loaded cached image: registry.k8s.io/sig-storage/csi-provisioner:v6.3.0
+Loaded cached image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.17.0
+Loaded cached image: registry.k8s.io/sig-storage/hostpathplugin:v1.17.1
+Loaded cached image: registry.k8s.io/sig-storage/livenessprobe:v2.19.0
+PASS: create two isolated test buckets
+PASS: qualification app deployed to bucket-alpha
+PASS: qualification app deployed to bucket-beta
+PASS: pre-existing PVC blocks initial StatefulSet creation
+PASS: both runtime profiles ready through operator reconciliation
+PASS: strict replicas use distinct nodes within the configured zone
+PASS: strict placement blocks a missing eligible zone
+PASS: probe same-fleet running
+PASS: probe client running
+PASS: probe client-beta running
+PASS: probe untrusted running
+PASS: probe operator running
+PASS: application writes readable only in their own fleet storage scope
+PASS: same-fleet/operator peer access, cross-fleet/untrusted/client peer denial, ClusterIP health routing
+PASS: cross-namespace storage conflict blocked
+PASS: fleet in a namespace without the fleet Role is reported, not reconciled
+PASS: schema rejects invalid specs and lifecycle mutations
+PASS: additional probe and bucket override are reported as unsafe drift
+PASS: restored original template matches normalized API defaults
+PASS: alpha strict scale to 3
+PASS: pause prevents new removal: alpha held for 12 s
+PASS: alpha strict scale to 2
+PASS: alpha 12/12 acknowledged writes readable
+PASS: alpha strict scale to 3
+PASS: alpha strict scale to 2
+PASS: alpha strict scale to 1
+PASS: alpha 12/12 acknowledged writes readable
+PASS: alpha strict scale to 2
+PASS: alpha 12/12 acknowledged writes readable
+PASS: alpha strict scale to 3
+PASS: Metrics Server automatic contraction: alpha
+PASS: alpha 12/12 acknowledged writes readable
+PASS: alpha fresh-disk grow, exact-ordinal shrink, 2-to-1, controller restart, bounded idle state
+PASS: beta strict scale to 3
+PASS: pause prevents new removal: beta held for 12 s
+PASS: beta strict scale to 2
+PASS: beta 12/12 acknowledged writes readable
+PASS: beta strict scale to 3
+PASS: beta strict scale to 2
+PASS: beta strict scale to 1
+PASS: beta 12/12 acknowledged writes readable
+PASS: beta strict scale to 2
+PASS: beta 12/12 acknowledged writes readable
+PASS: beta strict scale to 3
+PASS: Metrics Server automatic contraction: beta
+PASS: beta 12/12 acknowledged writes readable
+PASS: beta fresh-disk grow, exact-ordinal shrink, 2-to-1, controller restart, bounded idle state
+PASS: External mode names the /scale writer as owner
+PASS: /scale reports spec, observed replicas and the fleet selector
+PASS: fleet load generator running
+PASS: HPA reads the fleet through /scale
+PASS: HPA measures the fleet above its target through Metrics Server
+PASS: HPA raises spec.replicas to its maximum
+PASS: operator applies the HPA addition through current-operation state
+PASS: External mode never fights the HPA; desired 3 applied 3
+PASS: HPA lowers spec.replicas
+PASS: HPA-requested contraction executes through the gated Bucket executor (local fixture)
+PASS: acknowledged write readable after HPA-driven shrink; /scale consistent
+PASS: kubectl scale through /scale adds a replica via current-operation state
+PASS: manual ownership restored after External mode
+{
+    "apiVersion": "v1",
+    "items": [
+        {
+            "apiVersion": "celld.eric.dev/v1alpha1",
+            "kind": "CelldStorageReservation",
+            "metadata": {
+                "annotations": {
+                    "celld.eric.dev/current-operation": "{\"Version\":1,\"FleetUID\":\"8a82c60a-44b7-4478-9d96-a8baed50b31e\",\"WorkloadUID\":\"3640f8a1-4115-45e4-829c-9f5583577da9\",\"Initial\":2,\"Applied\":2,\"RuntimeImage\":\"ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af\",\"Claims\":{},\"Completion\":{\"ID\":\"a9fcf45e-1df8-492a-a9b8-bb3c29aa6bd9\",\"Kind\":\"Scale\",\"Outcome\":\"Completed\",\"At\":\"2026-09-20T22:14:25.174347853Z\"},\"Capacity\":{\"Load\":null,\"Addition\":{\"Outcome\":\"\",\"Before\":{\"97de5619-92fa-4eeb-972e-6f8f5a9489c3/containerd://2ceb67156d65a46a950ab31df1c0620abca0e6650fc1c6d2ca80fb6c5a64e27f/0\":{\"CPU\":7,\"MemoryMiB\":16,\"Pressure\":false},\"e00fa53d-da67-4d21-a759-5100ea8ada0b/containerd://01be5a20bbad5ef84a2143dee27ccbffd6aea16125183d07c06cafb6f335414a/0\":{\"CPU\":7,\"MemoryMiB\":58,\"Pressure\":false}},\"Target\":3,\"Since\":\"0001-01-01T00:00:00Z\",\"Samples\":0},\"IneffectiveBatches\":0,\"Actionable\":false,\"Config\":\"\",\"Membership\":\"72dd02f69d777cebf3834d22414de9185782389edcae2cba1f02c5b20877f4ee\",\"LastObservation\":\"2026-09-20T22:05:29.44633631Z\",\"HighSince\":\"0001-01-01T00:00:00Z\",\"LowSince\":\"0001-01-01T00:00:00Z\",\"PendingSince\":\"2026-09-20T22:13:49.958543433Z\",\"LastAction\":\"2026-09-20T22:14:25.174347978Z\",\"HighSamples\":0,\"LowSamples\":0,\"Stamps\":null,\"ManualTarget\":0,\"LastManual\":2,\"Decision\":{\"mode\":\"External\",\"reason\":\"ExternalOwner\",\"message\":\"spec.replicas is owned by the /scale writer: desired 3, applied 3\",\"desiredReplicas\":3}}}",
+                    "celld.eric.dev/launcher-creation": "d2e0bf0fed4fa7d727a051436ae2950ba7730b67e6b36a2b9b828c3ec54182f4",
+                    "celld.eric.dev/launcher-key-digest": "7395cdc72abfa60006d3f1600d277e364f10ae276e94c246f3b86ec8eeaa39c9",
+                    "celld.eric.dev/workload-creation-attempted": "true"
+                },
+                "creationTimestamp": "2026-09-20T21:59:44Z",
+                "generation": 1,
+                "name": "s3-3e3c6c589bf95c28c9dc27cca2758c2991eb0031bff576ff1ad01e71",
+                "resourceVersion": "5282",
+                "uid": "f549c9cc-bbcd-46a2-934f-8799d73753c9"
+            },
+            "spec": {
+                "bucket": "bucket-alpha",
+                "fleetName": "alpha",
+                "fleetNamespace": "fleets",
+                "fleetUID": "8a82c60a-44b7-4478-9d96-a8baed50b31e",
+                "initialReplicas": 2,
+                "specHash": "ed283e2f7c10254a8cea7b56cca39c3706270f645df78eb2dd263d2c437e6f53"
+            }
+        },
+        {
+            "apiVersion": "celld.eric.dev/v1alpha1",
+            "kind": "CelldStorageReservation",
+            "metadata": {
+                "annotations": {
+                    "celld.eric.dev/current-operation": "{\"Version\":1,\"FleetUID\":\"2fc2e952-dec5-478a-a7d7-8399299c013e\",\"WorkloadUID\":\"533f4a89-67a4-47c6-9c58-2487d3f9ee31\",\"Initial\":2,\"Applied\":2,\"RuntimeImage\":\"ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af\",\"Claims\":{}}",
+                    "celld.eric.dev/launcher-creation": "47917fd77266b523d0aa83b3e0a532a200b76e4cd328d1d61502a1f9cac0f71a",
+                    "celld.eric.dev/launcher-key-digest": "f0537f888b8553eaa258744a351bb64bf0740ff1494bf09d0d1d1cb9dff847cc",
+                    "celld.eric.dev/workload-creation-attempted": "true"
+                },
+                "creationTimestamp": "2026-09-20T22:00:03Z",
+                "generation": 1,
+                "name": "s3-56487ad297b0f7750cecacd1a7913098b33524065175aca8a8793286",
+                "resourceVersion": "2131",
+                "uid": "ac2bcca8-c8e7-41c3-910e-1161868871ad"
+            },
+            "spec": {
+                "bucket": "bucket-unavailable",
+                "fleetName": "unavailable",
+                "fleetNamespace": "fleets",
+                "fleetUID": "2fc2e952-dec5-478a-a7d7-8399299c013e",
+                "initialReplicas": 2,
+                "specHash": "15f100cdcc625287d6fac8ee4a7a54a3bf3c41627f50d9ec490d405db467cbb0"
+            }
+        },
+        {
+            "apiVersion": "celld.eric.dev/v1alpha1",
+            "kind": "CelldStorageReservation",
+            "metadata": {
+                "annotations": {
+                    "celld.eric.dev/launcher-creation": "a5e2c344893a9f9c11826d43cde42a8c899b357a7e27185591fc76c58b927604",
+                    "celld.eric.dev/launcher-key-digest": "828d722fe935c9e40f0f4733705e1fb3517422a3c8ae50f2fa9877bb25ccc019"
+                },
+                "creationTimestamp": "2026-09-20T21:59:42Z",
+                "generation": 1,
+                "name": "s3-5f1884e17c1adfcac935b4ade827d47209f4a15d74c7b435226da93b",
+                "resourceVersion": "1811",
+                "uid": "08e77b87-cc7f-4569-a74a-0921e171bce3"
+            },
+            "spec": {
+                "bucket": "new-bucket",
+                "fleetName": "collision",
+                "fleetNamespace": "fleets",
+                "fleetUID": "20c44e44-2228-47fd-acee-0a383988c24b",
+                "initialReplicas": 2,
+                "specHash": "be0f27a903254ac4264e7bce60e723645b7fcb930210cd7ce0b702b5df25fa67"
+            }
+        },
+        {
+            "apiVersion": "celld.eric.dev/v1alpha1",
+            "kind": "CelldStorageReservation",
+            "metadata": {
+                "annotations": {
+                    "celld.eric.dev/current-operation": "{\"Version\":1,\"FleetUID\":\"d5079b1b-7226-4bd3-bd25-e157ad5984ce\",\"WorkloadUID\":\"ba4a137e-4c68-407e-87a0-5d55540f839f\",\"Initial\":2,\"Applied\":2,\"RuntimeImage\":\"ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af\",\"Claims\":{\"data-beta-0\":\"efe13383-f927-4e87-af6a-8007110933d0\",\"data-beta-1\":\"dea64228-276b-4e6c-bfad-e8fbdfd1b934\"},\"Completion\":{\"ID\":\"7d624336-36ac-49a3-aab4-8456edaac92c\",\"Kind\":\"Scale\",\"Outcome\":\"Completed\",\"At\":\"2026-09-20T22:11:28.128897245Z\"},\"Capacity\":{\"Load\":null,\"Addition\":null,\"IneffectiveBatches\":0,\"Actionable\":false,\"Config\":\"\",\"Membership\":\"cfa7267f274cfb23260edae5a58de83beb36cb02e6d9af7b57e67a0fdbfd16ce\",\"LastObservation\":\"2026-09-20T22:11:08.546675995Z\",\"HighSince\":\"0001-01-01T00:00:00Z\",\"LowSince\":\"0001-01-01T00:00:00Z\",\"PendingSince\":\"0001-01-01T00:00:00Z\",\"LastAction\":\"2026-09-20T22:11:28.128897495Z\",\"HighSamples\":0,\"LowSamples\":0,\"Stamps\":null,\"ManualTarget\":0,\"LastManual\":2,\"Decision\":{\"mode\":\"Automatic\",\"reason\":\"ScaleInRecommended\",\"message\":\"Low demand across every node; one removal still requires qualified lifecycle evidence\",\"desiredReplicas\":2,\"usefulReplicas\":3,\"coveredReplicas\":3}}}",
+                    "celld.eric.dev/launcher-creation": "6bf92487a6c2c7521b098ab72e6ad9043f3a7159b73c21a1a40d02564c66ccfd",
+                    "celld.eric.dev/launcher-key-digest": "049e6cb3a6032c1ad40297b5f678c046b849b2cbcfc074bf94a80d0d58277be4",
+                    "celld.eric.dev/workload-creation-attempted": "true"
+                },
+                "creationTimestamp": "2026-09-20T21:59:44Z",
+                "generation": 1,
+                "name": "s3-9bad1ca42408fb5333d02d1bdf11293e9e22c4411493f3fcba7b6419",
+                "resourceVersion": "4682",
+                "uid": "17ecb249-b6bf-455f-9a71-563c53b1c144"
+            },
+            "spec": {
+                "bucket": "bucket-beta",
+                "fleetName": "beta",
+                "fleetNamespace": "fleets",
+                "fleetUID": "d5079b1b-7226-4bd3-bd25-e157ad5984ce",
+                "initialReplicas": 2,
+                "specHash": "48da7c1a95d7d1e4aa3c6595d8ab243ce2c689711bb5cd4473c4f06483d75dd3"
+            }
+        }
+    ],
+    "kind": "List",
+    "metadata": {
+        "resourceVersion": ""
+    }
+}
+
+PASS: alpha strict scale to 3
+PASS: manager crashes at before-effect: alpha
+PASS: manager resumes exact operation: alpha
+PASS: alpha 12/12 acknowledged writes readable
+PASS: alpha strict scale to 3
+PASS: manager crashes at after-effect: alpha
+PASS: manager resumes exact operation: alpha
+PASS: alpha 12/12 acknowledged writes readable
+PASS: alpha strict scale to 3
+PASS: alpha strict scale to 2
+PASS: beta strict scale to 3
+PASS: manager crashes at before-effect: beta
+PASS: manager resumes exact operation: beta
+PASS: beta 12/12 acknowledged writes readable
+PASS: beta strict scale to 3
+PASS: manager crashes at after-effect: beta
+PASS: manager resumes exact operation: beta
+PASS: beta 12/12 acknowledged writes readable
+PASS: beta strict scale to 3
+PASS: beta strict scale to 2
+PASS: alpha strict scale to 3
+PASS: alpha strict scale to 2
+PASS: alpha 12/12 acknowledged writes readable
+PASS: steady-state storage outage creates no operation or disk deletion held for 10 s
+PASS: fleets observable after storage transport restoration
+FAIL: assertion failed: client -> alpha allowed=true:  curl: (7) Failed to connect to alpha port 8080 after 0 ms: Could not connect to server
+command terminated with exit code 7
+
+goroutine 1 [running]:
+runtime/debug.Stack()
+	/Users/ewhauser/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.27.1.darwin-arm64/src/runtime/debug/stack.go:26 +0x64
+main.fail({0x7d5925e3e000?, 0x1051cfdc6?}, {0x7d5925c35350?, 0x1051d6a07?, 0x7d5925dec150?})
+	/Users/ewhauser/working/celld-operator-strict-integration/hack/integration/harness.go:28 +0x30
+main.assert(...)
+	/Users/ewhauser/working/celld-operator-strict-integration/hack/integration/harness.go:39
+main.(*harness).curl(0x7d5925c35d70, {{0x1051c78d4, 0x6}, {0x1051c78bc, 0x6}, {0x1051c741b, 0x5}, {0x7d5925e284e0, 0x1b}, {0x1051c6f00, ...}, ...})
+	/Users/ewhauser/working/celld-operator-strict-integration/hack/integration/cluster.go:450 +0x5c8
+main.(*harness).app(0x1051d82e5?, {0x1051c78d4?, 0x7d5925c356e8?}, {0x1051c741b?, 0x1?}, {0x1051c6f00?, 0x3c?}, {0x7d5925e284e0?, 0x0?})
+	/Users/ewhauser/working/celld-operator-strict-integration/hack/integration/cluster.go:460 +0x88
+main.(*harness).readLedger(0x7d5925c35d70, {0x1051c78d4, 0x6}, {0x1051c741b, 0x5})
+	/Users/ewhauser/working/celld-operator-strict-integration/hack/integration/lifecycle.go:51 +0xcc
+main.(*harness).exerciseFaults(0x7d5925c35d70)
+	/Users/ewhauser/working/celld-operator-strict-integration/hack/integration/faults.go:61 +0x11c8
+main.(*harness).exercise(0x7d5925c35d70)
+	/Users/ewhauser/working/celld-operator-strict-integration/hack/integration/main.go:138 +0x98
+main.realMain()
+	/Users/ewhauser/working/celld-operator-strict-integration/hack/integration/main.go:105 +0xb88
+main.main()
+	/Users/ewhauser/working/celld-operator-strict-integration/hack/integration/main.go:37 +0x1c
+NAMESPACE            NAME                                                          READY   STATUS      RESTARTS   AGE     IP                NODE                                  NOMINATED NODE   READINESS GATES
+celld-system         celld-operator-7b686c75cc-vcc8n                               1/1     Running     0          2m24s   192.168.210.222   celld-strict-f16e1e45-control-plane   <none>           <none>
+celld-test-store     deploy-bucket-alpha                                           0/1     Completed   0          23m     192.168.210.193   celld-strict-f16e1e45-control-plane   <none>           <none>
+celld-test-store     deploy-bucket-beta                                            0/1     Completed   0          23m     192.168.210.194   celld-strict-f16e1e45-control-plane   <none>           <none>
+celld-test-store     minio                                                         1/1     Running     0          23m     192.168.218.193   celld-strict-f16e1e45-worker          <none>           <none>
+celld-test-store     seed                                                          0/1     Completed   0          23m     192.168.218.196   celld-strict-f16e1e45-worker          <none>           <none>
+celld-test-store     toxi-ctl                                                      1/1     Running     0          23m     192.168.218.195   celld-strict-f16e1e45-worker          <none>           <none>
+celld-test-store     toxiproxy                                                     1/1     Running     0          23m     192.168.218.194   celld-strict-f16e1e45-worker          <none>           <none>
+default              csi-hostpathplugin-79647                                      4/4     Running     0          23m     192.168.218.197   celld-strict-f16e1e45-worker          <none>           <none>
+default              csi-hostpathplugin-nq8kf                                      4/4     Running     0          23m     192.168.154.69    celld-strict-f16e1e45-worker2         <none>           <none>
+default              csi-hostpathplugin-xr62g                                      4/4     Running     0          23m     192.168.210.195   celld-strict-f16e1e45-control-plane   <none>           <none>
+fleets               alpha-0                                                       1/1     Running     0          22m     192.168.218.200   celld-strict-f16e1e45-worker          <none>           <none>
+fleets               alpha-1                                                       1/1     Running     0          19m     192.168.154.75    celld-strict-f16e1e45-worker2         <none>           <none>
+fleets               beta-0                                                        1/1     Running     0          22m     192.168.218.201   celld-strict-f16e1e45-worker          <none>           <none>
+fleets               beta-1                                                        1/1     Running     0          13m     192.168.154.76    celld-strict-f16e1e45-worker2         <none>           <none>
+fleets               client                                                        1/1     Running     0          22m     192.168.154.72    celld-strict-f16e1e45-worker2         <none>           0/1
+fleets               client-beta                                                   1/1     Running     0          22m     192.168.210.198   celld-strict-f16e1e45-control-plane   <none>           0/1
+fleets               unavailable-6c8bd6dc9f-9lxbw                                  0/1     Pending     0          22m     <none>            <none>                                <none>           <none>
+fleets               unavailable-6c8bd6dc9f-tsm9s                                  0/1     Running     0          22m     192.168.218.202   celld-strict-f16e1e45-worker          <none>           <none>
+fleets               untrusted                                                     1/1     Running     0          22m     192.168.154.73    celld-strict-f16e1e45-worker2         <none>           0/1
+kube-system          calico-kube-controllers-78576cf5c8-r8v2j                      1/1     Running     0          29m     192.168.154.66    celld-strict-f16e1e45-worker2         <none>           <none>
+kube-system          calico-node-dp75j                                             1/1     Running     0          29m     172.18.0.5        celld-strict-f16e1e45-worker2         <none>           <none>
+kube-system          calico-node-fjngt                                             1/1     Running     0          29m     172.18.0.3        celld-strict-f16e1e45-control-plane   <none>           <none>
+kube-system          calico-node-kz8vb                                             1/1     Running     0          29m     172.18.0.4        celld-strict-f16e1e45-worker          <none>           <none>
+kube-system          coredns-7c65d6cfc9-dssk8                                      1/1     Running     0          29m     192.168.154.65    celld-strict-f16e1e45-worker2         <none>           <none>
+kube-system          coredns-7c65d6cfc9-wwdtr                                      1/1     Running     0          29m     192.168.154.67    celld-strict-f16e1e45-worker2         <none>           <none>
+kube-system          etcd-celld-strict-f16e1e45-control-plane                      1/1     Running     0          29m     172.18.0.3        celld-strict-f16e1e45-control-plane   <none>           <none>
+kube-system          kube-apiserver-celld-strict-f16e1e45-control-plane            1/1     Running     0          29m     172.18.0.3        celld-strict-f16e1e45-control-plane   <none>           <none>
+kube-system          kube-controller-manager-celld-strict-f16e1e45-control-plane   1/1     Running     0          29m     172.18.0.3        celld-strict-f16e1e45-control-plane   <none>           <none>
+kube-system          kube-proxy-64llm                                              1/1     Running     0          29m     172.18.0.4        celld-strict-f16e1e45-worker          <none>           <none>
+kube-system          kube-proxy-dg7zz                                              1/1     Running     0          29m     172.18.0.5        celld-strict-f16e1e45-worker2         <none>           <none>
+kube-system          kube-proxy-gl4w4                                              1/1     Running     0          29m     172.18.0.3        celld-strict-f16e1e45-control-plane   <none>           <none>
+kube-system          kube-scheduler-celld-strict-f16e1e45-control-plane            1/1     Running     0          29m     172.18.0.3        celld-strict-f16e1e45-control-plane   <none>           <none>
+kube-system          metrics-server-bf688598-vdtkv                                 1/1     Running     0          23m     192.168.218.199   celld-strict-f16e1e45-worker          <none>           <none>
+local-path-storage   local-path-provisioner-6fdc965494-kdd64                       1/1     Running     0          29m     192.168.154.68    celld-strict-f16e1e45-worker2         <none>           <none>
+
+apiVersion: v1
+items:
+- apiVersion: celld.eric.dev/v1alpha1
+  kind: CelldFleet
+  metadata:
+    annotations:
+      kubectl.kubernetes.io/last-applied-configuration: |
+        {"apiVersion":"celld.eric.dev/v1alpha1","kind":"CelldFleet","metadata":{"annotations":{},"name":"alpha","namespace":"fleets"},"spec":{"bucketWorkload":"Ordered","placement":{"azCount":1,"zones":["us-east-1a"]},"profile":"Bucket","qualification":"Experimental","replicas":2,"runtimeImage":"ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af","serviceAccountName":"runtime","storage":{"bucket":"bucket-alpha","region":"us-east-1","sizeGiB":1}},"status":{"capacity":{},"lifecycle":{},"replicas":0}}
+    creationTimestamp: "2026-09-20T21:59:44Z"
+    finalizers:
+    - celld.eric.dev/lifecycle-protection
+    generation: 24
+    name: alpha
+    namespace: fleets
+    resourceVersion: "7315"
+    uid: 8a82c60a-44b7-4478-9d96-a8baed50b31e
+  spec:
+    bucketWorkload: Ordered
+    placement:
+      azCount: 1
+      mode: Strict
+      zones:
+      - us-east-1a
+    profile: Bucket
+    qualification: Experimental
+    replicas: 2
+    runtimeImage: ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af
+    serviceAccountName: runtime
+    storage:
+      bucket: bucket-alpha
+      region: us-east-1
+      sizeGiB: 1
+  status:
+    appliedReplicas: 2
+    capacity: {}
+    conditions:
+    - lastTransitionTime: "2026-09-20T22:01:42Z"
+      message: Initial infrastructure and runtime readiness observed; this is not
+        production or durability qualification
+      observedGeneration: 24
+      reason: Provisioned
+      status: "False"
+      type: MaintenancePaused
+    - lastTransitionTime: "2026-09-20T21:59:44Z"
+      message: Initial infrastructure and runtime readiness observed; this is not
+        production or durability qualification
+      observedGeneration: 24
+      reason: Provisioned
+      status: "False"
+      type: Deleting
+    - lastTransitionTime: "2026-09-20T22:22:03Z"
+      message: Initial infrastructure and runtime readiness observed; this is not
+        production or durability qualification
+      observedGeneration: 24
+      reason: Provisioned
+      status: "True"
+      type: Ready
+    - lastTransitionTime: "2026-09-20T22:22:17Z"
+      message: Initial infrastructure and runtime readiness observed; this is not
+        production or durability qualification
+      observedGeneration: 24
+      reason: Provisioned
+      status: "True"
+      type: InfrastructureReady
+    - lastTransitionTime: "2026-09-20T21:59:59Z"
+      message: Initial infrastructure and runtime readiness observed; this is not
+        production or durability qualification
+      observedGeneration: 24
+      reason: Provisioned
+      status: "False"
+      type: Progressing
+    - lastTransitionTime: "2026-09-20T22:22:17Z"
+      message: Initial infrastructure and runtime readiness observed; this is not
+        production or durability qualification
+      observedGeneration: 24
+      reason: Provisioned
+      status: "False"
+      type: Blocked
+    - lastTransitionTime: "2026-09-20T21:59:44Z"
+      message: Strict removal requires captured celld and launcher proof; production
+        and cloud storage qualification remain outstanding
+      observedGeneration: 24
+      reason: QualificationIncomplete
+      status: "True"
+      type: LifecycleBlocked
+    - lastTransitionTime: "2026-09-20T21:59:44Z"
+      message: Local tests do not qualify real CSI/EBS cleanup, cross-host disk reuse
+        or cloud recovery
+      observedGeneration: 24
+      reason: QualificationIncomplete
+      status: "False"
+      type: ProductionQualified
+    - lastTransitionTime: "2026-09-20T21:59:44Z"
+      message: Current operation and policy state use 1414 of 184320 bytes
+      observedGeneration: 24
+      reason: BoundedOperation
+      status: "False"
+      type: OperationSizeWarning
+    - lastTransitionTime: "2026-09-20T21:59:44Z"
+      message: Current strict proof remains reserved until exact PVC/PV deletion and
+        attachment removal are observed
+      observedGeneration: 24
+      reason: CSIDeletionPending
+      status: "False"
+      type: DiskCleanupPending
+    desiredReplicas: 2
+    labelSelector: celld.eric.dev/fleet-uid=8a82c60a-44b7-4478-9d96-a8baed50b31e
+    lifecycle:
+      lastCompletionAt: "2026-09-20T22:22:16Z"
+      lastOutcome: Completed
+    observedGeneration: 24
+    observedReplicas: 2
+    readyReplicas: 2
+    replicaObservationValid: true
+    replicas: 2
+    reservation: s3-3e3c6c589bf95c28c9dc27cca2758c2991eb0031bff576ff1ad01e71
+- apiVersion: celld.eric.dev/v1alpha1
+  kind: CelldFleet
+  metadata:
+    annotations:
+      kubectl.kubernetes.io/last-applied-configuration: |
+        {"apiVersion":"celld.eric.dev/v1alpha1","kind":"CelldFleet","metadata":{"annotations":{},"name":"beta","namespace":"fleets"},"spec":{"placement":{"azCount":1,"zones":["us-east-1a"]},"profile":"PersistentFleet","qualification":"Experimental","replicas":2,"runtimeImage":"ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af","serviceAccountName":"runtime","storage":{"bucket":"bucket-beta","region":"us-east-1","sizeGiB":1,"storageClassName":"disposable"}},"status":{"capacity":{},"lifecycle":{},"replicas":0}}
+    creationTimestamp: "2026-09-20T21:59:44Z"
+    finalizers:
+    - celld.eric.dev/lifecycle-protection
+    generation: 17
+    name: beta
+    namespace: fleets
+    resourceVersion: "7127"
+    uid: d5079b1b-7226-4bd3-bd25-e157ad5984ce
+  spec:
+    bucketWorkload: Deployment
+    placement:
+      azCount: 1
+      mode: Strict
+      zones:
+      - us-east-1a
+    profile: PersistentFleet
+    qualification: Experimental
+    replicas: 2
+    runtimeImage: ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af
+    serviceAccountName: runtime
+    storage:
+      bucket: bucket-beta
+      region: us-east-1
+      sizeGiB: 1
+      storageClassName: disposable
+  status:
+    appliedReplicas: 2
+    capacity: {}
+    conditions:
+    - lastTransitionTime: "2026-09-20T22:06:24Z"
+      message: Initial infrastructure and runtime readiness observed; this is not
+        production or durability qualification
+      observedGeneration: 17
+      reason: Provisioned
+      status: "False"
+      type: MaintenancePaused
+    - lastTransitionTime: "2026-09-20T21:59:44Z"
+      message: Initial infrastructure and runtime readiness observed; this is not
+        production or durability qualification
+      observedGeneration: 17
+      reason: Provisioned
+      status: "False"
+      type: Deleting
+    - lastTransitionTime: "2026-09-20T22:21:01Z"
+      message: Initial infrastructure and runtime readiness observed; this is not
+        production or durability qualification
+      observedGeneration: 17
+      reason: Provisioned
+      status: "True"
+      type: Ready
+    - lastTransitionTime: "2026-09-20T22:21:28Z"
+      message: Initial infrastructure and runtime readiness observed; this is not
+        production or durability qualification
+      observedGeneration: 17
+      reason: Provisioned
+      status: "True"
+      type: InfrastructureReady
+    - lastTransitionTime: "2026-09-20T22:21:35Z"
+      message: Initial infrastructure and runtime readiness observed; this is not
+        production or durability qualification
+      observedGeneration: 17
+      reason: Provisioned
+      status: "False"
+      type: Progressing
+    - lastTransitionTime: "2026-09-20T22:21:28Z"
+      message: Initial infrastructure and runtime readiness observed; this is not
+        production or durability qualification
+      observedGeneration: 17
+      reason: Provisioned
+      status: "False"
+      type: Blocked
+    - lastTransitionTime: "2026-09-20T21:59:44Z"
+      message: Strict removal requires captured celld and launcher proof; production
+        and cloud storage qualification remain outstanding
+      observedGeneration: 17
+      reason: QualificationIncomplete
+      status: "True"
+      type: LifecycleBlocked
+    - lastTransitionTime: "2026-09-20T21:59:44Z"
+      message: Local tests do not qualify real CSI/EBS cleanup, cross-host disk reuse
+        or cloud recovery
+      observedGeneration: 17
+      reason: QualificationIncomplete
+      status: "False"
+      type: ProductionQualified
+    - lastTransitionTime: "2026-09-20T21:59:44Z"
+      message: Current operation and policy state use 1188 of 184320 bytes
+      observedGeneration: 17
+      reason: BoundedOperation
+      status: "False"
+      type: OperationSizeWarning
+    - lastTransitionTime: "2026-09-20T22:21:35Z"
+      message: Current strict proof remains reserved until exact PVC/PV deletion and
+        attachment removal are observed
+      observedGeneration: 17
+      reason: CSIDeletionPending
+      status: "False"
+      type: DiskCleanupPending
+    desiredReplicas: 2
+    labelSelector: celld.eric.dev/fleet-uid=d5079b1b-7226-4bd3-bd25-e157ad5984ce
+    lifecycle:
+      lastCompletionAt: "2026-09-20T22:21:34Z"
+      lastOutcome: Completed
+    observedGeneration: 17
+    observedReplicas: 2
+    readyReplicas: 2
+    replicaObservationValid: true
+    replicas: 2
+    reservation: s3-9bad1ca42408fb5333d02d1bdf11293e9e22c4411493f3fcba7b6419
+- apiVersion: celld.eric.dev/v1alpha1
+  kind: CelldFleet
+  metadata:
+    annotations:
+      kubectl.kubernetes.io/last-applied-configuration: |
+        {"apiVersion":"celld.eric.dev/v1alpha1","kind":"CelldFleet","metadata":{"annotations":{},"name":"collision","namespace":"fleets"},"spec":{"placement":{"azCount":1,"zones":["us-east-1a"]},"profile":"PersistentFleet","qualification":"Experimental","replicas":2,"runtimeImage":"ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af","serviceAccountName":"runtime","storage":{"bucket":"new-bucket","region":"us-east-1","sizeGiB":1,"storageClassName":"disposable"}},"status":{"capacity":{},"lifecycle":{},"replicas":0}}
+    creationTimestamp: "2026-09-20T21:59:42Z"
+    finalizers:
+    - celld.eric.dev/lifecycle-protection
+    generation: 1
+    name: collision
+    namespace: fleets
+    resourceVersion: "1812"
+    uid: 20c44e44-2228-47fd-acee-0a383988c24b
+  spec:
+    bucketWorkload: Deployment
+    placement:
+      azCount: 1
+      mode: Strict
+      zones:
+      - us-east-1a
+    profile: PersistentFleet
+    qualification: Experimental
+    replicas: 2
+    runtimeImage: ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af
+    serviceAccountName: runtime
+    storage:
+      bucket: new-bucket
+      region: us-east-1
+      sizeGiB: 1
+      storageClassName: disposable
+  status:
+    blockedSince: "2026-09-20T21:59:42Z"
+    conditions:
+    - lastTransitionTime: "2026-09-20T21:59:42Z"
+      message: PVC data-collision-0 already exists; initial provisioning cannot verify
+        retained disk identity or adopt existing claims
+      observedGeneration: 1
+      reason: StorageIdentityConflict
+      status: "False"
+      type: MaintenancePaused
+    - lastTransitionTime: "2026-09-20T21:59:42Z"
+      message: PVC data-collision-0 already exists; initial provisioning cannot verify
+        retained disk identity or adopt existing claims
+      observedGeneration: 1
+      reason: StorageIdentityConflict
+      status: "False"
+      type: Deleting
+    - lastTransitionTime: "2026-09-20T21:59:42Z"
+      message: PVC data-collision-0 already exists; initial provisioning cannot verify
+        retained disk identity or adopt existing claims
+      observedGeneration: 1
+      reason: StorageIdentityConflict
+      status: "False"
+      type: Ready
+    - lastTransitionTime: "2026-09-20T21:59:42Z"
+      message: PVC data-collision-0 already exists; initial provisioning cannot verify
+        retained disk identity or adopt existing claims
+      observedGeneration: 1
+      reason: StorageIdentityConflict
+      status: "False"
+      type: InfrastructureReady
+    - lastTransitionTime: "2026-09-20T21:59:42Z"
+      message: PVC data-collision-0 already exists; initial provisioning cannot verify
+        retained disk identity or adopt existing claims
+      observedGeneration: 1
+      reason: StorageIdentityConflict
+      status: "False"
+      type: Progressing
+    - lastTransitionTime: "2026-09-20T21:59:42Z"
+      message: PVC data-collision-0 already exists; initial provisioning cannot verify
+        retained disk identity or adopt existing claims
+      observedGeneration: 1
+      reason: StorageIdentityConflict
+      status: "True"
+      type: Blocked
+    - lastTransitionTime: "2026-09-20T21:59:42Z"
+      message: Strict removal requires captured celld and launcher proof; production
+        and cloud storage qualification remain outstanding
+      observedGeneration: 1
+      reason: QualificationIncomplete
+      status: "True"
+      type: LifecycleBlocked
+    - lastTransitionTime: "2026-09-20T21:59:42Z"
+      message: Local tests do not qualify real CSI/EBS cleanup, cross-host disk reuse
+        or cloud recovery
+      observedGeneration: 1
+      reason: QualificationIncomplete
+      status: "False"
+      type: ProductionQualified
+    - lastTransitionTime: "2026-09-20T21:59:42Z"
+      message: Current operation and policy state use 0 of 184320 bytes
+      observedGeneration: 1
+      reason: BoundedOperation
+      status: "False"
+      type: OperationSizeWarning
+    - lastTransitionTime: "2026-09-20T21:59:42Z"
+      message: Current strict proof remains reserved until exact PVC/PV deletion and
+        attachment removal are observed
+      observedGeneration: 1
+      reason: CSIDeletionPending
+      status: "False"
+      type: DiskCleanupPending
+    desiredReplicas: 2
+    labelSelector: celld.eric.dev/fleet-uid=20c44e44-2228-47fd-acee-0a383988c24b
+    observedGeneration: 1
+    replicaObservationValid: true
+- apiVersion: celld.eric.dev/v1alpha1
+  kind: CelldFleet
+  metadata:
+    annotations:
+      kubectl.kubernetes.io/last-applied-configuration: |
+        {"apiVersion":"celld.eric.dev/v1alpha1","kind":"CelldFleet","metadata":{"annotations":{},"name":"unavailable","namespace":"fleets"},"spec":{"bucketWorkload":"Deployment","placement":{"azCount":2,"zones":["us-east-1a","us-east-1b"]},"profile":"Bucket","qualification":"Experimental","replicas":2,"runtimeImage":"ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af","serviceAccountName":"runtime","storage":{"bucket":"bucket-unavailable","region":"us-east-1","sizeGiB":1}},"status":{"capacity":{},"lifecycle":{},"replicas":0}}
+    creationTimestamp: "2026-09-20T22:00:03Z"
+    finalizers:
+    - celld.eric.dev/lifecycle-protection
+    generation: 1
+    name: unavailable
+    namespace: fleets
+    resourceVersion: "2133"
+    uid: 2fc2e952-dec5-478a-a7d7-8399299c013e
+  spec:
+    bucketWorkload: Deployment
+    placement:
+      azCount: 2
+      mode: Strict
+      zones:
+      - us-east-1a
+      - us-east-1b
+    profile: Bucket
+    qualification: Experimental
+    replicas: 2
+    runtimeImage: ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af
+    serviceAccountName: runtime
+    storage:
+      bucket: bucket-unavailable
+      region: us-east-1
+      sizeGiB: 1
+  status:
+    appliedReplicas: 2
+    conditions:
+    - lastTransitionTime: "2026-09-20T22:00:04Z"
+      message: Waiting for ready replicas; inspect Pod scheduling, PVC binding and
+        runtime readiness. Capacity is externally provisioned
+      observedGeneration: 1
+      reason: Provisioning
+      status: "False"
+      type: MaintenancePaused
+    - lastTransitionTime: "2026-09-20T22:00:04Z"
+      message: Waiting for ready replicas; inspect Pod scheduling, PVC binding and
+        runtime readiness. Capacity is externally provisioned
+      observedGeneration: 1
+      reason: Provisioning
+      status: "False"
+      type: Deleting
+    - lastTransitionTime: "2026-09-20T22:00:04Z"
+      message: Waiting for ready replicas; inspect Pod scheduling, PVC binding and
+        runtime readiness. Capacity is externally provisioned
+      observedGeneration: 1
+      reason: Provisioning
+      status: "False"
+      type: Ready
+    - lastTransitionTime: "2026-09-20T22:00:04Z"
+      message: Waiting for ready replicas; inspect Pod scheduling, PVC binding and
+        runtime readiness. Capacity is externally provisioned
+      observedGeneration: 1
+      reason: Provisioning
+      status: "True"
+      type: InfrastructureReady
+    - lastTransitionTime: "2026-09-20T22:00:04Z"
+      message: Waiting for ready replicas; inspect Pod scheduling, PVC binding and
+        runtime readiness. Capacity is externally provisioned
+      observedGeneration: 1
+      reason: Provisioning
+      status: "True"
+      type: Progressing
+    - lastTransitionTime: "2026-09-20T22:00:04Z"
+      message: Waiting for ready replicas; inspect Pod scheduling, PVC binding and
+        runtime readiness. Capacity is externally provisioned
+      observedGeneration: 1
+      reason: Provisioning
+      status: "False"
+      type: Blocked
+    - lastTransitionTime: "2026-09-20T22:00:04Z"
+      message: Strict removal requires captured celld and launcher proof; production
+        and cloud storage qualification remain outstanding
+      observedGeneration: 1
+      reason: QualificationIncomplete
+      status: "True"
+      type: LifecycleBlocked
+    - lastTransitionTime: "2026-09-20T22:00:04Z"
+      message: Local tests do not qualify real CSI/EBS cleanup, cross-host disk reuse
+        or cloud recovery
+      observedGeneration: 1
+      reason: QualificationIncomplete
+      status: "False"
+      type: ProductionQualified
+    - lastTransitionTime: "2026-09-20T22:00:04Z"
+      message: Current operation and policy state use 264 of 184320 bytes
+      observedGeneration: 1
+      reason: BoundedOperation
+      status: "False"
+      type: OperationSizeWarning
+    - lastTransitionTime: "2026-09-20T22:00:04Z"
+      message: Current strict proof remains reserved until exact PVC/PV deletion and
+        attachment removal are observed
+      observedGeneration: 1
+      reason: CSIDeletionPending
+      status: "False"
+      type: DiskCleanupPending
+    desiredReplicas: 2
+    joiningReplicas: 2
+    labelSelector: celld.eric.dev/fleet-uid=2fc2e952-dec5-478a-a7d7-8399299c013e
+    observedGeneration: 1
+    observedReplicas: 2
+    replicaObservationValid: true
+    replicas: 2
+    reservation: s3-56487ad297b0f7750cecacd1a7913098b33524065175aca8a8793286
+kind: List
+metadata:
+  resourceVersion: ""
+
+{
+    "apiVersion": "v1",
+    "items": [
+        {
+            "apiVersion": "celld.eric.dev/v1alpha1",
+            "kind": "CelldStorageReservation",
+            "metadata": {
+                "annotations": {
+                    "celld.eric.dev/current-operation": "{\"Version\":1,\"FleetUID\":\"8a82c60a-44b7-4478-9d96-a8baed50b31e\",\"WorkloadUID\":\"3640f8a1-4115-45e4-829c-9f5583577da9\",\"Initial\":2,\"Applied\":2,\"RuntimeImage\":\"ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af\",\"Claims\":{},\"Completion\":{\"ID\":\"dc38e0d4-76f2-484d-aeab-98676a95dd40\",\"Kind\":\"Scale\",\"Outcome\":\"Completed\",\"At\":\"2026-09-20T22:22:16.899621608Z\"},\"Capacity\":{\"Load\":null,\"Addition\":{\"Outcome\":\"\",\"Before\":{\"97de5619-92fa-4eeb-972e-6f8f5a9489c3/containerd://2ceb67156d65a46a950ab31df1c0620abca0e6650fc1c6d2ca80fb6c5a64e27f/0\":{\"CPU\":7,\"MemoryMiB\":16,\"Pressure\":false},\"e00fa53d-da67-4d21-a759-5100ea8ada0b/containerd://01be5a20bbad5ef84a2143dee27ccbffd6aea16125183d07c06cafb6f335414a/0\":{\"CPU\":7,\"MemoryMiB\":58,\"Pressure\":false}},\"Target\":3,\"Since\":\"0001-01-01T00:00:00Z\",\"Samples\":0},\"IneffectiveBatches\":0,\"Actionable\":false,\"Config\":\"\",\"Membership\":\"72dd02f69d777cebf3834d22414de9185782389edcae2cba1f02c5b20877f4ee\",\"LastObservation\":\"2026-09-20T22:05:29.44633631Z\",\"HighSince\":\"0001-01-01T00:00:00Z\",\"LowSince\":\"0001-01-01T00:00:00Z\",\"PendingSince\":\"2026-09-20T22:22:02.875614611Z\",\"LastAction\":\"2026-09-20T22:22:16.899621817Z\",\"HighSamples\":0,\"LowSamples\":0,\"Stamps\":null,\"ManualTarget\":0,\"LastManual\":2,\"Decision\":{\"mode\":\"External\",\"reason\":\"ExternalOwner\",\"message\":\"spec.replicas is owned by the /scale writer: desired 3, applied 3\",\"desiredReplicas\":3}}}",
+                    "celld.eric.dev/launcher-creation": "d2e0bf0fed4fa7d727a051436ae2950ba7730b67e6b36a2b9b828c3ec54182f4",
+                    "celld.eric.dev/launcher-key-digest": "7395cdc72abfa60006d3f1600d277e364f10ae276e94c246f3b86ec8eeaa39c9",
+                    "celld.eric.dev/workload-creation-attempted": "true"
+                },
+                "creationTimestamp": "2026-09-20T21:59:44Z",
+                "generation": 1,
+                "name": "s3-3e3c6c589bf95c28c9dc27cca2758c2991eb0031bff576ff1ad01e71",
+                "resourceVersion": "7312",
+                "uid": "f549c9cc-bbcd-46a2-934f-8799d73753c9"
+            },
+            "spec": {
+                "bucket": "bucket-alpha",
+                "fleetName": "alpha",
+                "fleetNamespace": "fleets",
+                "fleetUID": "8a82c60a-44b7-4478-9d96-a8baed50b31e",
+                "initialReplicas": 2,
+                "specHash": "ed283e2f7c10254a8cea7b56cca39c3706270f645df78eb2dd263d2c437e6f53"
+            }
+        },
+        {
+            "apiVersion": "celld.eric.dev/v1alpha1",
+            "kind": "CelldStorageReservation",
+            "metadata": {
+                "annotations": {
+                    "celld.eric.dev/current-operation": "{\"Version\":1,\"FleetUID\":\"2fc2e952-dec5-478a-a7d7-8399299c013e\",\"WorkloadUID\":\"533f4a89-67a4-47c6-9c58-2487d3f9ee31\",\"Initial\":2,\"Applied\":2,\"RuntimeImage\":\"ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af\",\"Claims\":{}}",
+                    "celld.eric.dev/launcher-creation": "47917fd77266b523d0aa83b3e0a532a200b76e4cd328d1d61502a1f9cac0f71a",
+                    "celld.eric.dev/launcher-key-digest": "f0537f888b8553eaa258744a351bb64bf0740ff1494bf09d0d1d1cb9dff847cc",
+                    "celld.eric.dev/workload-creation-attempted": "true"
+                },
+                "creationTimestamp": "2026-09-20T22:00:03Z",
+                "generation": 1,
+                "name": "s3-56487ad297b0f7750cecacd1a7913098b33524065175aca8a8793286",
+                "resourceVersion": "2131",
+                "uid": "ac2bcca8-c8e7-41c3-910e-1161868871ad"
+            },
+            "spec": {
+                "bucket": "bucket-unavailable",
+                "fleetName": "unavailable",
+                "fleetNamespace": "fleets",
+                "fleetUID": "2fc2e952-dec5-478a-a7d7-8399299c013e",
+                "initialReplicas": 2,
+                "specHash": "15f100cdcc625287d6fac8ee4a7a54a3bf3c41627f50d9ec490d405db467cbb0"
+            }
+        },
+        {
+            "apiVersion": "celld.eric.dev/v1alpha1",
+            "kind": "CelldStorageReservation",
+            "metadata": {
+                "annotations": {
+                    "celld.eric.dev/launcher-creation": "a5e2c344893a9f9c11826d43cde42a8c899b357a7e27185591fc76c58b927604",
+                    "celld.eric.dev/launcher-key-digest": "828d722fe935c9e40f0f4733705e1fb3517422a3c8ae50f2fa9877bb25ccc019"
+                },
+                "creationTimestamp": "2026-09-20T21:59:42Z",
+                "generation": 1,
+                "name": "s3-5f1884e17c1adfcac935b4ade827d47209f4a15d74c7b435226da93b",
+                "resourceVersion": "1811",
+                "uid": "08e77b87-cc7f-4569-a74a-0921e171bce3"
+            },
+            "spec": {
+                "bucket": "new-bucket",
+                "fleetName": "collision",
+                "fleetNamespace": "fleets",
+                "fleetUID": "20c44e44-2228-47fd-acee-0a383988c24b",
+                "initialReplicas": 2,
+                "specHash": "be0f27a903254ac4264e7bce60e723645b7fcb930210cd7ce0b702b5df25fa67"
+            }
+        },
+        {
+            "apiVersion": "celld.eric.dev/v1alpha1",
+            "kind": "CelldStorageReservation",
+            "metadata": {
+                "annotations": {
+                    "celld.eric.dev/current-operation": "{\"Version\":1,\"FleetUID\":\"d5079b1b-7226-4bd3-bd25-e157ad5984ce\",\"WorkloadUID\":\"ba4a137e-4c68-407e-87a0-5d55540f839f\",\"Initial\":2,\"Applied\":2,\"RuntimeImage\":\"ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af\",\"Claims\":{\"data-beta-0\":\"efe13383-f927-4e87-af6a-8007110933d0\",\"data-beta-1\":\"dea64228-276b-4e6c-bfad-e8fbdfd1b934\"},\"Completion\":{\"ID\":\"0aa7c605-393a-4ec3-b59b-8734d7eb94fe\",\"Kind\":\"Scale\",\"Outcome\":\"Completed\",\"At\":\"2026-09-20T22:21:34.313052637Z\"},\"Capacity\":{\"Load\":null,\"Addition\":null,\"IneffectiveBatches\":0,\"Actionable\":false,\"Config\":\"\",\"Membership\":\"cfa7267f274cfb23260edae5a58de83beb36cb02e6d9af7b57e67a0fdbfd16ce\",\"LastObservation\":\"2026-09-20T22:11:08.546675995Z\",\"HighSince\":\"0001-01-01T00:00:00Z\",\"LowSince\":\"0001-01-01T00:00:00Z\",\"PendingSince\":\"2026-09-20T22:21:00.791715806Z\",\"LastAction\":\"2026-09-20T22:21:34.313052887Z\",\"HighSamples\":0,\"LowSamples\":0,\"Stamps\":null,\"ManualTarget\":0,\"LastManual\":2,\"Decision\":{\"mode\":\"Automatic\",\"reason\":\"ScaleInRecommended\",\"message\":\"Low demand across every node; one removal still requires qualified lifecycle evidence\",\"desiredReplicas\":2,\"usefulReplicas\":3,\"coveredReplicas\":3}}}",
+                    "celld.eric.dev/launcher-creation": "6bf92487a6c2c7521b098ab72e6ad9043f3a7159b73c21a1a40d02564c66ccfd",
+                    "celld.eric.dev/launcher-key-digest": "049e6cb3a6032c1ad40297b5f678c046b849b2cbcfc074bf94a80d0d58277be4",
+                    "celld.eric.dev/workload-creation-attempted": "true"
+                },
+                "creationTimestamp": "2026-09-20T21:59:44Z",
+                "generation": 1,
+                "name": "s3-9bad1ca42408fb5333d02d1bdf11293e9e22c4411493f3fcba7b6419",
+                "resourceVersion": "7124",
+                "uid": "17ecb249-b6bf-455f-9a71-563c53b1c144"
+            },
+            "spec": {
+                "bucket": "bucket-beta",
+                "fleetName": "beta",
+                "fleetNamespace": "fleets",
+                "fleetUID": "d5079b1b-7226-4bd3-bd25-e157ad5984ce",
+                "initialReplicas": 2,
+                "specHash": "48da7c1a95d7d1e4aa3c6595d8ab243ce2c689711bb5cd4473c4f06483d75dd3"
+            }
+        }
+    ],
+    "kind": "List",
+    "metadata": {
+        "resourceVersion": ""
+    }
+}
+
+LAST SEEN   TYPE      REASON                    OBJECT                                   MESSAGE
+24s         Warning   ShutdownPending           celldfleet/alpha                         strict runtime completion, exact child exit, inherited-lock release and restart denial are all required
+9m26s       Warning   CapacityUncertain         celldfleet/alpha                         survivor health or capacity evidence incomplete
+12s         Normal    Provisioned               celldfleet/alpha                         Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+18m         Normal    Provisioned               celldfleet/alpha                         Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+18m         Warning   Joining                   celldfleet/alpha                         waiting for specified replica readiness
+18m         Normal    Provisioned               celldfleet/alpha                         Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+19m         Warning   Joining                   celldfleet/alpha                         waiting for specified replica readiness
+22m         Normal    Provisioning              celldfleet/beta                          Initial workload created; waiting for runtime readiness and placement
+19m         Normal    Provisioned               celldfleet/alpha                         Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+16m         Warning   ShutdownPending           celldfleet/alpha                         strict runtime completion, exact child exit, inherited-lock release and restart denial are all required
+19m         Warning   ShutdownPending           celldfleet/alpha                         strict runtime completion, exact child exit, inherited-lock release and restart denial are all required
+19m         Warning   CapacityUncertain         celldfleet/alpha                         survivor health or capacity evidence incomplete
+19m         Normal    Provisioned               celldfleet/alpha                         Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+20m         Warning   Joining                   celldfleet/alpha                         waiting for specified replica readiness
+20m         Normal    Provisioned               celldfleet/alpha                         Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+2m35s       Warning   ShutdownPending           celldfleet/beta                          strict runtime completion, exact child exit, inherited-lock release and restart denial are all required
+20m         Warning   ShutdownPending           celldfleet/alpha                         strict runtime completion, exact child exit, inherited-lock release and restart denial are all required
+22m         Normal    Provisioned               celldfleet/beta                          Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+21m         Warning   LifecycleBlocked          celldfleet/beta                          workload differs from exact recorded infrastructure
+21m         Normal    Provisioned               celldfleet/beta                          Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+16m         Warning   Joining                   celldfleet/beta                          waiting for specified replica readiness
+16m         Normal    Provisioned               celldfleet/beta                          Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+16m         Warning   MaintenancePaused         celldfleet/beta                          new operations suspended
+16m         Warning   CapacityUncertain         celldfleet/beta                          survivor health or capacity evidence incomplete
+15m         Warning   ShutdownPending           celldfleet/beta                          strict runtime completion, exact child exit, inherited-lock release and restart denial are all required
+15m         Normal    LifecycleProgress         celldfleet/beta                          Waiting for exact PVC/PV deletion and CSI attachment removal
+15m         Normal    Provisioned               celldfleet/beta                          Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+15m         Warning   Joining                   celldfleet/beta                          waiting for specified replica readiness
+14m         Normal    Provisioned               celldfleet/beta                          Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+14m         Warning   CapacityUncertain         celldfleet/beta                          survivor health or capacity evidence incomplete
+14m         Warning   ShutdownPending           celldfleet/beta                          strict runtime completion, exact child exit, inherited-lock release and restart denial are all required
+14m         Normal    LifecycleProgress         celldfleet/beta                          Waiting for exact PVC/PV deletion and CSI attachment removal
+14m         Normal    Provisioned               celldfleet/beta                          Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+14m         Warning   ShutdownPending           celldfleet/beta                          strict runtime completion, exact child exit, inherited-lock release and restart denial are all required
+14m         Normal    LifecycleProgress         celldfleet/beta                          Waiting for exact PVC/PV deletion and CSI attachment removal
+13m         Normal    Provisioned               celldfleet/beta                          Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+13m         Warning   Joining                   celldfleet/beta                          waiting for specified replica readiness
+13m         Normal    Provisioned               celldfleet/beta                          Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+13m         Warning   Joining                   celldfleet/beta                          waiting for specified replica readiness
+13m         Normal    Provisioned               celldfleet/beta                          Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+11m         Warning   ShutdownPending           celldfleet/beta                          strict runtime completion, exact child exit, inherited-lock release and restart denial are all required
+11m         Normal    LifecycleProgress         celldfleet/beta                          Waiting for exact PVC/PV deletion and CSI attachment removal
+26s         Normal    Provisioned               celldfleet/alpha                         Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+4m41s       Warning   Joining                   celldfleet/beta                          waiting for specified replica readiness
+4m22s       Normal    Provisioned               celldfleet/beta                          Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+4m1s        Warning   ShutdownPending           celldfleet/beta                          strict runtime completion, exact child exit, inherited-lock release and restart denial are all required
+21m         Warning   MaintenancePaused         celldfleet/alpha                         new operations suspended
+3m31s       Normal    LifecycleProgress         celldfleet/beta                          Waiting for exact PVC/PV deletion and CSI attachment removal
+21m         Normal    Provisioned               celldfleet/alpha                         Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+21m         Warning   Joining                   celldfleet/alpha                         waiting for specified replica readiness
+2m3s        Normal    LifecycleProgress         celldfleet/beta                          Waiting for exact PVC/PV deletion and CSI attachment removal
+22m         Normal    Provisioned               celldfleet/alpha                         Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+16m         Normal    Provisioned               celldfleet/alpha                         Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+22m         Normal    Provisioning              celldfleet/alpha                         Initial workload created; waiting for runtime readiness and placement
+116s        Normal    Provisioned               celldfleet/beta                          Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+3m24s       Normal    Provisioned               celldfleet/beta                          Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+107s        Warning   Joining                   celldfleet/beta                          waiting for specified replica readiness
+22m         Normal    Provisioning              celldfleet/unavailable                   Initial workload created; waiting for runtime readiness and placement
+88s         Normal    Provisioned               celldfleet/beta                          Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+87s         Warning   CapacityUncertain         celldfleet/beta                          survivor health or capacity evidence incomplete
+73s         Warning   ShutdownPending           celldfleet/beta                          strict runtime completion, exact child exit, inherited-lock release and restart denial are all required
+62s         Normal    LifecycleProgress         celldfleet/beta                          Waiting for exact PVC/PV deletion and CSI attachment removal
+55s         Normal    Provisioned               celldfleet/beta                          Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+2m56s       Normal    Provisioned               celldfleet/beta                          Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+10m         Warning   Joining                   celldfleet/alpha                         waiting for specified replica readiness
+10m         Normal    Provisioned               celldfleet/alpha                         Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+3m15s       Warning   Joining                   celldfleet/beta                          waiting for specified replica readiness
+9m14s       Warning   ShutdownPending           celldfleet/alpha                         strict runtime completion, exact child exit, inherited-lock release and restart denial are all required
+11m         Normal    Provisioned               celldfleet/beta                          Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+48s         Warning   Joining                   celldfleet/alpha                         waiting for specified replica readiness
+4m47s       Normal    Provisioned               celldfleet/alpha                         Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+4m59s       Warning   ShutdownPending           celldfleet/alpha                         strict runtime completion, exact child exit, inherited-lock release and restart denial are all required
+5m6s        Warning   CapacityUncertain         celldfleet/alpha                         survivor health or capacity evidence incomplete
+5m7s        Normal    Provisioned               celldfleet/alpha                         Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+5m24s       Warning   Joining                   celldfleet/alpha                         waiting for specified replica readiness
+5m31s       Normal    Provisioned               celldfleet/alpha                         Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+6m1s        Warning   ShutdownPending           celldfleet/alpha                         strict runtime completion, exact child exit, inherited-lock release and restart denial are all required
+6m26s       Normal    Provisioned               celldfleet/alpha                         Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+6m43s       Warning   Joining                   celldfleet/alpha                         waiting for specified replica readiness
+6m50s       Normal    Provisioned               celldfleet/alpha                         Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+7m21s       Warning   ShutdownPending           celldfleet/alpha                         strict runtime completion, exact child exit, inherited-lock release and restart denial are all required
+7m41s       Normal    Provisioned               celldfleet/alpha                         Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+7m58s       Warning   Joining                   celldfleet/alpha                         waiting for specified replica readiness
+8m4s        Normal    Provisioned               celldfleet/alpha                         Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+8m15s       Warning   ShutdownPending           celldfleet/alpha                         strict runtime completion, exact child exit, inherited-lock release and restart denial are all required
+8m38s       Warning   CapacityUncertain         celldfleet/alpha                         survivor health or capacity evidence incomplete
+8m39s       Normal    Provisioned               celldfleet/alpha                         Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+9m2s        Normal    Provisioned               celldfleet/alpha                         Initial infrastructure and runtime readiness observed; this is not production or durability qualification
+8m56s       Warning   Joining                   celldfleet/alpha                         waiting for specified replica readiness
+22m         Warning   StorageIdentityConflict   celldfleet/collision                     PVC data-collision-0 already exists; initial provisioning cannot verify retained disk identity or adopt existing claims
+22m         Normal    NoPods                    poddisruptionbudget/collision            No matching pods found
+22m         Normal    WaitForFirstConsumer      persistentvolumeclaim/data-beta-1        waiting for first consumer to be created before binding
+22m         Normal    SuccessfulCreate          statefulset/beta                         create Pod beta-0 in StatefulSet beta successful
+22m         Normal    Scheduled                 pod/alpha-1                              Successfully assigned fleets/alpha-1 to celld-strict-f16e1e45-worker2
+22m         Normal    WaitForFirstConsumer      persistentvolumeclaim/data-beta-0        waiting for first consumer to be created before binding
+22m         Normal    ExternalProvisioning      persistentvolumeclaim/data-beta-1        Waiting for a volume to be created either by the external provisioner 'hostpath.csi.k8s.io' or manually by the system administrator. If volume creation is delayed, please verify that the provisioner is running and correctly registered.
+22m         Normal    ProvisioningSucceeded     persistentvolumeclaim/data-beta-0        Successfully provisioned volume pvc-efe13383-f927-4e87-af6a-8007110933d0
+22m         Normal    Provisioning              persistentvolumeclaim/data-beta-1        External provisioner is provisioning volume for claim "fleets/data-beta-1"
+22m         Normal    ProvisioningSucceeded     persistentvolumeclaim/data-beta-1        Successfully provisioned volume pvc-6b1dfe77-6433-4718-a727-99dafb57eee4
+22m         Normal    Started                   pod/alpha-0                              Started container install-launcher
+22m         Normal    Pulled                    pod/alpha-0                              Container image "celld-launcher-test:celld-strict-f16e1e45" already present on machine
+22m         Normal    Created                   pod/alpha-0                              Created container install-launcher
+22m         Normal    Pulled                    pod/alpha-1                              Container image "celld-launcher-test:celld-strict-f16e1e45" already present on machine
+22m         Normal    Created                   pod/alpha-1                              Created container install-launcher
+22m         Normal    Started                   pod/alpha-1                              Started container install-launcher
+22m         Normal    Scheduled                 pod/alpha-0                              Successfully assigned fleets/alpha-0 to celld-strict-f16e1e45-worker
+22m         Normal    SuccessfulCreate          statefulset/alpha                        create Pod alpha-0 in StatefulSet alpha successful
+22m         Normal    NoPods                    poddisruptionbudget/beta                 No matching pods found
+22m         Normal    Provisioning              persistentvolumeclaim/data-beta-0        External provisioner is provisioning volume for claim "fleets/data-beta-0"
+22m         Normal    NoPods                    poddisruptionbudget/alpha                No matching pods found
+22m         Normal    ExternalProvisioning      persistentvolumeclaim/data-beta-0        Waiting for a volume to be created either by the external provisioner 'hostpath.csi.k8s.io' or manually by the system administrator. If volume creation is delayed, please verify that the provisioner is running and correctly registered.
+22m         Normal    Created                   pod/alpha-1                              Created container celld
+22m         Normal    Scheduled                 pod/beta-1                               Successfully assigned fleets/beta-1 to celld-strict-f16e1e45-worker2
+22m         Normal    Pulled                    pod/alpha-0                              Container image "ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af" already present on machine
+22m         Normal    Created                   pod/alpha-0                              Created container celld
+22m         Normal    Started                   pod/alpha-0                              Started container celld
+22m         Normal    Started                   pod/beta-0                               Started container install-launcher
+22m         Normal    Scheduled                 pod/beta-0                               Successfully assigned fleets/beta-0 to celld-strict-f16e1e45-worker
+22m         Normal    Pulled                    pod/beta-0                               Container image "celld-launcher-test:celld-strict-f16e1e45" already present on machine
+22m         Normal    Created                   pod/beta-0                               Created container install-launcher
+22m         Normal    Pulled                    pod/alpha-1                              Container image "ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af" already present on machine
+22m         Normal    Started                   pod/beta-1                               Started container install-launcher
+22m         Normal    Pulled                    pod/beta-1                               Container image "ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af" already present on machine
+22m         Normal    Started                   pod/alpha-1                              Started container celld
+22m         Normal    Created                   pod/beta-1                               Created container celld
+22m         Normal    Created                   pod/beta-0                               Created container celld
+22m         Normal    Started                   pod/beta-0                               Started container celld
+22m         Normal    Pulled                    pod/beta-1                               Container image "celld-launcher-test:celld-strict-f16e1e45" already present on machine
+22m         Normal    Created                   pod/beta-1                               Created container install-launcher
+22m         Normal    Pulled                    pod/beta-0                               Container image "ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af" already present on machine
+22m         Normal    Started                   pod/beta-1                               Started container celld
+22m         Warning   Unhealthy                 pod/alpha-1                              Readiness probe failed: HTTP probe failed with statuscode: 503
+22m         Normal    NoPods                    poddisruptionbudget/unavailable          No matching pods found
+22m         Normal    SuccessfulCreate          replicaset/unavailable-6c8bd6dc9f        Created pod: unavailable-6c8bd6dc9f-9lxbw
+22m         Normal    ScalingReplicaSet         deployment/unavailable                   Scaled up replica set unavailable-6c8bd6dc9f to 2
+22m         Normal    SuccessfulCreate          replicaset/unavailable-6c8bd6dc9f        Created pod: unavailable-6c8bd6dc9f-tsm9s
+22m         Normal    Scheduled                 pod/unavailable-6c8bd6dc9f-tsm9s         Successfully assigned fleets/unavailable-6c8bd6dc9f-tsm9s to celld-strict-f16e1e45-worker
+22m         Normal    Created                   pod/unavailable-6c8bd6dc9f-tsm9s         Created container install-launcher
+22m         Warning   FailedMount               pod/unavailable-6c8bd6dc9f-tsm9s         MountVolume.SetUp failed for volume "launcher-key" : failed to sync secret cache: timed out waiting for the condition
+22m         Normal    Pulled                    pod/unavailable-6c8bd6dc9f-tsm9s         Container image "celld-launcher-test:celld-strict-f16e1e45" already present on machine
+22m         Normal    Started                   pod/unavailable-6c8bd6dc9f-tsm9s         Started container celld
+22m         Normal    Started                   pod/unavailable-6c8bd6dc9f-tsm9s         Started container install-launcher
+22m         Normal    Pulled                    pod/unavailable-6c8bd6dc9f-tsm9s         Container image "ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af" already present on machine
+22m         Normal    Created                   pod/unavailable-6c8bd6dc9f-tsm9s         Created container celld
+22m         Normal    Scheduled                 pod/same-fleet                           Successfully assigned fleets/same-fleet to celld-strict-f16e1e45-control-plane
+22m         Normal    Started                   pod/same-fleet                           Started container probe
+22m         Normal    Created                   pod/same-fleet                           Created container probe
+22m         Normal    Pulled                    pod/same-fleet                           Container image "curlimages/curl:8.12.1" already present on machine
+22m         Normal    Started                   pod/client                               Started container probe
+22m         Normal    Scheduled                 pod/client                               Successfully assigned fleets/client to celld-strict-f16e1e45-worker2
+22m         Normal    Pulled                    pod/client                               Container image "curlimages/curl:8.12.1" already present on machine
+22m         Normal    Created                   pod/client                               Created container probe
+22m         Normal    Scheduled                 pod/client-beta                          Successfully assigned fleets/client-beta to celld-strict-f16e1e45-control-plane
+22m         Normal    Pulled                    pod/client-beta                          Container image "curlimages/curl:8.12.1" already present on machine
+22m         Normal    Created                   pod/client-beta                          Created container probe
+22m         Normal    Started                   pod/client-beta                          Started container probe
+22m         Normal    Scheduled                 pod/untrusted                            Successfully assigned fleets/untrusted to celld-strict-f16e1e45-worker2
+22m         Normal    Created                   pod/untrusted                            Created container probe
+22m         Normal    Started                   pod/untrusted                            Started container probe
+22m         Normal    Pulled                    pod/untrusted                            Container image "curlimages/curl:8.12.1" already present on machine
+22m         Normal    Killing                   pod/same-fleet                           Stopping container probe
+21m         Normal    Scheduled                 pod/alpha-2                              Successfully assigned fleets/alpha-2 to celld-strict-f16e1e45-control-plane
+21m         Normal    Pulled                    pod/alpha-2                              Container image "celld-launcher-test:celld-strict-f16e1e45" already present on machine
+21m         Normal    Created                   pod/alpha-2                              Created container install-launcher
+21m         Normal    Started                   pod/alpha-2                              Started container install-launcher
+21m         Normal    Pulled                    pod/alpha-2                              Container image "ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af" already present on machine
+21m         Normal    Started                   pod/alpha-2                              Started container celld
+21m         Normal    Created                   pod/alpha-2                              Created container celld
+21m         Warning   Unhealthy                 pod/alpha-2                              Readiness probe failed: HTTP probe failed with statuscode: 503
+20m         Normal    Killing                   pod/alpha-2                              Stopping container celld
+20m         Warning   Unhealthy                 pod/alpha-2                              Readiness probe failed: Get "http://192.168.210.199:8080/.well-known/celld/health": dial tcp 192.168.210.199:8080: connect: connection refused
+20m         Normal    Created                   pod/alpha-2                              Created container install-launcher
+20m         Normal    Pulled                    pod/alpha-2                              Container image "celld-launcher-test:celld-strict-f16e1e45" already present on machine
+20m         Normal    Scheduled                 pod/alpha-2                              Successfully assigned fleets/alpha-2 to celld-strict-f16e1e45-control-plane
+20m         Normal    Started                   pod/alpha-2                              Started container install-launcher
+20m         Normal    Pulled                    pod/alpha-2                              Container image "ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af" already present on machine
+20m         Normal    Created                   pod/alpha-2                              Created container celld
+20m         Normal    Started                   pod/alpha-2                              Started container celld
+19m         Warning   Unhealthy                 pod/alpha-2                              Readiness probe failed: Get "http://192.168.210.201:8080/.well-known/celld/health": dial tcp 192.168.210.201:8080: connect: connection refused
+19m         Normal    Killing                   pod/alpha-2                              Stopping container celld
+19m         Normal    SuccessfulDelete          statefulset/alpha                        delete Pod alpha-1 in StatefulSet alpha successful
+19m         Warning   Unhealthy                 pod/alpha-1                              Readiness probe failed: Get "http://192.168.154.70:8080/.well-known/celld/health": dial tcp 192.168.154.70:8080: connect: connection refused
+19m         Normal    Killing                   pod/alpha-1                              Stopping container celld
+19m         Normal    SuccessfulCreate          statefulset/alpha                        create Pod alpha-1 in StatefulSet alpha successful
+19m         Normal    Pulled                    pod/alpha-1                              Container image "celld-launcher-test:celld-strict-f16e1e45" already present on machine
+19m         Normal    Created                   pod/alpha-1                              Created container install-launcher
+19m         Normal    Started                   pod/alpha-1                              Started container install-launcher
+19m         Normal    Scheduled                 pod/alpha-1                              Successfully assigned fleets/alpha-1 to celld-strict-f16e1e45-worker2
+19m         Normal    Pulled                    pod/alpha-1                              Container image "ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af" already present on machine
+19m         Normal    Started                   pod/alpha-1                              Started container celld
+19m         Normal    Created                   pod/alpha-1                              Created container celld
+18m         Normal    Pulled                    pod/alpha-2                              Container image "celld-launcher-test:celld-strict-f16e1e45" already present on machine
+18m         Normal    Created                   pod/alpha-2                              Created container install-launcher
+18m         Normal    Scheduled                 pod/alpha-2                              Successfully assigned fleets/alpha-2 to celld-strict-f16e1e45-control-plane
+18m         Normal    Started                   pod/alpha-2                              Started container install-launcher
+18m         Normal    Pulled                    pod/alpha-2                              Container image "ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af" already present on machine
+18m         Normal    Created                   pod/alpha-2                              Created container celld
+18m         Normal    Started                   pod/alpha-2                              Started container celld
+18m         Warning   Unhealthy                 pod/alpha-2                              Readiness probe failed: HTTP probe failed with statuscode: 503
+16m         Normal    Killing                   pod/alpha-2                              Stopping container celld
+16m         Warning   Unhealthy                 pod/alpha-2                              Readiness probe failed: Get "http://192.168.210.202:8080/.well-known/celld/health": dial tcp 192.168.210.202:8080: connect: connection refused
+16m         Normal    WaitForFirstConsumer      persistentvolumeclaim/data-beta-2        waiting for first consumer to be created before binding
+16m         Normal    ProvisioningSucceeded     persistentvolumeclaim/data-beta-2        Successfully provisioned volume pvc-a556d591-8012-40ab-ac70-2b79a83491eb
+16m         Normal    ExternalProvisioning      persistentvolumeclaim/data-beta-2        Waiting for a volume to be created either by the external provisioner 'hostpath.csi.k8s.io' or manually by the system administrator. If volume creation is delayed, please verify that the provisioner is running and correctly registered.
+16m         Normal    Provisioning              persistentvolumeclaim/data-beta-2        External provisioner is provisioning volume for claim "fleets/data-beta-2"
+16m         Normal    Scheduled                 pod/beta-2                               Successfully assigned fleets/beta-2 to celld-strict-f16e1e45-control-plane
+16m         Normal    Started                   pod/beta-2                               Started container install-launcher
+16m         Normal    Created                   pod/beta-2                               Created container install-launcher
+16m         Normal    Pulled                    pod/beta-2                               Container image "celld-launcher-test:celld-strict-f16e1e45" already present on machine
+16m         Normal    Started                   pod/beta-2                               Started container celld
+16m         Normal    Created                   pod/beta-2                               Created container celld
+16m         Normal    Pulled                    pod/beta-2                               Container image "ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af" already present on machine
+16m         Warning   Unhealthy                 pod/beta-2                               Readiness probe failed: HTTP probe failed with statuscode: 503
+15m         Normal    Killing                   pod/beta-2                               Stopping container celld
+15m         Warning   Unhealthy                 pod/beta-2                               Readiness probe failed: Get "http://192.168.210.203:8080/.well-known/celld/health": dial tcp 192.168.210.203:8080: connect: connection refused
+15m         Normal    WaitForFirstConsumer      persistentvolumeclaim/data-beta-2        waiting for first consumer to be created before binding
+15m         Normal    ExternalProvisioning      persistentvolumeclaim/data-beta-2        Waiting for a volume to be created either by the external provisioner 'hostpath.csi.k8s.io' or manually by the system administrator. If volume creation is delayed, please verify that the provisioner is running and correctly registered.
+15m         Normal    Provisioning              persistentvolumeclaim/data-beta-2        External provisioner is provisioning volume for claim "fleets/data-beta-2"
+15m         Normal    ProvisioningSucceeded     persistentvolumeclaim/data-beta-2        Successfully provisioned volume pvc-99b0fea7-7a09-414a-8817-c9ad3c61c9e0
+15m         Normal    Started                   pod/beta-2                               Started container install-launcher
+15m         Normal    Pulled                    pod/beta-2                               Container image "celld-launcher-test:celld-strict-f16e1e45" already present on machine
+15m         Normal    Scheduled                 pod/beta-2                               Successfully assigned fleets/beta-2 to celld-strict-f16e1e45-control-plane
+15m         Normal    Created                   pod/beta-2                               Created container install-launcher
+15m         Normal    Started                   pod/beta-2                               Started container celld
+15m         Normal    Created                   pod/beta-2                               Created container celld
+15m         Normal    Pulled                    pod/beta-2                               Container image "ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af" already present on machine
+14m         Warning   Unhealthy                 pod/beta-2                               Readiness probe failed: HTTP probe failed with statuscode: 503
+14m         Normal    Killing                   pod/beta-2                               Stopping container celld
+14m         Warning   Unhealthy                 pod/beta-2                               Readiness probe failed: Get "http://192.168.210.205:8080/.well-known/celld/health": dial tcp 192.168.210.205:8080: connect: connection refused
+14m         Warning   Unhealthy                 pod/beta-1                               Readiness probe failed: HTTP probe failed with statuscode: 503
+14m         Normal    SuccessfulDelete          statefulset/beta                         delete Pod beta-1 in StatefulSet beta successful
+14m         Normal    Killing                   pod/beta-1                               Stopping container celld
+14m         Warning   Unhealthy                 pod/beta-1                               Readiness probe failed: Get "http://192.168.154.71:8080/.well-known/celld/health": dial tcp 192.168.154.71:8080: connect: connection refused
+13m         Normal    WaitForFirstConsumer      persistentvolumeclaim/data-beta-1        waiting for first consumer to be created before binding
+13m         Normal    SuccessfulCreate          statefulset/beta                         create Pod beta-1 in StatefulSet beta successful
+13m         Normal    SuccessfulCreate          statefulset/beta                         create Claim data-beta-1 Pod beta-1 in StatefulSet beta success
+13m         Normal    Provisioning              persistentvolumeclaim/data-beta-1        External provisioner is provisioning volume for claim "fleets/data-beta-1"
+13m         Normal    ExternalProvisioning      persistentvolumeclaim/data-beta-1        Waiting for a volume to be created either by the external provisioner 'hostpath.csi.k8s.io' or manually by the system administrator. If volume creation is delayed, please verify that the provisioner is running and correctly registered.
+13m         Normal    ProvisioningSucceeded     persistentvolumeclaim/data-beta-1        Successfully provisioned volume pvc-dea64228-276b-4e6c-bfad-e8fbdfd1b934
+13m         Normal    Scheduled                 pod/beta-1                               Successfully assigned fleets/beta-1 to celld-strict-f16e1e45-worker2
+13m         Normal    Started                   pod/beta-1                               Started container install-launcher
+13m         Normal    Created                   pod/beta-1                               Created container install-launcher
+13m         Normal    Pulled                    pod/beta-1                               Container image "celld-launcher-test:celld-strict-f16e1e45" already present on machine
+13m         Normal    Created                   pod/beta-1                               Created container celld
+13m         Normal    Pulled                    pod/beta-1                               Container image "ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af" already present on machine
+13m         Normal    Started                   pod/beta-1                               Started container celld
+13m         Warning   Unhealthy                 pod/beta-1                               Readiness probe failed: HTTP probe failed with statuscode: 503
+13m         Normal    WaitForFirstConsumer      persistentvolumeclaim/data-beta-2        waiting for first consumer to be created before binding
+13m         Normal    Provisioning              persistentvolumeclaim/data-beta-2        External provisioner is provisioning volume for claim "fleets/data-beta-2"
+13m         Normal    ExternalProvisioning      persistentvolumeclaim/data-beta-2        Waiting for a volume to be created either by the external provisioner 'hostpath.csi.k8s.io' or manually by the system administrator. If volume creation is delayed, please verify that the provisioner is running and correctly registered.
+13m         Normal    ProvisioningSucceeded     persistentvolumeclaim/data-beta-2        Successfully provisioned volume pvc-9a3947b3-7ccf-46cd-b560-f3670ceb2834
+13m         Normal    Scheduled                 pod/beta-2                               Successfully assigned fleets/beta-2 to celld-strict-f16e1e45-control-plane
+13m         Normal    Started                   pod/beta-2                               Started container celld
+13m         Normal    Pulled                    pod/beta-2                               Container image "celld-launcher-test:celld-strict-f16e1e45" already present on machine
+13m         Normal    Created                   pod/beta-2                               Created container celld
+13m         Normal    Pulled                    pod/beta-2                               Container image "ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af" already present on machine
+13m         Normal    Started                   pod/beta-2                               Started container install-launcher
+13m         Normal    Created                   pod/beta-2                               Created container install-launcher
+11m         Warning   Unhealthy                 pod/beta-2                               Readiness probe failed: Get "http://192.168.210.206:8080/.well-known/celld/health": dial tcp 192.168.210.206:8080: connect: connection refused
+11m         Normal    Killing                   pod/beta-2                               Stopping container celld
+10m         Normal    Scheduled                 pod/load                                 Successfully assigned fleets/load to celld-strict-f16e1e45-control-plane
+10m         Normal    Pulled                    pod/load                                 Container image "curlimages/curl:8.12.1" already present on machine
+10m         Normal    Started                   pod/load                                 Started container load
+10m         Normal    Created                   pod/load                                 Created container load
+10m         Normal    SuccessfulRescale         horizontalpodautoscaler/alpha            New size: 3; reason: cpu resource utilization (percentage of request) above target
+10m         Normal    Started                   pod/alpha-2                              Started container install-launcher
+10m         Normal    Created                   pod/alpha-2                              Created container install-launcher
+10m         Normal    Pulled                    pod/alpha-2                              Container image "celld-launcher-test:celld-strict-f16e1e45" already present on machine
+10m         Normal    Scheduled                 pod/alpha-2                              Successfully assigned fleets/alpha-2 to celld-strict-f16e1e45-control-plane
+10m         Normal    Pulled                    pod/alpha-2                              Container image "ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af" already present on machine
+10m         Normal    Created                   pod/alpha-2                              Created container celld
+10m         Normal    Started                   pod/alpha-2                              Started container celld
+9m58s       Normal    Killing                   pod/load                                 Stopping container load
+9m26s       Normal    SuccessfulRescale         horizontalpodautoscaler/alpha            New size: 2; reason: Current number of replicas above Spec.MaxReplicas
+9m7s        Warning   Unhealthy                 pod/alpha-2                              Readiness probe failed: Get "http://192.168.210.208:8080/.well-known/celld/health": dial tcp 192.168.210.208:8080: connect: connection refused
+9m7s        Normal    Killing                   pod/alpha-2                              Stopping container celld
+8m56s       Normal    Pulled                    pod/alpha-2                              Container image "celld-launcher-test:celld-strict-f16e1e45" already present on machine
+8m56s       Normal    Created                   pod/alpha-2                              Created container install-launcher
+8m56s       Normal    Scheduled                 pod/alpha-2                              Successfully assigned fleets/alpha-2 to celld-strict-f16e1e45-control-plane
+8m55s       Normal    Started                   pod/alpha-2                              Started container celld
+8m55s       Normal    Pulled                    pod/alpha-2                              Container image "ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af" already present on machine
+8m55s       Normal    Created                   pod/alpha-2                              Created container celld
+8m55s       Normal    Started                   pod/alpha-2                              Started container install-launcher
+8m8s        Normal    Killing                   pod/alpha-2                              Stopping container celld
+8m8s        Warning   Unhealthy                 pod/alpha-2                              Readiness probe failed: Get "http://192.168.210.209:8080/.well-known/celld/health": dial tcp 192.168.210.209:8080: connect: connection refused
+7m58s       Normal    Scheduled                 pod/alpha-2                              Successfully assigned fleets/alpha-2 to celld-strict-f16e1e45-control-plane
+7m57s       Normal    Pulled                    pod/alpha-2                              Container image "ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af" already present on machine
+7m57s       Normal    Pulled                    pod/alpha-2                              Container image "celld-launcher-test:celld-strict-f16e1e45" already present on machine
+7m57s       Normal    Created                   pod/alpha-2                              Created container install-launcher
+7m57s       Normal    Created                   pod/alpha-2                              Created container celld
+7m57s       Normal    Started                   pod/alpha-2                              Started container install-launcher
+7m57s       Normal    Started                   pod/alpha-2                              Started container celld
+7m2s        Warning   Unhealthy                 pod/alpha-2                              Readiness probe failed: Get "http://192.168.210.210:8080/.well-known/celld/health": dial tcp 192.168.210.210:8080: connect: connection refused
+6m43s       Normal    Pulled                    pod/alpha-2                              Container image "celld-launcher-test:celld-strict-f16e1e45" already present on machine
+6m43s       Normal    Scheduled                 pod/alpha-2                              Successfully assigned fleets/alpha-2 to celld-strict-f16e1e45-control-plane
+6m43s       Normal    Created                   pod/alpha-2                              Created container install-launcher
+6m43s       Normal    Started                   pod/alpha-2                              Started container install-launcher
+6m42s       Normal    Pulled                    pod/alpha-2                              Container image "ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af" already present on machine
+6m42s       Normal    Created                   pod/alpha-2                              Created container celld
+6m42s       Normal    Started                   pod/alpha-2                              Started container celld
+6m31s       Warning   Unhealthy                 pod/alpha-2                              Readiness probe failed: HTTP probe failed with statuscode: 503
+5m54s       Normal    Killing                   pod/alpha-2                              Stopping container celld
+5m54s       Warning   Unhealthy                 pod/alpha-2                              Readiness probe failed: Get "http://192.168.210.213:8080/.well-known/celld/health": dial tcp 192.168.210.213:8080: connect: connection refused
+5m24s       Normal    Created                   pod/alpha-2                              Created container install-launcher
+5m24s       Normal    Pulled                    pod/alpha-2                              Container image "celld-launcher-test:celld-strict-f16e1e45" already present on machine
+5m24s       Normal    Scheduled                 pod/alpha-2                              Successfully assigned fleets/alpha-2 to celld-strict-f16e1e45-control-plane
+5m24s       Normal    Started                   pod/alpha-2                              Started container install-launcher
+5m23s       Normal    Started                   pod/alpha-2                              Started container celld
+5m23s       Normal    Created                   pod/alpha-2                              Created container celld
+5m23s       Normal    Pulled                    pod/alpha-2                              Container image "ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af" already present on machine
+5m12s       Warning   Unhealthy                 pod/alpha-2                              Readiness probe failed: HTTP probe failed with statuscode: 503
+4m52s       Warning   Unhealthy                 pod/alpha-2                              Readiness probe failed: Get "http://192.168.210.216:8080/.well-known/celld/health": dial tcp 192.168.210.216:8080: connect: connection refused
+4m52s       Normal    Killing                   pod/alpha-2                              Stopping container celld
+4m44s       Normal    WaitForFirstConsumer      persistentvolumeclaim/data-beta-2        waiting for first consumer to be created before binding
+4m41s       Normal    ProvisioningSucceeded     persistentvolumeclaim/data-beta-2        Successfully provisioned volume pvc-99d15ad9-e867-4e79-b6dd-9650f2e81ceb
+4m41s       Normal    Provisioning              persistentvolumeclaim/data-beta-2        External provisioner is provisioning volume for claim "fleets/data-beta-2"
+4m41s       Normal    ExternalProvisioning      persistentvolumeclaim/data-beta-2        Waiting for a volume to be created either by the external provisioner 'hostpath.csi.k8s.io' or manually by the system administrator. If volume creation is delayed, please verify that the provisioner is running and correctly registered.
+4m40s       Normal    Started                   pod/beta-2                               Started container celld
+4m40s       Normal    Pulled                    pod/beta-2                               Container image "ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af" already present on machine
+4m40s       Normal    Created                   pod/beta-2                               Created container celld
+4m40s       Normal    Pulled                    pod/beta-2                               Container image "celld-launcher-test:celld-strict-f16e1e45" already present on machine
+4m40s       Normal    Started                   pod/beta-2                               Started container install-launcher
+4m40s       Normal    Created                   pod/beta-2                               Created container install-launcher
+4m40s       Normal    Scheduled                 pod/beta-2                               Successfully assigned fleets/beta-2 to celld-strict-f16e1e45-control-plane
+3m42s       Warning   Unhealthy                 pod/beta-2                               Readiness probe failed: Get "http://192.168.210.217:8080/.well-known/celld/health": dial tcp 192.168.210.217:8080: connect: connection refused
+3m19s       Normal    WaitForFirstConsumer      persistentvolumeclaim/data-beta-2        waiting for first consumer to be created before binding
+3m16s       Normal    Provisioning              persistentvolumeclaim/data-beta-2        External provisioner is provisioning volume for claim "fleets/data-beta-2"
+3m16s       Normal    ExternalProvisioning      persistentvolumeclaim/data-beta-2        Waiting for a volume to be created either by the external provisioner 'hostpath.csi.k8s.io' or manually by the system administrator. If volume creation is delayed, please verify that the provisioner is running and correctly registered.
+3m16s       Normal    ProvisioningSucceeded     persistentvolumeclaim/data-beta-2        Successfully provisioned volume pvc-1cda6409-c250-4302-b27e-a43a8640de7e
+3m15s       Normal    Scheduled                 pod/beta-2                               Successfully assigned fleets/beta-2 to celld-strict-f16e1e45-control-plane
+3m14s       Normal    Created                   pod/beta-2                               Created container install-launcher
+3m14s       Normal    Started                   pod/beta-2                               Started container install-launcher
+3m14s       Normal    Pulled                    pod/beta-2                               Container image "celld-launcher-test:celld-strict-f16e1e45" already present on machine
+3m13s       Normal    Pulled                    pod/beta-2                               Container image "ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af" already present on machine
+3m13s       Normal    Created                   pod/beta-2                               Created container celld
+3m13s       Normal    Started                   pod/beta-2                               Started container celld
+3m2s        Warning   Unhealthy                 pod/beta-2                               Readiness probe failed: HTTP probe failed with statuscode: 503
+2m50s       Normal    WaitForFirstConsumer      persistentvolumeclaim/data-collision-0   waiting for first consumer to be created before binding
+2m27s       Warning   FailedScheduling          pod/unavailable-6c8bd6dc9f-9lxbw         0/3 nodes are available: 3 node(s) didn't match pod topology spread constraints. preemption: 0/3 nodes are available: 3 No preemption victims found for incoming pod.
+2m27s       Warning   Unhealthy                 pod/beta-2                               Readiness probe failed: Get "http://192.168.210.220:8080/.well-known/celld/health": dial tcp 192.168.210.220:8080: connect: connection refused
+2m27s       Warning   Unhealthy                 pod/unavailable-6c8bd6dc9f-tsm9s         Readiness probe failed: Get "http://192.168.218.202:8080/.well-known/celld/health": dial tcp 192.168.218.202:8080: connect: connection refused
+2m27s       Normal    Killing                   pod/beta-2                               Stopping container celld
+111s        Normal    SuccessfulCreate          statefulset/beta                         create Pod beta-2 in StatefulSet beta successful
+111s        Normal    WaitForFirstConsumer      persistentvolumeclaim/data-beta-2        waiting for first consumer to be created before binding
+111s        Normal    SuccessfulCreate          statefulset/beta                         create Claim data-beta-2 Pod beta-2 in StatefulSet beta success
+110s        Normal    WaitForPodScheduled       persistentvolumeclaim/data-beta-2        waiting for pod beta-2 to be scheduled
+108s        Normal    Provisioning              persistentvolumeclaim/data-beta-2        External provisioner is provisioning volume for claim "fleets/data-beta-2"
+108s        Normal    ExternalProvisioning      persistentvolumeclaim/data-beta-2        Waiting for a volume to be created either by the external provisioner 'hostpath.csi.k8s.io' or manually by the system administrator. If volume creation is delayed, please verify that the provisioner is running and correctly registered.
+108s        Normal    ProvisioningSucceeded     persistentvolumeclaim/data-beta-2        Successfully provisioned volume pvc-b2566b64-f81b-4661-bf7a-835af1eb333b
+107s        Normal    Scheduled                 pod/beta-2                               Successfully assigned fleets/beta-2 to celld-strict-f16e1e45-control-plane
+106s        Normal    Pulled                    pod/beta-2                               Container image "celld-launcher-test:celld-strict-f16e1e45" already present on machine
+106s        Normal    Created                   pod/beta-2                               Created container install-launcher
+106s        Normal    Created                   pod/beta-2                               Created container celld
+106s        Normal    Started                   pod/beta-2                               Started container celld
+106s        Normal    Pulled                    pod/beta-2                               Container image "ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af" already present on machine
+106s        Normal    Started                   pod/beta-2                               Started container install-launcher
+66s         Normal    SuccessfulDelete          statefulset/beta                         delete Pod beta-2 in StatefulSet beta successful
+66s         Normal    Killing                   pod/beta-2                               Stopping container celld
+66s         Warning   Unhealthy                 pod/beta-2                               Readiness probe failed: Get "http://192.168.210.223:8080/.well-known/celld/health": dial tcp 192.168.210.223:8080: connect: connection refused
+51s         Normal    SuccessfulCreate          statefulset/alpha                        create Pod alpha-2 in StatefulSet alpha successful
+48s         Normal    Pulled                    pod/alpha-2                              Container image "celld-launcher-test:celld-strict-f16e1e45" already present on machine
+48s         Normal    Started                   pod/alpha-2                              Started container install-launcher
+48s         Normal    Scheduled                 pod/alpha-2                              Successfully assigned fleets/alpha-2 to celld-strict-f16e1e45-control-plane
+48s         Normal    Created                   pod/alpha-2                              Created container install-launcher
+47s         Normal    Started                   pod/alpha-2                              Started container celld
+47s         Normal    Created                   pod/alpha-2                              Created container celld
+47s         Normal    Pulled                    pod/alpha-2                              Container image "ghcr.io/ewhauser/celld@sha256:78f74de9b5482a428b69f175cd1901b59cc363f3aa398ffd197ade0c9a6a20af" already present on machine
+31s         Warning   Unhealthy                 pod/alpha-2                              Readiness probe failed: Get "http://192.168.210.224:8080/.well-known/celld/health": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+22s         Warning   Unhealthy                 pod/alpha-2                              Readiness probe failed: HTTP probe failed with statuscode: 503
+17s         Normal    SuccessfulDelete          statefulset/alpha                        delete Pod alpha-2 in StatefulSet alpha successful
+17s         Normal    Killing                   pod/alpha-2                              Stopping container celld
+17s         Warning   Unhealthy                 pod/alpha-2                              Readiness probe failed: Get "http://192.168.210.224:8080/.well-known/celld/health": dial tcp 192.168.210.224:8080: connect: connection refused
+1s          Warning   Unhealthy                 pod/beta-1                               Readiness probe failed: Get "http://192.168.154.76:8080/.well-known/celld/health": dial tcp 192.168.154.76:8080: connect: connection refused
+1s          Warning   Unhealthy                 pod/beta-0                               Readiness probe failed: Get "http://192.168.218.201:8080/.well-known/celld/health": dial tcp 192.168.218.201:8080: connect: connection refused
+0s          Warning   Unhealthy                 pod/alpha-1                              Readiness probe failed: Get "http://192.168.154.75:8080/.well-known/celld/health": dial tcp 192.168.154.75:8080: connect: connection refused
+0s          Warning   Unhealthy                 pod/alpha-0                              Readiness probe failed: Get "http://192.168.218.200:8080/.well-known/celld/health": dial tcp 192.168.218.200:8080: connect: connection refused
+
+No resources found in fleets namespace.
+
+NAMESPACE            NAME                                                          CPU(cores)   MEMORY(bytes)   
+celld-system         celld-operator-7b686c75cc-vcc8n                               10m          14Mi            
+celld-test-store     minio                                                         7m           220Mi           
+celld-test-store     toxi-ctl                                                      0m           7Mi             
+celld-test-store     toxiproxy                                                     5m           16Mi            
+default              csi-hostpathplugin-79647                                      5m           56Mi            
+default              csi-hostpathplugin-nq8kf                                      4m           50Mi            
+default              csi-hostpathplugin-xr62g                                      4m           58Mi            
+fleets               alpha-0                                                       7m           78Mi            
+fleets               alpha-1                                                       6m           32Mi            
+fleets               beta-0                                                        6m           24Mi            
+fleets               beta-1                                                        7m           18Mi            
+fleets               client                                                        4m           1Mi             
+fleets               client-beta                                                   0m           1Mi             
+fleets               unavailable-6c8bd6dc9f-tsm9s                                  0m           2Mi             
+fleets               untrusted                                                     0m           2Mi             
+kube-system          calico-kube-controllers-78576cf5c8-r8v2j                      4m           17Mi            
+kube-system          calico-node-dp75j                                             20m          133Mi           
+kube-system          calico-node-fjngt                                             26m          132Mi           
+kube-system          calico-node-kz8vb                                             20m          132Mi           
+kube-system          coredns-7c65d6cfc9-dssk8                                      3m           15Mi            
+kube-system          coredns-7c65d6cfc9-wwdtr                                      2m           15Mi            
+kube-system          etcd-celld-strict-f16e1e45-control-plane                      36m          71Mi            
+kube-system          kube-apiserver-celld-strict-f16e1e45-control-plane            88m          357Mi           
+kube-system          kube-controller-manager-celld-strict-f16e1e45-control-plane   15m          64Mi            
+kube-system          kube-proxy-64llm                                              2m           14Mi            
+kube-system          kube-proxy-dg7zz                                              2m           14Mi            
+kube-system          kube-proxy-gl4w4                                              1m           14Mi            
+kube-system          kube-scheduler-celld-strict-f16e1e45-control-plane            3m           22Mi            
+kube-system          metrics-server-bf688598-vdtkv                                 3m           23Mi            
+local-path-storage   local-path-provisioner-6fdc965494-kdd64                       1m           8Mi             
+
+INFO: Formatting 1st pool, 1 set(s), 1 drives per set.
+INFO: WARNING: Host local has more than 0 drives of set. A host failure will result in data becoming unavailable.
+MinIO Object Storage Server
+Copyright: 2015-2026 MinIO, Inc.
+License: GNU AGPLv3 - https://www.gnu.org/licenses/agpl-3.0.html
+Version: RELEASE.2025-09-07T16-13-09Z (go1.24.6 linux/arm64)
+
+API: http://192.168.218.193:9000  http://127.0.0.1:9000 
+WebUI: http://192.168.218.193:42467 http://127.0.0.1:42467   
+
+Docs: https://docs.min.io
+
+apiVersion: v1
+items:
+- apiVersion: v1
+  kind: PersistentVolume
+  metadata:
+    annotations:
+      pv.kubernetes.io/provisioned-by: hostpath.csi.k8s.io
+      volume.kubernetes.io/provisioner-deletion-secret-name: ""
+      volume.kubernetes.io/provisioner-deletion-secret-namespace: ""
+    creationTimestamp: "2026-09-20T22:08:39Z"
+    finalizers:
+    - external-provisioner.volume.kubernetes.io/finalizer
+    - kubernetes.io/pv-protection
+    name: pvc-dea64228-276b-4e6c-bfad-e8fbdfd1b934
+    resourceVersion: "4161"
+    uid: 3ba789ab-e027-4415-84b2-a09b4f5fa20b
+  spec:
+    accessModes:
+    - ReadWriteOncePod
+    capacity:
+      storage: 1Gi
+    claimRef:
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      name: data-beta-1
+      namespace: fleets
+      resourceVersion: "4156"
+      uid: dea64228-276b-4e6c-bfad-e8fbdfd1b934
+    csi:
+      driver: hostpath.csi.k8s.io
+      volumeAttributes:
+        kind: fast
+        storage.kubernetes.io/csiProvisionerIdentity: 1789941544166-3867-hostpath.csi.k8s.io-celld-strict-f16e1e45-worker2
+      volumeHandle: d5b72421-b53f-11f1-984b-d6981b056701
+    nodeAffinity:
+      required:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: topology.hostpath.csi/node
+            operator: In
+            values:
+            - celld-strict-f16e1e45-worker2
+    persistentVolumeReclaimPolicy: Delete
+    storageClassName: disposable
+    volumeMode: Filesystem
+  status:
+    lastPhaseTransitionTime: "2026-09-20T22:08:39Z"
+    phase: Bound
+- apiVersion: v1
+  kind: PersistentVolume
+  metadata:
+    annotations:
+      pv.kubernetes.io/provisioned-by: hostpath.csi.k8s.io
+      volume.kubernetes.io/provisioner-deletion-secret-name: ""
+      volume.kubernetes.io/provisioner-deletion-secret-namespace: ""
+    creationTimestamp: "2026-09-20T21:59:44Z"
+    finalizers:
+    - external-provisioner.volume.kubernetes.io/finalizer
+    - kubernetes.io/pv-protection
+    name: pvc-efe13383-f927-4e87-af6a-8007110933d0
+    resourceVersion: "1912"
+    uid: 8875d6d9-af2a-4ec1-934a-9fe4a552489e
+  spec:
+    accessModes:
+    - ReadWriteOncePod
+    capacity:
+      storage: 1Gi
+    claimRef:
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      name: data-beta-0
+      namespace: fleets
+      resourceVersion: "1905"
+      uid: efe13383-f927-4e87-af6a-8007110933d0
+    csi:
+      driver: hostpath.csi.k8s.io
+      volumeAttributes:
+        kind: fast
+        storage.kubernetes.io/csiProvisionerIdentity: 1789941544139-1009-hostpath.csi.k8s.io-celld-strict-f16e1e45-worker
+      volumeHandle: 96995822-b53e-11f1-b509-82077a1c5ed4
+    nodeAffinity:
+      required:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: topology.hostpath.csi/node
+            operator: In
+            values:
+            - celld-strict-f16e1e45-worker
+    persistentVolumeReclaimPolicy: Delete
+    storageClassName: disposable
+    volumeMode: Filesystem
+  status:
+    lastPhaseTransitionTime: "2026-09-20T21:59:44Z"
+    phase: Bound
+kind: List
+metadata:
+  resourceVersion: ""
+
+NAME               STATUS    VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE   VOLUMEMODE
+data-beta-0        Bound     pvc-efe13383-f927-4e87-af6a-8007110933d0   1Gi        RWOP           disposable     <unset>                 22m   Filesystem
+data-beta-1        Bound     pvc-dea64228-276b-4e6c-bfad-e8fbdfd1b934   1Gi        RWOP           disposable     <unset>                 13m   Filesystem
+data-collision-0   Pending                                                                        disposable     <unset>                 22m   Filesystem
+
+apiVersion: v1
+items: []
+kind: List
+metadata:
+  resourceVersion: ""
+
+2026-09-20T22:21:39.600848Z  INFO celld::ownership_store: refreshed the shared fleet sample event="fleet_sample_refreshed" leases=2 elapsed_ms=663
+2026-09-20T22:21:39.954243Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1001830 idle_us=1001715 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:40.868403Z  INFO celld::actor: node lease attempt started event="node_lease_attempt_started" node=e00fa53d-da67-4d21-a759-5100ea8ada0b attempt="renew" prior_authority_headroom_ms=6665
+2026-09-20T22:21:40.981125Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1026831 idle_us=1026573 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:41.129174Z  INFO celld::actor: node lease attempt completed event="node_lease_attempt" node=e00fa53d-da67-4d21-a759-5100ea8ada0b attempt="renew" outcome="applied" elapsed_ms=261 prior_authority_headroom_ms=6404 candidate_headroom_ms=9739
+2026-09-20T22:21:42.007166Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1026003 idle_us=1025945 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:43.009678Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1002455 idle_us=1002371 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:44.010941Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1001243 idle_us=1001194 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:44.204110Z  INFO celld::actor: node lease attempt started event="node_lease_attempt_started" node=e00fa53d-da67-4d21-a759-5100ea8ada0b attempt="renew" prior_authority_headroom_ms=6664
+2026-09-20T22:21:44.500003Z  INFO celld::actor: node lease attempt completed event="node_lease_attempt" node=e00fa53d-da67-4d21-a759-5100ea8ada0b attempt="renew" outcome="applied" elapsed_ms=296 prior_authority_headroom_ms=6368 candidate_headroom_ms=9704
+2026-09-20T22:21:45.031610Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1020621 idle_us=1020550 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:46.040266Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1008639 idle_us=1008486 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:47.066826Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1026534 idle_us=1026423 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:47.538617Z  INFO celld::actor: node lease attempt started event="node_lease_attempt_started" node=e00fa53d-da67-4d21-a759-5100ea8ada0b attempt="renew" prior_authority_headroom_ms=6666
+2026-09-20T22:21:47.779368Z  INFO celld::actor: node lease attempt completed event="node_lease_attempt" node=e00fa53d-da67-4d21-a759-5100ea8ada0b attempt="renew" outcome="applied" elapsed_ms=241 prior_authority_headroom_ms=6425 candidate_headroom_ms=9759
+2026-09-20T22:21:48.089930Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1023058 idle_us=1023002 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:49.096398Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1006449 idle_us=1006354 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:50.097440Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1001014 idle_us=1000940 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:50.873763Z  INFO celld::actor: node lease attempt started event="node_lease_attempt_started" node=e00fa53d-da67-4d21-a759-5100ea8ada0b attempt="renew" prior_authority_headroom_ms=6665
+2026-09-20T22:21:51.104679Z  INFO celld::actor: node lease attempt completed event="node_lease_attempt" node=e00fa53d-da67-4d21-a759-5100ea8ada0b attempt="renew" outcome="applied" elapsed_ms=230 prior_authority_headroom_ms=6434 candidate_headroom_ms=9769
+2026-09-20T22:21:51.106714Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1009243 idle_us=1009117 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:52.129510Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1022773 idle_us=1022705 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:53.129691Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1000157 idle_us=1000068 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:54.154008Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1024296 idle_us=1024081 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:54.209443Z  INFO celld::actor: node lease attempt started event="node_lease_attempt_started" node=e00fa53d-da67-4d21-a759-5100ea8ada0b attempt="renew" prior_authority_headroom_ms=6664
+2026-09-20T22:21:54.454935Z  INFO celld::actor: node lease attempt completed event="node_lease_attempt" node=e00fa53d-da67-4d21-a759-5100ea8ada0b attempt="renew" outcome="applied" elapsed_ms=246 prior_authority_headroom_ms=6419 candidate_headroom_ms=9755
+2026-09-20T22:21:54.736322Z  INFO celld::ownership_store: refreshed the shared fleet sample event="fleet_sample_refreshed" leases=2 elapsed_ms=792
+2026-09-20T22:21:55.178181Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1024151 idle_us=1024080 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:56.182466Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1004263 idle_us=1004186 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:57.185575Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1003092 idle_us=1003000 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:57.553533Z  INFO celld::actor: node lease attempt started event="node_lease_attempt_started" node=e00fa53d-da67-4d21-a759-5100ea8ada0b attempt="renew" prior_authority_headroom_ms=6656
+2026-09-20T22:21:57.784411Z  INFO celld::actor: node lease attempt completed event="node_lease_attempt" node=e00fa53d-da67-4d21-a759-5100ea8ada0b attempt="renew" outcome="applied" elapsed_ms=231 prior_authority_headroom_ms=6425 candidate_headroom_ms=9769
+2026-09-20T22:21:58.205941Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1020334 idle_us=1020267 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:59.227045Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1021082 idle_us=1021035 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:00.249155Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1022093 idle_us=1022021 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:00.889174Z  INFO celld::actor: node lease attempt started event="node_lease_attempt_started" node=e00fa53d-da67-4d21-a759-5100ea8ada0b attempt="renew" prior_authority_headroom_ms=6664
+2026-09-20T22:22:01.141344Z  INFO celld::actor: node lease attempt completed event="node_lease_attempt" node=e00fa53d-da67-4d21-a759-5100ea8ada0b attempt="renew" outcome="applied" elapsed_ms=252 prior_authority_headroom_ms=6412 candidate_headroom_ms=9748
+2026-09-20T22:22:01.270972Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1021800 idle_us=1021732 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:02.274281Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1003289 idle_us=1003195 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:03.275796Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1001487 idle_us=1001410 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:04.224453Z  INFO celld::actor: node lease attempt started event="node_lease_attempt_started" node=e00fa53d-da67-4d21-a759-5100ea8ada0b attempt="renew" prior_authority_headroom_ms=6665
+2026-09-20T22:22:04.295807Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1019917 idle_us=1019829 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:04.478112Z  INFO celld::actor: node lease attempt completed event="node_lease_attempt" node=e00fa53d-da67-4d21-a759-5100ea8ada0b attempt="renew" outcome="applied" elapsed_ms=254 prior_authority_headroom_ms=6411 candidate_headroom_ms=9746
+2026-09-20T22:22:05.319587Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1023762 idle_us=1023706 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:06.320221Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1000597 idle_us=1000533 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:07.325753Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1005516 idle_us=1005446 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:07.559929Z  INFO celld::actor: node lease attempt started event="node_lease_attempt_started" node=e00fa53d-da67-4d21-a759-5100ea8ada0b attempt="renew" prior_authority_headroom_ms=6665
+2026-09-20T22:22:07.837244Z  INFO celld::actor: node lease attempt completed event="node_lease_attempt" node=e00fa53d-da67-4d21-a759-5100ea8ada0b attempt="renew" outcome="applied" elapsed_ms=277 prior_authority_headroom_ms=6387 candidate_headroom_ms=9722
+2026-09-20T22:22:08.350501Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1024701 idle_us=1024626 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:09.358227Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1007685 idle_us=1007619 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:10.358858Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1000596 idle_us=1000527 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:10.895696Z  INFO celld::actor: node lease attempt started event="node_lease_attempt_started" node=e00fa53d-da67-4d21-a759-5100ea8ada0b attempt="renew" prior_authority_headroom_ms=6664
+2026-09-20T22:22:11.127174Z  INFO celld::actor: node lease attempt completed event="node_lease_attempt" node=e00fa53d-da67-4d21-a759-5100ea8ada0b attempt="renew" outcome="applied" elapsed_ms=232 prior_authority_headroom_ms=6432 candidate_headroom_ms=9768
+2026-09-20T22:22:11.382930Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1024047 idle_us=1023997 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:12.409062Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1026116 idle_us=1026039 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:13.411967Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1002881 idle_us=1002800 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:14.230953Z  INFO celld::actor: node lease attempt started event="node_lease_attempt_started" node=e00fa53d-da67-4d21-a759-5100ea8ada0b attempt="renew" prior_authority_headroom_ms=6665
+2026-09-20T22:22:14.437445Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1025452 idle_us=1025394 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:14.473131Z  INFO celld::actor: node lease attempt completed event="node_lease_attempt" node=e00fa53d-da67-4d21-a759-5100ea8ada0b attempt="renew" outcome="applied" elapsed_ms=242 prior_authority_headroom_ms=6422 candidate_headroom_ms=9757
+2026-09-20T22:22:14.653313Z  INFO celld::ownership_store: refreshed the shared fleet sample event="fleet_sample_refreshed" leases=3 elapsed_ms=796
+2026-09-20T22:22:15.463373Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1025911 idle_us=1025845 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:16.486195Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1022802 idle_us=1022732 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:17.509644Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1023431 idle_us=1023302 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:17.566916Z  INFO celld::actor: node lease attempt started event="node_lease_attempt_started" node=e00fa53d-da67-4d21-a759-5100ea8ada0b attempt="renew" prior_authority_headroom_ms=6664
+2026-09-20T22:22:17.796332Z  INFO celld::pool: isolate started isolate=13 slot=0 total=1
+2026-09-20T22:22:17.864602Z  INFO celld::actor: node lease attempt completed event="node_lease_attempt" node=e00fa53d-da67-4d21-a759-5100ea8ada0b attempt="renew" outcome="applied" elapsed_ms=297 prior_authority_headroom_ms=6366 candidate_headroom_ms=9702
+2026-09-20T22:22:18.534406Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1024722 idle_us=1024664 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:19.558829Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1024408 idle_us=1024349 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:20.580980Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1022131 idle_us=1021960 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:20.902931Z  INFO celld::actor: node lease attempt started event="node_lease_attempt_started" node=e00fa53d-da67-4d21-a759-5100ea8ada0b attempt="renew" prior_authority_headroom_ms=6664
+2026-09-20T22:22:21.607479Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1026474 idle_us=1026398 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:22.608603Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1001103 idle_us=1000980 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:23.391110Z  INFO celld::pool: isolate retiring isolate=13 slot=0
+2026-09-20T22:22:23.391786Z  INFO celld::pool: isolate freed isolate=13 slot=0
+2026-09-20T22:22:23.403162Z  WARN celld::actor: node lease attempt did not apply event="node_lease_attempt" node=e00fa53d-da67-4d21-a759-5100ea8ada0b attempt="renew" outcome="ambiguous" elapsed_ms=2500 prior_authority_headroom_ms=4163 candidate_headroom_ms=7499
+2026-09-20T22:22:23.633576Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1024955 idle_us=1024879 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:24.657012Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1023417 idle_us=1023347 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:25.667983Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1010948 idle_us=1010833 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:26.677388Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1009387 idle_us=1009118 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:27.570012Z  WARN celld::actor: SELF-FENCE: node lease not renewed within TTL — halting event="node_lease_watchdog_fence" code=3
+
+2026-09-20T22:21:49.770950Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1026126 idle_us=1025985 stall_us=0 apply_us=0 scan_us=125 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:50.705032Z  INFO celld: append routed event="log_append_router" collect_ms=0 append_ms=0 body_len=97
+2026-09-20T22:21:50.775872Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1004898 idle_us=1004735 stall_us=0 apply_us=0 scan_us=116 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:51.801060Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1025158 idle_us=1024955 stall_us=0 apply_us=0 scan_us=185 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:52.306691Z  INFO celld::actor: node lease attempt started event="node_lease_attempt_started" node=beta-0 attempt="renew" prior_authority_headroom_ms=6665
+2026-09-20T22:21:52.594810Z  INFO celld::actor: node lease attempt completed event="node_lease_attempt" node=beta-0 attempt="renew" outcome="applied" elapsed_ms=288 prior_authority_headroom_ms=6377 candidate_headroom_ms=9712
+2026-09-20T22:21:52.714881Z  INFO celld: append routed event="log_append_router" collect_ms=0 append_ms=0 body_len=97
+2026-09-20T22:21:52.824378Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1023299 idle_us=1023135 stall_us=0 apply_us=0 scan_us=119 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:53.845179Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1020776 idle_us=1020670 stall_us=0 apply_us=0 scan_us=89 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:54.724739Z  INFO celld: append routed event="log_append_router" collect_ms=0 append_ms=0 body_len=97
+2026-09-20T22:21:54.870565Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1025358 idle_us=1025228 stall_us=0 apply_us=0 scan_us=112 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:55.620059Z  INFO celld::ownership_store: refreshed the shared fleet sample event="fleet_sample_refreshed" leases=3 elapsed_ms=741
+2026-09-20T22:21:55.641730Z  INFO celld::actor: node lease attempt started event="node_lease_attempt_started" node=beta-0 attempt="renew" prior_authority_headroom_ms=6665
+2026-09-20T22:21:55.878973Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1008383 idle_us=1008243 stall_us=0 apply_us=0 scan_us=125 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:55.930830Z  INFO celld::actor: node lease attempt completed event="node_lease_attempt" node=beta-0 attempt="renew" outcome="applied" elapsed_ms=289 prior_authority_headroom_ms=6376 candidate_headroom_ms=9711
+2026-09-20T22:21:56.735785Z  INFO celld: append routed event="log_append_router" collect_ms=0 append_ms=0 body_len=97
+2026-09-20T22:21:56.885610Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1006609 idle_us=1006422 stall_us=0 apply_us=0 scan_us=163 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:57.891887Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1006236 idle_us=1006091 stall_us=0 apply_us=0 scan_us=131 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:58.745039Z  INFO celld: append routed event="log_append_router" collect_ms=0 append_ms=0 body_len=97
+2026-09-20T22:21:58.912089Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1020175 idle_us=1020070 stall_us=0 apply_us=0 scan_us=94 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:21:58.976494Z  INFO celld::actor: node lease attempt started event="node_lease_attempt_started" node=beta-0 attempt="renew" prior_authority_headroom_ms=6665
+2026-09-20T22:21:59.224057Z  INFO celld::actor: node lease attempt completed event="node_lease_attempt" node=beta-0 attempt="renew" outcome="applied" elapsed_ms=248 prior_authority_headroom_ms=6417 candidate_headroom_ms=9752
+2026-09-20T22:21:59.937755Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1025649 idle_us=1025517 stall_us=0 apply_us=0 scan_us=118 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:00.754368Z  INFO celld: append routed event="log_append_router" collect_ms=0 append_ms=0 body_len=97
+2026-09-20T22:22:00.939049Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1001277 idle_us=1001166 stall_us=0 apply_us=0 scan_us=101 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:01.963700Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1024634 idle_us=1024530 stall_us=0 apply_us=0 scan_us=93 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:02.311942Z  INFO celld::actor: node lease attempt started event="node_lease_attempt_started" node=beta-0 attempt="renew" prior_authority_headroom_ms=6665
+2026-09-20T22:22:02.554934Z  INFO celld::actor: node lease attempt completed event="node_lease_attempt" node=beta-0 attempt="renew" outcome="applied" elapsed_ms=243 prior_authority_headroom_ms=6422 candidate_headroom_ms=9757
+2026-09-20T22:22:02.762461Z  INFO celld: append routed event="log_append_router" collect_ms=0 append_ms=0 body_len=97
+2026-09-20T22:22:02.968506Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1004785 idle_us=1004630 stall_us=0 apply_us=0 scan_us=142 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:03.969983Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1001458 idle_us=1001272 stall_us=0 apply_us=0 scan_us=171 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:04.773036Z  INFO celld: append routed event="log_append_router" collect_ms=0 append_ms=0 body_len=97
+2026-09-20T22:22:04.992540Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1022541 idle_us=1022430 stall_us=0 apply_us=0 scan_us=102 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:05.646652Z  INFO celld::actor: node lease attempt started event="node_lease_attempt_started" node=beta-0 attempt="renew" prior_authority_headroom_ms=6665
+2026-09-20T22:22:05.905083Z  INFO celld::actor: node lease attempt completed event="node_lease_attempt" node=beta-0 attempt="renew" outcome="applied" elapsed_ms=259 prior_authority_headroom_ms=6406 candidate_headroom_ms=9741
+2026-09-20T22:22:06.010620Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1018063 idle_us=1017923 stall_us=0 apply_us=0 scan_us=126 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:06.785221Z  INFO celld: append routed event="log_append_router" collect_ms=0 append_ms=0 body_len=97
+2026-09-20T22:22:07.036261Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1025616 idle_us=1025527 stall_us=0 apply_us=0 scan_us=75 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:08.036372Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1000087 idle_us=999971 stall_us=0 apply_us=0 scan_us=107 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:08.797527Z  INFO celld: append routed event="log_append_router" collect_ms=0 append_ms=0 body_len=97
+2026-09-20T22:22:08.981912Z  INFO celld::actor: node lease attempt started event="node_lease_attempt_started" node=beta-0 attempt="renew" prior_authority_headroom_ms=6665
+2026-09-20T22:22:09.043303Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1006910 idle_us=1006780 stall_us=0 apply_us=0 scan_us=119 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:09.252310Z  INFO celld::actor: node lease attempt completed event="node_lease_attempt" node=beta-0 attempt="renew" outcome="applied" elapsed_ms=271 prior_authority_headroom_ms=6394 candidate_headroom_ms=9729
+2026-09-20T22:22:10.067767Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1024439 idle_us=1024281 stall_us=0 apply_us=0 scan_us=131 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:10.660844Z  INFO celld::ownership_store: refreshed the shared fleet sample event="fleet_sample_refreshed" leases=3 elapsed_ms=772
+2026-09-20T22:22:10.810737Z  INFO celld: append routed event="log_append_router" collect_ms=0 append_ms=0 body_len=97
+2026-09-20T22:22:11.091456Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1023670 idle_us=1023561 stall_us=0 apply_us=0 scan_us=96 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:12.112679Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1021203 idle_us=1021039 stall_us=0 apply_us=0 scan_us=153 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:12.316770Z  INFO celld::actor: node lease attempt started event="node_lease_attempt_started" node=beta-0 attempt="renew" prior_authority_headroom_ms=6665
+2026-09-20T22:22:12.534058Z  INFO celld::actor: node lease attempt completed event="node_lease_attempt" node=beta-0 attempt="renew" outcome="applied" elapsed_ms=218 prior_authority_headroom_ms=6447 candidate_headroom_ms=9782
+2026-09-20T22:22:12.815929Z  INFO celld: append routed event="log_append_router" collect_ms=0 append_ms=0 body_len=97
+2026-09-20T22:22:13.135647Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1022912 idle_us=1022761 stall_us=0 apply_us=0 scan_us=136 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:14.160334Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1024469 idle_us=1024338 stall_us=0 apply_us=0 scan_us=114 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:14.827091Z  INFO celld: append routed event="log_append_router" collect_ms=0 append_ms=0 body_len=97
+2026-09-20T22:22:15.185215Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1024854 idle_us=1024744 stall_us=0 apply_us=0 scan_us=93 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:15.651228Z  INFO celld::actor: node lease attempt started event="node_lease_attempt_started" node=beta-0 attempt="renew" prior_authority_headroom_ms=6665
+2026-09-20T22:22:15.935849Z  INFO celld::actor: node lease attempt completed event="node_lease_attempt" node=beta-0 attempt="renew" outcome="applied" elapsed_ms=284 prior_authority_headroom_ms=6381 candidate_headroom_ms=9716
+2026-09-20T22:22:16.186047Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1000803 idle_us=1000674 stall_us=0 apply_us=0 scan_us=115 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:16.837992Z  INFO celld: append routed event="log_append_router" collect_ms=0 append_ms=0 body_len=97
+2026-09-20T22:22:17.186578Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1000507 idle_us=1000380 stall_us=0 apply_us=0 scan_us=111 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:18.209980Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1023379 idle_us=1023282 stall_us=0 apply_us=0 scan_us=85 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:18.847116Z  INFO celld: append routed event="log_append_router" collect_ms=0 append_ms=0 body_len=97
+2026-09-20T22:22:18.986517Z  INFO celld::actor: node lease attempt started event="node_lease_attempt_started" node=beta-0 attempt="renew" prior_authority_headroom_ms=6665
+2026-09-20T22:22:19.196309Z  INFO celld::actor: node lease attempt completed event="node_lease_attempt" node=beta-0 attempt="renew" outcome="applied" elapsed_ms=210 prior_authority_headroom_ms=6455 candidate_headroom_ms=9790
+2026-09-20T22:22:19.229640Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1019645 idle_us=1019505 stall_us=0 apply_us=0 scan_us=128 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:20.249529Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1019872 idle_us=1019762 stall_us=0 apply_us=0 scan_us=95 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:20.856831Z  INFO celld: append routed event="log_append_router" collect_ms=0 append_ms=0 body_len=97
+2026-09-20T22:22:21.253090Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1003535 idle_us=1003328 stall_us=0 apply_us=0 scan_us=193 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:22.256742Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1003628 idle_us=1003471 stall_us=0 apply_us=0 scan_us=131 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:22.321055Z  INFO celld::actor: node lease attempt started event="node_lease_attempt_started" node=beta-0 attempt="renew" prior_authority_headroom_ms=6665
+2026-09-20T22:22:22.866720Z  INFO celld: append routed event="log_append_router" collect_ms=0 append_ms=0 body_len=97
+2026-09-20T22:22:23.279670Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1022886 idle_us=1022758 stall_us=0 apply_us=0 scan_us=107 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:24.305859Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1026168 idle_us=1026037 stall_us=0 apply_us=0 scan_us=115 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:24.823172Z  WARN celld::actor: node lease attempt did not apply event="node_lease_attempt" node=beta-0 attempt="renew" outcome="ambiguous" elapsed_ms=2502 prior_authority_headroom_ms=4163 candidate_headroom_ms=7498
+2026-09-20T22:22:24.876653Z  INFO celld: append routed event="log_append_router" collect_ms=0 append_ms=0 body_len=97
+2026-09-20T22:22:25.309162Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1003286 idle_us=1003143 stall_us=0 apply_us=0 scan_us=125 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:26.334868Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1025676 idle_us=1025341 stall_us=0 apply_us=0 scan_us=318 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:27.335144Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1000238 idle_us=1000076 stall_us=0 apply_us=0 scan_us=147 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:28.358920Z  INFO celld::ltx_repl: ship loop time ledger event="log_ship_loop" wall_us=1023760 idle_us=1023638 stall_us=0 apply_us=0 scan_us=109 group_us=0 capture_us=0 submit_us=0 rounds=0
+2026-09-20T22:22:28.989176Z  WARN celld::actor: SELF-FENCE: node lease not renewed within TTL — halting event="node_lease_watchdog_fence" code=3
+
+{"time":"2026-09-20T22:20:06.839695676Z","level":"INFO","msg":"starting server","name":"health probe","addr":"[::]:8082"}
+{"time":"2026-09-20T22:20:06.8397558Z","level":"INFO","msg":"Attempting to acquire leader lease...","logger":"leaderelection","lock":"celld-system/celld-operator.celld.eric.dev"}
+{"time":"2026-09-20T22:20:24.996096152Z","level":"INFO","msg":"Successfully acquired lease","logger":"leaderelection","lock":"celld-system/celld-operator.celld.eric.dev"}
+{"time":"2026-09-20T22:20:24.996440519Z","level":"INFO","msg":"Starting EventSource","controller":"celldfleet","controllerGroup":"celld.eric.dev","controllerKind":"CelldFleet","source":"kind source: *v1alpha1.CelldFleet"}
+{"time":"2026-09-20T22:20:25.203229597Z","level":"INFO","msg":"Starting Controller","controller":"celldfleet","controllerGroup":"celld.eric.dev","controllerKind":"CelldFleet"}
+{"time":"2026-09-20T22:20:25.203291762Z","level":"INFO","msg":"Starting workers","controller":"celldfleet","controllerGroup":"celld.eric.dev","controllerKind":"CelldFleet","worker count":4}
+
+Cleaning up only cluster celld-strict-f16e1e45
+exit status 1
+make: *** [integration] Error 1

@@ -13,15 +13,15 @@ rules:
   - apiGroups: ['']
     resources: [services]
     verbs: [get, create]
-  # list covers the single retained-claim inventory the lifecycle reads per reconcile.
+  # Delete applies only to exact UID/RV-bound claims after captured strict removal proof.
   - apiGroups: ['']
     resources: [persistentvolumeclaims]
-    verbs: [get, list, create]
+    verbs: [get, list, create, delete]
   - apiGroups: ['']
     resources: [pods]
     verbs: [get, list, update, delete]
   - apiGroups: ['']
-    resources: [secrets, configmaps]
+    resources: [secrets]
     verbs: [get, create]
   - apiGroups: [metrics.k8s.io]
     resources: [pods]

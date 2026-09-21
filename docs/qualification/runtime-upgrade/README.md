@@ -1,46 +1,62 @@
-# Local released-image upgrade qualification
+# Runtime upgrade qualification
 
-Run: September 18, 2026 local time (September 19 UTC), macOS/Colima Docker,
-MinIO, two PersistentFleet celld processes and retained Docker volumes. No cloud
-resources, Kubernetes context, custom celld build or upstream changes.
+**PASS:** both Bucket and PersistentFleet completed a real
+`0.5.1-ewhauser.2 → 0.5.1-ewhauser.3` upgrade on 2026-09-21.
+The maintenance suite exited zero. The operator and launcher were built from
+exact source `010aca2aa797f868cbd9ceca44e7e50dcb564fe1`; the runtime executed as
+native Linux arm64 in the disposable Kind cluster `celld-strict-507fb9f1`.
 
-Command:
-
+```sh
+CELLD_RUNTIME_IMAGE=ghcr.io/ewhauser/celld@sha256:a00da2bcaeaee6879d658477cd1bdb354a5de55fa9e7f0ab5e2fd95e6e0ce080 \
+CELLD_UPGRADE_IMAGE=ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29 \
+make integration-maintenance
 ```
-.qualification-venv/bin/python hack/qualification/versions.py .qualification-runs/versions/live7
-```
 
-The 420-second bounded experiment completed successfully and removed all owned
-containers, volumes and its Docker network. The exact canonical release digests,
-OCI revisions, architecture and harness hashes are in `provenance.json`.
+The [event log](events.log) includes the command, source, every test marker and
+final cleanup. [result.json](result.json) records runtime sources, exact image
+identities and checksums for all raw evidence. The [identity receipt](identities.json)
+compares healthy pre-upgrade and post-upgrade Pod and disk snapshots.
 
-Observed sequence:
+Each fleet wrote twelve unique acknowledged IDs across twelve cells. Every ID
+and stored value matched after coordinated restart and again after upgrade.
+Restart completed across controller replacement; another controller replacement
+did not replay the completed token. Upgrade required the new image on every Pod
+and disjoint old/new Pod UIDs. PersistentFleet additionally required both old PVs
+to disappear, no VolumeAttachments to reference them, and fresh PVC UIDs, PV UIDs
+and CSI handles. Final deletion removed compute and storage while retaining each
+bucket reservation. The owned cluster and both read-only observers exited cleanly.
 
-1. Start unchanged v0.4.1 processes a and b; both become healthy.
-2. Write 12 operations and record only successful acknowledgments.
-3. Stop a, leave b alive until its recovery positively seals a's exact generation,
-   then stop b. Require both original logs sealed and all source leases expired.
-4. Start unchanged v0.5.0 on the same retained volumes. Both become healthy with
-   different ownership generations; no loss objects appear in the observed log inventory.
-5. Read all 12 original operations through b. Write six new operations through b,
-   then read all 18 through a. Missing operations: zero.
+This used Kubernetes v1.31.4, Calico v3.29.3, MinIO with a bounded 2 GiB
+memory-backed volume, and distributed hostpath CSI with external-provisioner
+v6.3.0, Delete/WFFC and ReadWriteOncePod. The observer confirmed the external
+provisioner's deletion finalizer on both generations of PersistentFleet PVs.
+Hostpath CSI has no attach operation, so absence of VolumeAttachments does not
+qualify cloud detach behavior.
 
-`docker.log` and `result.json` contain bounded result evidence. Actual v0.4.1
-private-state and node-record samples are retained as codec regression fixtures
-in `internal/runtime/catalog/testdata/`.
+## Environment failure preserved
 
-This is a concrete forward runtime/storage compatibility test. It is not a live
-Kubernetes operator upgrade or EKS/EBS qualification, rolling upgrade, arbitrary
-version or rollback qualification. The fixture explicitly waits for a live peer
-to seal the first stopped source before stopping the last peer. The coordinated
-operator currently stops every member before its all-sealed gate and therefore
-can remain safely blocked on a busy source fleet with unsealed logs. Its completed
-all-sealed transition, crash/lost-response recovery, exact image authority,
-new generations and claim retention are tested with fake Kubernetes/runtime
-clients. Unsealed full-stop recovery needs a separately qualified protocol;
-no successful live controller upgrade is claimed here.
+The preceding local `.3` faults attempt, cluster `celld-strict-a4b7efd8`, failed
+before any celld runtime started. All four launcher init containers reported
+`no space left on device` while copying the launcher. The harness timed out
+waiting for initial readiness and cleaned up its owned cluster. That attempt
+provides **no fault-scenario result**.
 
-During development, actual images exposed two distinct configuration contracts:
-v0.4.1 requires its drain-token timeout within the shutdown budget; v0.5.0 rejects
-that removed setting. The operator installs the version-specific container
-configuration in the same zero-replica CAS as the target image.
+Only this task's completed amd64 image smoke artifact and identified unused
+operator/launcher build-cache entries were removed. Free Docker disk space rose
+from 7.3 to 8.4 GiB before the successful upgrade run. No unrelated containers,
+images or caches were pruned. The successful run required no intervention;
+read-only observers captured storage pressure and resource transitions. Its raw
+log, the failed log and observer outputs are archived with SHA256 receipts in
+[result.json](result.json), under:
+
+`/Users/ewhauser/.codex/artifacts/celld-operator/strict-control-plane/2026-09-21/ewhauser3-local-004747Z/`
+
+## Scope
+
+Only base isolation and graceful maintenance ran here. The old `.2` runtime was
+not subjected to its known lease-loss recovery failure. Hosted `.3` fault and
+other suite results are separate evidence. This closes the previously unrun
+actual different-runtime upgrade gate; it does not qualify AWS/EBS, EC2 loss,
+cross-host or cross-boot disk recovery, MinIO Pod replacement, or a published
+operator image. See the [runtime startup-recovery evidence](../native-peer-startup/README.md)
+for the distinct `.2` recovery defect and `.3` fix.

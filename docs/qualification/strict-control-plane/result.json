@@ -1,0 +1,190 @@
+{
+  "schema_version": 1,
+  "result": "PASS",
+  "command": "make integration",
+  "repository_commit": "6ea528756e721d189eea5ab7283a1e3ab45ba815",
+  "cluster": "celld-strict-b936d780",
+  "host_platform": "darwin/arm64",
+  "runtime_platform": "linux/arm64",
+  "operator_and_launcher": "built locally from the exact repository commit",
+  "runtime": {
+    "version": "0.5.1-ewhauser.2",
+    "source_commit": "2a65a4df99bed5254bdd679df57ed98556454dec",
+    "index": "ghcr.io/ewhauser/celld@sha256:a00da2bcaeaee6879d658477cd1bdb354a5de55fa9e7f0ab5e2fd95e6e0ce080",
+    "executed_platform_manifest": "sha256:e4014d56abd9b8830a0a4a908fd8cdcd806a8b2220892bc4d3d962b9f9319e06",
+    "release_url": "https://github.com/ewhauser/celld/releases/tag/v0.5.1-ewhauser.2"
+  },
+  "oracle": {
+    "distinct_cells_per_fleet": 12,
+    "new_ids_per_phase": 12,
+    "retains_all_prior_ids": true,
+    "checks_exact_response_id": true,
+    "fresh_batch_immediately_before_s3_partition": true
+  },
+  "source_boundary": {
+    "includes_stable_persistent_peer_dns": true,
+    "includes_pre_replacement_runtime_log_capture": true,
+    "includes_later_launcher_transport_retry": false,
+    "later_launcher_fix_commit": "ed09768",
+    "includes_maintained_pod_ip_change_and_expanded_dns_assertions": false,
+    "supplemental_read_only_observer": "ewhauser2-stable-dns-pod-rebinding.json"
+  },
+  "not_qualified": [
+    "Different-digest runtime upgrade: no second compatible immutable runtime supplied",
+    "AWS EKS, EBS CSI deletion, EC2 loss and managed-service behavior",
+    "Cross-host or cross-boot disk reuse",
+    "Recovery with unavailable or sufficiently delayed predecessor peers",
+    "Object-store durability across MinIO Pod replacement",
+    "Published operator image: operator and launcher were built from source"
+  ],
+  "prior_attempts": [
+    {
+      "result": "ENVIRONMENT_FAILURE",
+      "runtime": "0.5.1-ewhauser.1",
+      "log": "integration-initial-storage-pressure.log",
+      "detail": "MinIO 507 on container overlay before any fleet started; isolated fixture changed to bounded memory-backed storage.",
+      "sha256": "30fbde1e5aef545f4c8706d55fbd7d105e851978143d3938ae15a52e3d713060",
+      "bytes": 7959
+    },
+    {
+      "result": "FAIL",
+      "repository_commit": "92c433e",
+      "runtime": "0.5.1-ewhauser.1",
+      "log": "integration.log",
+      "detail": "Old automatic readiness-recovery assumption was invalid after S3 lease expiry; runtime self-fenced, claims remained. Did not reach maintenance. One recorded completed-probe fixture cleanup intervention.",
+      "sha256": "071de46413849516eec884c7b3530b51e2de6d7d1021f1f17698d3c62682f851",
+      "bytes": 149569
+    },
+    {
+      "result": "PASS_LIMITED_ORACLE",
+      "repository_commit": "1bd7545",
+      "runtime": "0.5.1-ewhauser.1",
+      "log": "faults-lease-loss-recovery.log",
+      "detail": "Four manager crashes and explicit same-host lease-loss recovery passed; only twelve historical IDs in one cell, without immediate fresh-tail writes.",
+      "sha256": "da7073117a31efa7c1375b49a0fa266d0295fd48988f59727ba46d66c8e7438b",
+      "bytes": 4618
+    },
+    {
+      "result": "FAIL_ACKNOWLEDGED_TAIL_LOSS",
+      "repository_commit": "4490a2067d819fddcebb7a3d57d9bf912c24cbb5",
+      "runtime": "0.5.1-ewhauser.1",
+      "job_url": "https://github.com/ewhauser/celld-operator/actions/runs/35541999300/job/106161255348",
+      "raw_log": "/Users/ewhauser/.codex/artifacts/celld/0.5.1-ewhauser.2/lease-address-recovery/hosted-fresh-tail-failure.log",
+      "sha256": "268c35960863f4238cc0b63514dee210190f8e334dd0a4da78318634fa073542",
+      "detail": "First fresh beta acknowledgement missing after retained-disk recovery; earlier twelve beta and all twenty-four alpha readable. Native .2 matched reproduction isolated stale Pod-IP peer addresses; stable DNS fixed the operator.",
+      "bytes": 319934
+    },
+    {
+      "result": "SUPERSEDED_CANCELLED",
+      "repository_commit": "516120cd9bca9a70d2a8166706f4b8e69e0f34a5",
+      "runtime": "0.5.1-ewhauser.2",
+      "cluster": "celld-strict-22d06b2a",
+      "raw_log": "/Users/ewhauser/.codex/artifacts/celld-operator/strict-control-plane/2026-09-20/integration-ewhauser2-superseded.log",
+      "sha256": "adb36a78a1e72c7e902d08e971a54c6967412737d66be5351e8b04392d474586",
+      "bytes": 150194,
+      "detail": "Interrupted after setup when the independently reproduced peer-address defect was fixed. No fresh-tail result. Owned cluster cleaned normally."
+    }
+  ],
+  "exit_code": 0,
+  "log_created_at_utc": "2026-09-20T23:08:10.445532+00:00",
+  "completed_at_utc": "2026-09-20T23:44:02.362813+00:00",
+  "cleanup": {
+    "owned_cluster_removed": true,
+    "observer_exit_code": 0
+  },
+  "passed_suites": [
+    "lifecycle: Bucket and PersistentFleet",
+    "external HPA and kubectl scale",
+    "four manager crashes before/after exact workload effect",
+    "S3 latency",
+    "fresh-tail S3 lease-loss fail-stop and explicit administrative same-host recovery",
+    "coordinated restart across manager replacement with fresh PersistentFleet disks",
+    "completed maintenance token does not replay",
+    "final compute/PVC/PV deletion with retained bucket reservations"
+  ],
+  "acknowledgements_per_fleet": {
+    "after_lifecycle": 12,
+    "after_crash_boundaries": 24,
+    "after_fresh_tail_lease_loss_recovery": 36,
+    "after_coordinated_restart": 48
+  },
+  "persistent_endpoint_rebinding": {
+    "before": {
+      "beta-0": {
+        "pod_uid": "b9be1073-9e13-40ae-9671-d8a1db137852",
+        "pod_ip": "192.168.20.70",
+        "node": "celld-strict-b936d780-worker2",
+        "advertise": "beta-0.beta-peers.fleets.svc:8081"
+      },
+      "beta-1": {
+        "pod_uid": "56155c84-5357-4f1a-b257-e98f64cee5bb",
+        "pod_ip": "192.168.17.10",
+        "node": "celld-strict-b936d780-worker",
+        "advertise": "beta-1.beta-peers.fleets.svc:8081"
+      }
+    },
+    "after": {
+      "beta-0": {
+        "pod_uid": "0595ec0d-df76-463b-aec8-9fb3cc6aa635",
+        "pod_ip": "192.168.20.77",
+        "node": "celld-strict-b936d780-worker2",
+        "advertise": "beta-0.beta-peers.fleets.svc:8081"
+      },
+      "beta-1": {
+        "pod_uid": "fe1599ac-c6f0-48f6-8490-21701ffa5a7d",
+        "pod_ip": "192.168.17.12",
+        "node": "celld-strict-b936d780-worker",
+        "advertise": "beta-1.beta-peers.fleets.svc:8081"
+      }
+    },
+    "checks": {
+      "beta-0": {
+        "new_pod_uid": true,
+        "changed_ip": true,
+        "same_node": true,
+        "same_advertise": true
+      },
+      "beta-1": {
+        "new_pod_uid": true,
+        "changed_ip": true,
+        "same_node": true,
+        "same_advertise": true
+      }
+    }
+  },
+  "raw_archives": {
+    "complete_run": {
+      "path": "/Users/ewhauser/.codex/artifacts/celld-operator/strict-control-plane/2026-09-20/integration-ewhauser2-stable-dns.log",
+      "sha256": "e386e5fc55e1d0de369fa1ecb54006cc53cc454f8920b693d5e12271fe170537",
+      "bytes": 2412371
+    },
+    "pre_replacement_runtime_logs": {
+      "path": "/Users/ewhauser/.codex/artifacts/celld-operator/strict-control-plane/2026-09-20/integration-ewhauser2-stable-dns-pre-replacement-runtime.log",
+      "sha256": "178e146ac7416425d16e2f2d962baa1da038b92332c0964870e85f1c05b3af07",
+      "bytes": 2396989
+    }
+  },
+  "pre_replacement_log_targets": [
+    {
+      "pod": "alpha-0",
+      "pod_uid": "64b61155-6f41-4679-b430-9eceae96df77"
+    },
+    {
+      "pod": "alpha-1",
+      "pod_uid": "a271253f-a4ea-4009-8355-85775b5de1fb"
+    },
+    {
+      "pod": "beta-0",
+      "pod_uid": "b9be1073-9e13-40ae-9671-d8a1db137852"
+    },
+    {
+      "pod": "beta-1",
+      "pod_uid": "56155c84-5357-4f1a-b257-e98f64cee5bb"
+    }
+  ],
+  "later_source_local_validation": {
+    "path": "/Users/ewhauser/.codex/artifacts/celld/0.5.1-ewhauser.2/operator-final-local-validation.json",
+    "sha256": "a4489b55e634d23e0b61972561723a1d5beba3d2557d2b3a94c1681d9771eb21",
+    "bytes": 1645
+  }
+}

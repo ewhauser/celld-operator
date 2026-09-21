@@ -11,7 +11,7 @@ metadata:
 ---
 # Cluster-wide privileges cover only the fleet API and cluster-scoped storage
 # and node objects. Everything the operator touches inside a fleet namespace
-# (workloads, pods, claims, secrets, journal archives, policies) is granted per
+# (workloads, pods, claims, secrets, policies) is granted per
 # namespace by config/rbac/fleet-namespace.yaml. A fleet in a namespace without
 # that Role is reported as NamespaceAccessDenied rather than reconciled.
 apiVersion: rbac.authorization.k8s.io/v1
@@ -31,23 +31,15 @@ rules:
   - apiGroups: ['']
     resources: [persistentvolumes]
     verbs: [get]
-  # EC2 fencing terminates a whole instance, so before it does the operator must
-  # prove the node hosts nothing but the admitted target Pod and kube-system
-  # DaemonSets. That check spans every namespace, so it cannot be granted by the
-  # per-namespace Role; list is the only verb it needs, and the request is
-  # always narrowed server-side by spec.nodeName.
-  - apiGroups: ['']
-    resources: [pods]
-    verbs: [list]
   - apiGroups: ['']
     resources: [nodes]
-    verbs: [get, patch]
-  - apiGroups: [storage.k8s.io]
-    resources: [volumeattachments]
-    verbs: [list]
+    verbs: [get]
   - apiGroups: [storage.k8s.io]
     resources: [storageclasses]
     verbs: [get]
+  - apiGroups: [storage.k8s.io]
+    resources: [volumeattachments]
+    verbs: [list]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

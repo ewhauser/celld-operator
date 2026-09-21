@@ -1,0 +1,113 @@
+{
+  "cases": {
+    "old-ewhauser2-verified": {
+      "source_commit": "2a65a4df99bed5254bdd679df57ed98556454dec",
+      "artifact": {
+        "event": "artifact",
+        "at": 1789949917.341366,
+        "binary": "/Users/ewhauser/.codex/artifacts/celld/0.5.1-ewhauser.2/macos-arm64/celld",
+        "binary_sha256": "f9b68e9e9608d74c40a9d8e9dab1846c3532f4f51762dc25e863c0986f2146db",
+        "version": "2026-09-21T00:18:37.340273Z  WARN celld::memory: the allocator will not run a background thread, so freed pages return only when a thread allocates again error=`name` or `mib` specifies an unknown/invalid value.\ncelld 0.5.1-ewhauser.2",
+        "harness_sha256": "d7e00f5744d5118e3a812315843d7211cd6cf582fa0a0c14a9fd03c7894e6873"
+      },
+      "outcome": {
+        "event": "result",
+        "at": 1789949970.9001799,
+        "mode": "stable",
+        "acknowledged": 10,
+        "preserved": {
+          "a": 5,
+          "b": 5
+        },
+        "loss_records": [
+          "log/a/d317d7373be3eb0a96e1280170387ef8dc3497b0b113080e4164291998e18704.e1.loss.json"
+        ]
+      },
+      "withheld_witness": {
+        "event": "witness still offline",
+        "at": 1789949969.853565,
+        "delay_seconds": 2.0,
+        "first_node_health": 200,
+        "first_node_exit": null
+      },
+      "results": "/Users/ewhauser/.codex/artifacts/celld/recovery-startup-skew/old-ewhauser2-verified/results.json",
+      "full_log": "/Users/ewhauser/.codex/artifacts/celld/recovery-startup-skew/old-ewhauser2-verified.log",
+      "full_log_sha256": "72886e2549aa7d0c4fb45d2a32403f8798a2c80572d83d76d3996e85d55bcdd6"
+    },
+    "fixed-release-ewhauser3-verified": {
+      "source_commit": "739f2baa87a5bfc4bfe04e317adf6d774edf8740",
+      "artifact": {
+        "event": "artifact",
+        "at": 1789950520.5838668,
+        "binary": "/Users/ewhauser/.codex/artifacts/celld/0.5.1-ewhauser.3/macos-arm64/celld",
+        "binary_sha256": "88ecc31e36462d3d7762f131de60279308e3a18e4e7df44190523a70f6198fd4",
+        "version": "2026-09-21T00:28:40.582319Z  WARN celld::memory: the allocator will not run a background thread, so freed pages return only when a thread allocates again error=`name` or `mib` specifies an unknown/invalid value.\ncelld 0.5.1-ewhauser.3",
+        "harness_sha256": "d7e00f5744d5118e3a812315843d7211cd6cf582fa0a0c14a9fd03c7894e6873"
+      },
+      "outcome": {
+        "event": "result",
+        "at": 1789950581.6335208,
+        "mode": "stable",
+        "acknowledged": 10,
+        "preserved": {
+          "a": 10,
+          "b": 10
+        },
+        "loss_records": []
+      },
+      "withheld_witness": {
+        "event": "witness still offline",
+        "at": 1789950574.05134,
+        "delay_seconds": 2.0,
+        "first_node_health": 0,
+        "first_node_exit": null
+      },
+      "results": "/Users/ewhauser/.codex/artifacts/celld/recovery-startup-skew/fixed-release-ewhauser3-verified/results.json",
+      "full_log": "/Users/ewhauser/.codex/artifacts/celld/recovery-startup-skew/fixed-release-ewhauser3-verified.log",
+      "full_log_sha256": "1f41fa735ed2d4aeaefa93a748500daf7873b66279c671bac6d454346bb18aef"
+    },
+    "fixed-release-ewhauser3-retry-exhaustion": {
+      "source_commit": "739f2baa87a5bfc4bfe04e317adf6d774edf8740",
+      "artifact": {
+        "event": "artifact",
+        "at": 1789950521.798372,
+        "binary": "/Users/ewhauser/.codex/artifacts/celld/0.5.1-ewhauser.3/macos-arm64/celld",
+        "binary_sha256": "88ecc31e36462d3d7762f131de60279308e3a18e4e7df44190523a70f6198fd4",
+        "version": "2026-09-21T00:28:41.797280Z  WARN celld::memory: the allocator will not run a background thread, so freed pages return only when a thread allocates again error=`name` or `mib` specifies an unknown/invalid value.\ncelld 0.5.1-ewhauser.3",
+        "harness_sha256": "bb5f84a2a5e045c41cb86069aef22d59a85d98353b7ccda15c4df13932451ca3"
+      },
+      "outcome": {
+        "event": "result",
+        "at": 1789950635.212874,
+        "mode": "stable",
+        "acknowledged": 10,
+        "preserved": {
+          "a": 10,
+          "b": 10
+        },
+        "loss_records": []
+      },
+      "withheld_witness": {
+        "event": "witness still offline",
+        "at": 1789950575.447346,
+        "delay_seconds": 2.0,
+        "first_node_health": 0,
+        "first_node_exit": null
+      },
+      "retry_exhaustion": {
+        "event": "startup retries exhausted without loss",
+        "at": 1789950632.646165,
+        "exit_code": 1,
+        "loss_records": []
+      },
+      "results": "/Users/ewhauser/.codex/artifacts/celld/recovery-startup-skew/fixed-release-ewhauser3-retry-exhaustion/results.json",
+      "full_log": "/Users/ewhauser/.codex/artifacts/celld/recovery-startup-skew/fixed-release-ewhauser3-retry-exhaustion.log",
+      "full_log_sha256": "2b22da3bc63af9cc81e1a7dda809ec64cf2c7706c68e04df3320183c6a5c0f50"
+    }
+  },
+  "qualification_boundary": "Exact GitHub-built and published macOS ARM64 artifacts. Native MinIO evidence does not qualify Kubernetes or EBS.",
+  "excluded_attempts": {
+    "old-ewhauser2-controlled": "Instrumentation timeout: INFO recovery marker was disabled under default WARN logging.",
+    "fixed-local-ewhauser3": "Instrumentation treated expected health timeout as uncaught exception; corrected bounded health probe separately verifies process remains alive."
+  }
+}

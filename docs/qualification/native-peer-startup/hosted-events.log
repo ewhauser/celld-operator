@@ -1,0 +1,60 @@
+external-job.log:348: 2026-09-21T00:58:02.8804212Z PASS: HPA raises spec.replicas to its maximum
+external-job.log:349: 2026-09-21T00:58:25.2844160Z PASS: operator applies the HPA addition through current-operation state
+external-job.log:350: 2026-09-21T00:58:45.4176461Z PASS: External mode never fights the HPA; desired 3 applied 3
+external-job.log:351: 2026-09-21T00:59:18.1829964Z PASS: HPA lowers spec.replicas
+external-job.log:352: 2026-09-21T00:59:34.4475144Z PASS: HPA-requested contraction completes through the strict control plane and /scale catches up
+external-job.log:353: 2026-09-21T00:59:34.5950838Z PASS: acknowledged write readable after HPA-driven shrink; /scale consistent
+external-job.log:464: 2026-09-21T01:00:40.3105174Z PASS: strict control-plane integration suite external runtime ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29
+faults-job.log:344: 2026-09-21T00:58:09.8643607Z PASS: manager crashes at before-effect: alpha
+faults-job.log:346: 2026-09-21T00:58:29.6596593Z PASS: manager resumes exact operation: alpha
+faults-job.log:347: 2026-09-21T00:58:31.0517242Z PASS: alpha 12/12 acknowledged writes readable
+faults-job.log:350: 2026-09-21T00:59:31.0268998Z PASS: manager crashes at after-effect: alpha
+faults-job.log:352: 2026-09-21T00:59:54.4022346Z PASS: manager resumes exact operation: alpha
+faults-job.log:353: 2026-09-21T00:59:55.7301680Z PASS: alpha 12/12 acknowledged writes readable
+faults-job.log:358: 2026-09-21T01:01:59.5976625Z PASS: manager crashes at before-effect: beta
+faults-job.log:360: 2026-09-21T01:02:29.5150118Z PASS: manager resumes exact operation: beta
+faults-job.log:361: 2026-09-21T01:02:30.9301506Z PASS: beta 12/12 acknowledged writes readable
+faults-job.log:364: 2026-09-21T01:03:28.5899887Z PASS: manager crashes at after-effect: beta
+faults-job.log:366: 2026-09-21T01:03:54.3868306Z PASS: manager resumes exact operation: beta
+faults-job.log:367: 2026-09-21T01:03:55.8372887Z PASS: beta 12/12 acknowledged writes readable
+faults-job.log:372: 2026-09-21T01:05:39.3832993Z PASS: alpha 12/12 acknowledged writes readable
+faults-job.log:374: 2026-09-21T01:05:56.8188712Z PASS: S3 lease expiry stops every runtime without removal authority
+faults-job.log:5819: 2026-09-21T01:06:11.1822547Z PASS: restoring S3 does not restart failed children or delete disks held for 12 s
+faults-job.log:5820: 2026-09-21T01:06:11.1823625Z PASS: lease-loss fail-stop preserves all Pod/PVC/PV identities; no strict proof or automatic restart
+faults-job.log:5821: 2026-09-21T01:06:32.1398359Z PASS: delayed witness: replacement beta-0 has a new exact launcher child
+faults-job.log:5822: 2026-09-21T01:06:34.6318884Z PASS: delayed witness: exact predecessor recovery observes beta-1 unavailable
+faults-job.log:5823: 2026-09-21T01:06:34.6322103Z EVIDENCE: delayed witness: 2026-09-21T01:06:30.628744702Z celld predecessor recovery attempt 1 failed: node-log recovery for beta-0/e574fc2b0e9f89aaf2e18d7704b5f4d59f4e8bc8bc08a767cf03a87895cd10fa: no complete true witness among {"beta-1"} and 1 member(s) undecided; refusing to seal while member state remains unverified
+faults-job.log:5824: 2026-09-21T01:06:38.9986770Z PASS: delayed witness: recovery stays unready without loss or removal authority held for 2 s
+faults-job.log:5825: 2026-09-21T01:06:41.3480693Z PASS: delayed witness releases peer=beta-1 pod_uid=4b942662-bffe-4bdb-bca3-e18ffc8f2c5a after exact child pod_uid=a8345024-2fc7-4a73-8feb-add5a1f54efc invocation=d46193733d12ff459d151a0c9a9d89100d298a0b4c034eb68dc529327008d24e generation=a0c3dfea1affd206f97911baacd828689e2c5d167e7ad4000cd56aa3a76e493e pid=22 retried predecessor=beta-0/e574fc2b0e9f89aaf2e18d7704b5f4d59f4e8bc8bc08a767cf03a87895cd10fa without readiness or loss
+faults-job.log:5827: 2026-09-21T01:07:09.2683381Z PASS: PersistentFleet DNS rebinding pod=beta-0 old_ip=192.168.134.70 new_ip=192.168.134.75 advertise=beta-0.beta-peers.fleets.svc:8081
+faults-job.log:5828: 2026-09-21T01:07:09.4518094Z PASS: PersistentFleet DNS rebinding pod=beta-1 old_ip=192.168.3.70 new_ip=192.168.3.75 advertise=beta-1.beta-peers.fleets.svc:8081
+faults-job.log:5829: 2026-09-21T01:07:12.4578909Z PASS: alpha 24/24 acknowledged writes readable
+faults-job.log:5830: 2026-09-21T01:07:15.2328968Z PASS: beta 24/24 acknowledged writes readable
+faults-job.log:5831: 2026-09-21T01:07:15.2332038Z PASS: explicit administrative recovery uses new Pod/runtime identities and retains same-host PersistentFleet disks and every acknowledged write
+faults-job.log:5832: 2026-09-21T01:07:46.4749383Z PASS: both profiles preserve acknowledged writes across before/after-effect manager crashes, storage latency and explicit administrative recovery after lease loss
+faults-job.log:5833: 2026-09-21T01:07:46.4753395Z PASS: strict control-plane integration suite faults runtime ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29
+maintenance-job.log:341: 2026-09-21T00:57:26.4678897Z PASS: coordinated restart accepted: alpha
+maintenance-job.log:342: 2026-09-21T00:58:20.1283620Z PASS: restart completes across manager replacement: alpha
+maintenance-job.log:343: 2026-09-21T00:58:21.7742009Z PASS: alpha 12/12 acknowledged writes readable
+maintenance-job.log:344: 2026-09-21T00:58:36.3041002Z PASS: completed token does not replay: alpha held for 12 s
+maintenance-job.log:345: 2026-09-21T00:59:03.2955828Z PASS: strict final deletion: alpha
+maintenance-job.log:346: 2026-09-21T00:59:03.4625478Z PASS: alpha compute and disks deleted; bucket reservation retained
+maintenance-job.log:347: 2026-09-21T00:59:07.2525927Z PASS: coordinated restart accepted: beta
+maintenance-job.log:348: 2026-09-21T01:00:18.5626398Z PASS: restart completes across manager replacement: beta
+maintenance-job.log:349: 2026-09-21T01:00:20.4035877Z PASS: beta 12/12 acknowledged writes readable
+maintenance-job.log:350: 2026-09-21T01:00:34.4627434Z PASS: completed token does not replay: beta held for 12 s
+maintenance-job.log:351: 2026-09-21T01:01:26.3249079Z PASS: strict final deletion: beta
+maintenance-job.log:352: 2026-09-21T01:01:26.7794623Z PASS: beta compute and disks deleted; bucket reservation retained
+maintenance-job.log:353: 2026-09-21T01:01:26.7796734Z NOT RUN: different-digest runtime upgrade; set CELLD_UPGRADE_IMAGE to qualify an actual upgrade
+maintenance-job.log:354: 2026-09-21T01:01:26.7799846Z PASS: strict control-plane integration suite maintenance runtime ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29
+lifecycle-job.log:345: 2026-09-21T00:59:07.8407639Z PASS: alpha 12/12 acknowledged writes readable
+lifecycle-job.log:349: 2026-09-21T01:00:21.9873109Z PASS: alpha 12/12 acknowledged writes readable
+lifecycle-job.log:351: 2026-09-21T01:00:47.1979845Z PASS: alpha 12/12 acknowledged writes readable
+lifecycle-job.log:354: 2026-09-21T01:02:23.1926485Z PASS: alpha 12/12 acknowledged writes readable
+lifecycle-job.log:355: 2026-09-21T01:02:23.2323025Z PASS: alpha fresh-disk grow, exact-ordinal shrink, 2-to-1, controller restart, bounded idle state
+lifecycle-job.log:359: 2026-09-21T01:03:25.3539791Z PASS: beta 12/12 acknowledged writes readable
+lifecycle-job.log:363: 2026-09-21T01:04:59.8559369Z PASS: beta 12/12 acknowledged writes readable
+lifecycle-job.log:365: 2026-09-21T01:05:27.1371423Z PASS: beta 12/12 acknowledged writes readable
+lifecycle-job.log:368: 2026-09-21T01:07:24.0763363Z PASS: beta 12/12 acknowledged writes readable
+lifecycle-job.log:369: 2026-09-21T01:07:24.1120098Z PASS: beta fresh-disk grow, exact-ordinal shrink, 2-to-1, controller restart, bounded idle state
+lifecycle-job.log:370: 2026-09-21T01:07:24.1121229Z PASS: strict control-plane integration suite lifecycle runtime ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29

@@ -29,7 +29,7 @@ type Observation struct {
 }
 type Stamp struct{ Runtime, Metrics time.Time }
 
-// State is retained with the lifecycle journal. Status is never an input.
+// State is retained with bounded current-operation state. Status is never an input.
 type State struct {
 	Load               map[string]Load
 	Addition           *Addition
@@ -240,7 +240,7 @@ func RecordAction(s *State, now time.Time, from, to int32) {
 }
 
 // LowDemand revalidates the current complete observation immediately before an
-// already-journaled contraction. It cannot authorize a new operation or replace
+// already-recorded contraction. It cannot authorize a new operation or replace
 // lifecycle recovery evidence. Unknown/repeated clocks remain conservative.
 func LowDemand(p fleet.CapacityPolicy, o Observation, current int32) bool {
 	if p.Validate() != nil || !o.Complete || o.At.IsZero() || len(o.Samples) != int(current) {

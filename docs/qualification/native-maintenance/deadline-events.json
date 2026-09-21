@@ -1,0 +1,31 @@
+[
+  {
+    "event": "Three native v0.5.1 nodes ready"
+  },
+  {
+    "event": "Acknowledged writes",
+    "total": 12,
+    "through": "c"
+  },
+  {
+    "event": "Store outage/deadline failed closed",
+    "status": {
+      "capabilities": {
+        "strict_disk_removal": true
+      },
+      "control_only": true,
+      "operation": {
+        "blocker": "follower admission deadline",
+        "expected_generation": "1bcb7f0789bbf6d37f77400fd1c92e702209e7c1184baa9044c14169808989c1",
+        "mode": "remove-disk",
+        "operation_id": "store-outage",
+        "phase": "failed"
+      },
+      "runtime_generation": "1bcb7f0789bbf6d37f77400fd1c92e702209e7c1184baa9044c14169808989c1",
+      "schema_version": 1
+    }
+  },
+  {
+    "event": "Failed terminal result remains immutable after store recovery"
+  }
+]

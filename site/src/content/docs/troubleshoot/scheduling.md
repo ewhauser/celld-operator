@@ -22,7 +22,7 @@ kubectl --context YOUR_CONTEXT -n fleets describe pvc PVC_NAME
 kubectl --context YOUR_CONTEXT get storageclass STORAGE_CLASS_NAME -o yaml
 ```
 
-The class must use EBS CSI with `Retain` and `WaitForFirstConsumer`; the fleet's existing retained claims must keep their identities. `StorageClassMissing` and `InvalidStorageClass` identify a missing or incompatible class. `StorageIdentityConflict` means a claim was missing, replaced, or could not be safely attributed. Preserve all disks and review the conflict; do not create a replacement claim with the same name. See [storage setup](../../configure/storage/).
+The class must use supported dynamic CSI with `Delete` and `WaitForFirstConsumer`; every bound PV must have the expected claim UID, driver, handle and external-provisioner deletion finalizer. `StorageClassMissing` and `InvalidStorageClass` identify a missing or incompatible class. `StorageIdentityConflict` means a claim was missing, replaced, or could not be safely attributed. Preserve all disks and review the conflict; do not create a replacement claim with the same name. See [storage setup](../../configure/storage/).
 
 When a capacity policy reports `PendingCapacity` or `IneffectiveCapacity`, compare Pod events, PVC status, and `status.capacity` to see whether the new replica joined and became useful. `IncompleteMetrics` asks for a complete, fresh Metrics Server and celld `/state` sample from every expected replica. A ready newcomer alone does not prove it redistributed demand. See [capacity](../../operate/capacity/).
 

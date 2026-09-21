@@ -9,16 +9,19 @@ import (
 	"crypto/sha512"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -27,7 +30,6 @@ import (
 )
 
 const (
-	runtimeImage  = "ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8"
 	calicoURL     = "https://raw.githubusercontent.com/projectcalico/calico/v3.29.3/manifests/calico.yaml"
 	calicoSHA     = "9a575859428b822a224dedafc4238555b6b0f910f2abf12983f20f871860914e"
 	minioImage    = "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z"
@@ -43,6 +45,8 @@ const (
 	storeNS     = "celld-test-store"
 	operatorNS  = "celld-system"
 )
+
+var runtimeImagePin = regexp.MustCompile(`^ghcr.io/ewhauser/celld@sha256:[a-f0-9]{64}$`)
 
 var csiManifests = []struct{ url, sha string }{
 	{"https://raw.githubusercontent.com/kubernetes-csi/external-provisioner/v6.3.0/deploy/kubernetes/rbac.yaml", "0ee8427b746a1d3b695705b74c2d7fb165121110b1a10c0b6e204918d93e814f"},
@@ -89,10 +93,6 @@ func verified(body []byte, sha, what string) []byte {
 
 func (h *harness) createCluster() {
 	config := kindConfig
-	if h.opts.orderedBucket {
-		last := strings.LastIndex(config, "us-east-1a")
-		config = config[:last] + "us-east-1b" + config[last+len("us-east-1a"):]
-	}
 	configPath := h.writeFile("kind.yaml", []byte(config))
 	fmt.Println("Creating isolated cluster", h.name)
 	// Name is unique; cleanup is authorized only for this invocation's cluster.
@@ -121,61 +121,63 @@ func (h *harness) createCluster() {
 }
 
 func (h *harness) loadImages() {
-	images := []string{runtimeImage, minioImage, mcImage, curlImage}
+	images := []string{h.opts.runtimeImage, minioImage, mcImage, curlImage, metricsServer, toxiproxy}
+	if h.opts.upgradeImage != "" {
+		images = append(images, h.opts.upgradeImage)
+	}
 	if h.opts.operatorImage != "" {
 		images = append(images, h.opts.operatorImage)
 	}
-	if h.bucketLifecycle {
-		images = append(images, metricsServer)
-	}
-	if h.opts.faults {
-		images = append(images, toxiproxy)
-	}
-	if h.opts.rwopCSI {
-		images = append(images, csiImages...)
-	}
+	images = append(images, csiImages...)
 	for index, image := range images {
 		// Docker's containerd store may have only the local platform of
 		// a multiarch image. Export that platform explicitly; ordinary
 		// kind load docker-image can fail on absent sibling manifests.
 		_, notCached := h.try(command{args: []string{"docker", "image", "inspect", image}, timeout: 30 * time.Second})
 		archive := h.path(fmt.Sprintf("cached-image-%d.tar", index))
-		switch {
-		case notCached == nil && !strings.Contains(image, "@sha256:"):
+		if notCached == nil && !strings.Contains(image, "@sha256:") {
 			h.sh(3*time.Minute, "docker", "image", "save", "--platform", "linux/"+h.arch, "-o", archive, image)
 			h.sh(3*time.Minute, "kind", "load", "image-archive", "--name", h.name, archive)
 			must(os.Remove(archive))
+			fmt.Println("Loaded cached image:", image)
 			continue
-		case notCached == nil:
-			// A digest reference has no tag for kind to import. Save the
-			// full index (its digest is the pinned one) and name it in
-			// containerd directly; the kubelet then finds the exact pin
-			// without a registry round trip.
-			h.sh(3*time.Minute, "docker", "image", "save", "-o", archive, image)
-			for _, node := range h.nodes {
-				h.sh(2*time.Minute, "docker", "cp", archive, node+":/celld-cached-image.tar")
-				h.sh(5*time.Minute, "docker", "exec", node, "ctr", "-n", "k8s.io", "images", "import", "--index-name", image, "--platform", "linux/"+h.arch, "/celld-cached-image.tar")
-				h.sh(30*time.Second, "docker", "exec", node, "rm", "-f", "/celld-cached-image.tar")
-			}
-			must(os.Remove(archive))
-			fmt.Println("Loaded pinned image from local cache:", image)
-			continue
+
 		}
-		fmt.Println("Pulling into disposable node:", image)
-		for _, node := range h.nodes {
-			// Registry throughput varies; a slow pull must not abort a long run.
+		h.pullImage(image)
+	}
+}
+
+// Each node owns a separate containerd store. Bound concurrency at the three
+// disposable nodes; a failure is collected before the parent performs cleanup.
+func (h *harness) pullImage(image string) {
+	fmt.Println("Pulling into disposable nodes:", image)
+	results := make(chan error, len(h.nodes))
+	for _, node := range h.nodes {
+		go func() {
+			var err error
 			for attempt := range 3 {
-				_, err := h.try(command{args: []string{"docker", "exec", node, "crictl", "pull", image}, timeout: 10 * time.Minute})
+				_, err = h.try(command{args: []string{"docker", "exec", node, "crictl", "pull", image}, timeout: 10 * time.Minute})
 				if err == nil {
+					fmt.Println("Pulled image:", image, "on", node)
 					break
 				}
-				if attempt == 2 {
-					must(err)
+				if h.ctx.Err() != nil {
+					break
 				}
-				fmt.Println("Retrying image pull on", node, "after:", truncate(err.Error(), 200))
+				if attempt < 2 {
+					fmt.Println("Retrying image pull on", node, "after:", truncate(err.Error(), 200))
+				}
 			}
+			results <- err
+		}()
+	}
+	var failures []error
+	for range h.nodes {
+		if err := <-results; err != nil {
+			failures = append(failures, err)
 		}
 	}
+	must(errors.Join(failures...))
 }
 
 func truncate(s string, n int) string {
@@ -216,11 +218,13 @@ func (h *harness) deployStore() {
 		Name: "minio", Namespace: storeNS, Labels: map[string]string{"app": "minio", "role": "backend"},
 		Spec: corev1.PodSpec{Containers: []corev1.Container{{
 			Name: "minio", Image: minioImage, Args: []string{"server", "/data"},
-			Env: []corev1.EnvVar{{Name: "MINIO_ROOT_USER", Value: "qualification"}, {Name: "MINIO_ROOT_PASSWORD", Value: "qualification-only"}},
-		}}},
+			Env:          []corev1.EnvVar{{Name: "MINIO_ROOT_USER", Value: "qualification"}, {Name: "MINIO_ROOT_PASSWORD", Value: "qualification-only"}},
+			VolumeMounts: []corev1.VolumeMount{{Name: "data", MountPath: "/data"}},
+			Resources:    corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("128Mi")}, Limits: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("1Gi")}},
+		}}, Volumes: []corev1.Volume{{Name: "data", EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory, SizeLimit: new(resource.MustParse("2Gi"))}}}},
 	})
 	h.k("-n", storeNS, "wait", "--for=condition=Ready", "pod/minio", "--timeout=120s")
-	if h.opts.faults {
+	if h.opts.suite == "all" || h.opts.suite == "faults" {
 		h.storeService("minio-backend", "backend", 9000)
 		h.apply(&corev1.ConfigMap{
 			APIVersion: "v1", Kind: "ConfigMap",
@@ -270,7 +274,7 @@ func (h *harness) deployApplication() {
 	esbuild := h.writeFile("esbuild", extractFromTarGz(archive, "package/bin/esbuild"))
 	must(os.Chmod(esbuild, 0o755))
 	h.sh(30*time.Second, "docker", "cp", esbuild, h.nodes[0]+":/opt/celld-test-esbuild")
-	h.sh(30*time.Second, "docker", "cp", filepath.Join(h.root, "hack", "qualification", "app"), h.nodes[0]+":/opt/celld-test-app")
+	h.sh(30*time.Second, "docker", "cp", filepath.Join(h.root, "hack", "integration", "app"), h.nodes[0]+":/opt/celld-test-app")
 	for _, bucket := range []string{"bucket-alpha", "bucket-beta"} {
 		deployName := "deploy-" + bucket
 		h.apply(&corev1.Pod{
@@ -279,7 +283,7 @@ func (h *harness) deployApplication() {
 			Spec: corev1.PodSpec{
 				NodeName: h.nodes[0], RestartPolicy: corev1.RestartPolicyNever,
 				Containers: []corev1.Container{{
-					Name: "deploy", Image: runtimeImage, Args: []string{"deploy", "/app"},
+					Name: "deploy", Image: h.opts.runtimeImage, Args: []string{"deploy", "/app"},
 					Env: []corev1.EnvVar{
 						{Name: "CELLD_BUCKET", Value: "s3://" + bucket}, {Name: "AWS_REGION", Value: "us-east-1"},
 						{Name: "AWS_ALLOW_HTTP", Value: "true"}, {Name: "S3_ENDPOINT", Value: "http://minio:9000"},
@@ -316,21 +320,18 @@ func extractFromTarGz(archive []byte, member string) []byte {
 func (h *harness) installStorageClass() {
 	class := &storagev1.StorageClass{
 		APIVersion: "storage.k8s.io/v1", Kind: "StorageClass",
-		Name:              "retained",
-		Provisioner:       "rancher.io/local-path",
-		ReclaimPolicy:     new(corev1.PersistentVolumeReclaimRetain),
+		Name:              "disposable",
+		Provisioner:       "hostpath.csi.k8s.io",
+		ReclaimPolicy:     new(corev1.PersistentVolumeReclaimDelete),
 		VolumeBindingMode: new(storagev1.VolumeBindingWaitForFirstConsumer),
 	}
-	if h.opts.rwopCSI {
-		// SHA-pinned upstream manifests, applied as published; the driver runs
-		// on every node so strict hostname separation still has three hosts.
-		for _, manifest := range csiManifests {
-			h.applyText(string(verified(h.fetch(manifest.url, time.Minute), manifest.sha, manifest.url)))
-		}
-		h.k("rollout", "status", "daemonset/csi-hostpathplugin", "--timeout=240s")
-		class.Provisioner = "hostpath.csi.k8s.io"
-		class.Parameters = map[string]string{"kind": "fast"}
+	// SHA-pinned upstream manifests, applied as published; the driver runs
+	// on every node so strict hostname separation still has three hosts.
+	for _, manifest := range csiManifests {
+		h.applyText(string(verified(h.fetch(manifest.url, time.Minute), manifest.sha, manifest.url)))
 	}
+	h.k("rollout", "status", "daemonset/csi-hostpathplugin", "--timeout=240s")
+	class.Parameters = map[string]string{"kind": "fast"}
 	h.apply(class)
 }
 
@@ -343,69 +344,45 @@ func (h *harness) goBuild(output, pkg string) {
 }
 
 func (h *harness) startOperator() {
-	token := strings.TrimSpace(h.k("-n", operatorNS, "create", "token", "celld-operator", "--duration=1h"))
-	config := decode(h.k("config", "view", "--raw", "-o", "json"))
-	config["users"] = []object{{"name": "operator", "user": object{"token": token}}}
-	sub(list(config, "contexts")[0], "context")["user"] = "operator"
-	h.operatorKubeconfig = h.writeFile("operator-kubeconfig", []byte(encode(config)))
-	logFile, err := os.OpenFile(h.path("operator.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	must(err)
-	h.operatorLog = logFile
-	if !h.bucketLifecycle {
-		h.startNativeOperator()
-		return
-	}
-	// Run the actual manager under its in-cluster ServiceAccount so
-	// direct Pod IP state collection and Metrics Server are real.
-	args := []string{"--operator-namespace=" + operatorNS, "--network-policy-enforced", "--local-test", "--local-evidence"}
-	container := object{"name": "operator", "args": args}
+	args := []string{"--operator-namespace=" + operatorNS, "--network-policy-enforced", "--local-test", "--local-rwop"}
+	container := object{"name": "operator"}
 	var volumes []object
 	if h.opts.operatorImage != "" {
-		// Qualify the published artifact itself: its entrypoint, its embedded
-		// launcher, nothing rebuilt from source.
 		container["image"] = h.opts.operatorImage
-		if h.persistentLifecycle {
-			h.launcherImage = h.opts.operatorImage
-			args = append(args, "--launcher-image="+h.launcherImage)
-		}
+		h.launcherImage = h.opts.operatorImage
 	} else {
 		h.goBuild(h.path("operator"), "./cmd/celld-operator")
 		h.sh(30*time.Second, "docker", "cp", h.path("operator"), h.nodes[0]+":/opt/celld-test-operator")
-		container["image"] = runtimeImage
+		container["image"] = h.opts.runtimeImage
 		container["command"] = []string{"/operator"}
 		container["volumeMounts"] = []object{{"name": "operator-binary", "mountPath": "/operator", "readOnly": true}}
 		volumes = []object{{"name": "operator-binary", "hostPath": object{"path": "/opt/celld-test-operator", "type": "File"}}}
-		if h.persistentLifecycle {
-			h.goBuild(h.path("celld-launcher"), "./cmd/celld-launcher")
-			h.launcherImage = "celld-launcher-test:" + h.name
-			h.writeFile("Dockerfile", []byte("FROM "+runtimeImage+"\nCOPY celld-launcher /celld-launcher\n"))
-			h.sh(3*time.Minute, "docker", "build", "-t", h.launcherImage, h.tmp)
-			h.sh(3*time.Minute, "kind", "load", "docker-image", "--name", h.name, h.launcherImage)
-			args = append(args, "--launcher-image="+h.launcherImage)
-		}
+		h.goBuild(h.path("celld-launcher"), "./cmd/celld-launcher")
+		h.launcherImage = "celld-launcher-test:" + h.name
+		h.builtLauncher = true
+		h.writeFile("Dockerfile", []byte("FROM "+h.opts.runtimeImage+"\nCOPY celld-launcher /celld-launcher\n"))
+		h.sh(3*time.Minute, "docker", "build", "-t", h.launcherImage, h.tmp)
+		h.sh(3*time.Minute, "kind", "load", "docker-image", "--name", h.name, h.launcherImage)
 	}
-	if h.persistentLifecycle && h.opts.rwopCSI {
-		args = append(args, "--local-rwop")
-	}
+	args = append(args, "--launcher-image="+h.launcherImage)
 	container["args"] = args
 	h.operatorArgs = args
 	spec := object{"nodeName": h.nodes[0], "securityContext": object{"runAsUser": 65532}, "containers": []object{container}}
 	if volumes != nil {
 		spec["volumes"] = volumes
 	}
-	patch := object{"spec": object{"replicas": 1, "template": object{"spec": spec}}}
-	h.k("-n", operatorNS, "patch", "deployment", "celld-operator", "--type=strategic", "-p", encode(patch))
+	h.k("-n", operatorNS, "patch", "deployment", "celld-operator", "--type=strategic", "-p", encode(object{"spec": object{"replicas": 1, "template": object{"spec": spec}}}))
 	h.k("-n", operatorNS, "rollout", "status", "deployment/celld-operator", "--timeout=120s")
 	metrics := h.writeFile("metrics.yaml", verified(h.fetch(metricsURL, 2*time.Minute), metricsSHA, metricsURL))
 	h.k("apply", "-f", metrics)
-	h.k("-n", "kube-system", "patch", "deployment", "metrics-server", "--type=json", "-p",
-		`[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]`)
+	h.k("-n", "kube-system", "patch", "deployment", "metrics-server", "--type=json", "-p", `[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]`)
 	h.k("-n", "kube-system", "rollout", "status", "deployment/metrics-server", "--timeout=300s")
+
 }
 
 // setOperatorFault rolls the in-cluster manager with an explicit --local-test
 // crash point; an empty point withdraws it and replaces the crash-looping pod.
-func (h *harness) setOperatorFault(point string) {
+func (h *harness) setOperatorFault(point string) string {
 	args := append([]string{}, h.operatorArgs...)
 	if point != "" {
 		args = append(args, "--local-fault-point="+point)
@@ -413,36 +390,54 @@ func (h *harness) setOperatorFault(point string) {
 	h.k("-n", operatorNS, "patch", "deployment", "celld-operator", "--type=json", "-p",
 		encode([]object{{"op": "replace", "path": "/spec/template/spec/containers/0/args", "value": args}}))
 	h.k("-n", operatorNS, "rollout", "status", "deployment/celld-operator", "--timeout=180s")
+	// Bind crash evidence to the new manager Pod, not kubectl's choice of a
+	// matching Pod while a rollout or process restart changes readiness.
+	var selected string
+	h.wait("one manager Pod with the requested fault configuration", func() bool {
+		selected = ""
+		for _, pod := range items(decode(h.k("-n", operatorNS, "get", "pods", "-l", "app.kubernetes.io/name=celld-operator,pod-template-hash", "-o", "json"))) {
+			if str(pod, "metadata", "deletionTimestamp") != "" {
+				continue
+			}
+			for _, container := range list(pod, "spec", "containers") {
+				if str(container, "name") == "operator" && same(strs(container, "args"), args) {
+					if selected != "" {
+						return false
+					}
+					selected = nameOf(pod)
+				}
+			}
+		}
+		return selected != ""
+	})
+	return selected
 }
 
 func (h *harness) restartOperator() {
-	if h.bucketLifecycle {
-		h.k("-n", operatorNS, "rollout", "restart", "deployment/celld-operator")
-		h.k("-n", operatorNS, "rollout", "status", "deployment/celld-operator", "--timeout=120s")
-		return
-	}
-	h.process.stop(false)
-	h.startNativeOperator()
+	h.k("-n", operatorNS, "rollout", "restart", "deployment/celld-operator")
+	h.k("-n", operatorNS, "rollout", "status", "deployment/celld-operator", "--timeout=120s")
 }
 
-func newFleet(name, bucket, profile, namespace string) *v1alpha1.CelldFleet {
+func (h *harness) newFleet(name, bucket, profile, namespace string) *v1alpha1.CelldFleet {
 	storage := v1alpha1.StorageSpec{Bucket: bucket, Region: "us-east-1", SizeGiB: 1}
 	if profile == "PersistentFleet" {
-		storage.StorageClassName = "retained"
+		storage.StorageClassName = "disposable"
 	}
 	return &v1alpha1.CelldFleet{
 		APIVersion: "celld.eric.dev/v1alpha1", Kind: "CelldFleet",
 		Name: name, Namespace: namespace,
 		Spec: v1alpha1.CelldFleetSpec{
-			Qualification: "Experimental", Profile: profile, Replicas: 2, ServiceAccountName: "runtime",
+			Qualification: "Experimental", Profile: profile, Replicas: 2, RuntimeImage: h.opts.runtimeImage, ServiceAccountName: "runtime",
 			Storage:   storage,
 			Placement: v1alpha1.PlacementSpec{AZCount: 1, Zones: []string{"us-east-1a"}},
 		},
 	}
 }
 
-func bucketFleet(name, bucket string) *v1alpha1.CelldFleet {
-	return newFleet(name, bucket, "Bucket", "fleets")
+func (h *harness) bucketFleet(name, bucket string) *v1alpha1.CelldFleet {
+	f := h.newFleet(name, bucket, "Bucket", "fleets")
+	f.Spec.BucketWorkload = "Ordered"
+	return f
 }
 
 // probe starts a curl pod. A fleet-uid label also sets an owner reference so the
@@ -506,12 +501,13 @@ func (h *harness) app(pod, fleetName, method, path string) object {
 	return decode(h.curl(request{pod: pod, address: fleetName, path: path, port: 8080, method: method}))
 }
 
-func stored(response object) bool {
+func stored(response object, expectedID string) bool {
+	assert(expectedID != "" && str(response, "id") == expectedID, "response is not for requested ID %s: %v", expectedID, response)
 	value, ok := field(response, "stored").(bool)
 	assert(ok, "response lacks a boolean stored field: %v", response)
 	return value
 }
 
 func (h *harness) ackStored(pod, fleetName string) bool {
-	return stored(h.app(pod, fleetName, "GET", "/?cell=integration&id=ack"))
+	return stored(h.app(pod, fleetName, "GET", "/?cell=integration&id=ack"), "ack")
 }

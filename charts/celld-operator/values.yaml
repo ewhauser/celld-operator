@@ -8,10 +8,6 @@ image:
 imagePullSecrets: []
 # Pin this image by digest to enable launcher-managed PersistentFleet workloads.
 launcherImage: ''
-# Optional dedicated-instance termination; both fields are required to enable.
-ec2Fencing:
-  account: ''
-  region: ''
 networkPolicyEnforced: false
 # Namespaces that will hold CelldFleet resources. The chart renders the
 # namespaced Role and RoleBinding from config/rbac/fleet-namespace.yaml into

@@ -1,41 +1,32 @@
 ---
 title: Scale a fleet
-description: Change the manual replica target and recognize safe progress or a blocked reduction.
+description: All replica requests pass through the strict current-operation executor.
 ---
 
-Use this procedure to change `spec.replicas` on `my-fleet` in namespace `fleets`. Select the Kubernetes context explicitly and check the [placement rules](../../configure/placement/) before asking for more replicas. The operator provisions no nodes or cloud resources for you.
-
-## Before you change the target
-
-Check the current target, observed membership, and any operation already in progress:
+Change the CelldFleet target, never its child Deployment or StatefulSet:
 
 ```bash
+kubectl --context YOUR_CONTEXT -n fleets patch celldfleet my-fleet   --type merge -p '{"spec":{"replicas":4}}'
 kubectl --context YOUR_CONTEXT -n fleets get celldfleet my-fleet -o yaml
-kubectl --context YOUR_CONTEXT -n fleets describe celldfleet my-fleet
 ```
 
-The new target must remain at least `placement.azCount` and within the API limit of 1–100. An existing [capacity policy](../capacity/) may request additional replicas; an edit to `spec.replicas` takes precedence over its next action. A previously issued action still finishes recovery. Avoid another change until that action is settled.
+Keep replicas at least equal to the configured zone count. Additions require
+eligible node capacity; PersistentFleet also needs new CSI claims. New claims
+are admitted by exact identity before scheduling gates open.
 
-## Request and watch the change
+Scale-in is implemented for PersistentFleet and Ordered Bucket. The executor
+selects one highest ordinal, records the operation, obtains strict celld and
+launcher proof, then conditionally reduces replicas. PersistentFleet completes
+only after exact disk cleanup. A request to remove several members proceeds one
+operation at a time.
 
-For example, request four replicas:
+Bucket Deployment contraction is blocked because Kubernetes chooses the victim.
+Select Ordered when creating a fleet that needs scale-in; layout is immutable.
 
-```bash
-kubectl --context YOUR_CONTEXT -n fleets patch celldfleet my-fleet \
-  --type merge -p '{"spec":{"replicas":4}}'
-kubectl --context YOUR_CONTEXT -n fleets get celldfleet my-fleet -w
-```
+Read `status.lifecycle` and conditions while the operation runs. A pause or new
+replica target can cancel only before issuance. After that, the current request
+must finish or remain visibly blocked before a new target can proceed.
 
-Inspect the detailed status in another terminal:
-
-```bash
-kubectl --context YOUR_CONTEXT -n fleets get celldfleet my-fleet \
-  -o json | jq '.status'
-kubectl --context YOUR_CONTEXT -n fleets get pods -o wide
-```
-
-For an increase, expect `desiredReplicas` to change first, followed by `appliedReplicas`, observed Pods, and `readyReplicas`. The operator records the change in the retained lifecycle journal. `Ready=True` is an availability observation, not proof of durable writes.
-
-To decrease the target, change the same field to a smaller valid count. A Bucket fleet shrinks by one member, then waits for verified session expiry and healthy remaining members before completing the removal. A launcher-managed PersistentFleet stops the departing writer and checks its logs and remaining members before reducing the StatefulSet count. Some reductions require `maintenance.allowCoordinatedDowntime: true` and an intentional outage. Automatic production contraction remains blocked. See [profiles](../../concepts/profiles/) and [limitations](../../reference/limitations/) before requesting a reduction.
-
-The change is complete when `status.appliedReplicas` and `status.readyReplicas` reach the requested count, `Progressing` is no longer active, and no `Blocked` reason remains for this request. During a reduction, `Ready=True` can describe the current workload size before the requested target is applied. If progress stops, read [lifecycle troubleshooting](../../troubleshoot/lifecycle/) and [scheduling troubleshooting](../../troubleshoot/scheduling/). Never edit the reservation journal or delete a Pod to bypass a stop gate.
+An external autoscaler must target the CelldFleet `/scale` subresource using
+`capacity.mode: External`. It uses the same safety checks and gains no direct
+workload authority. See [capacity policy](../capacity/) and [current operations](../../concepts/current-operation/).

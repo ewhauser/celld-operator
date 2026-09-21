@@ -20,8 +20,8 @@ jobs:
           version: v4.2.4
       - run: |
           python3 -m venv .qualification-venv
-          .qualification-venv/bin/pip install -r hack/chart-requirements.txt -r hack/qualification/requirements.txt
-          make check manifests-check qualification-replay qualification-test chart-check
+          .qualification-venv/bin/pip install -r hack/chart-requirements.txt
+          make check manifests-check chart-check
       - name: Validate release version and packaging
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
@@ -36,7 +36,8 @@ jobs:
           # Docker's classic image store cannot hold two platforms of one digest
           # reference at once ("cannot overwrite digest"), so address each platform
           # of the pinned celld index by its own manifest digest.
-          index=ghcr.io/denoland/celld@sha256:df8e74bb9a059df5779644368984933eba76acd6a2d196672732f4368f760fc8
+          index="$(cat hack/runtime-image.txt)"
+          repository="${index%@*}"
           native="$(dpkg --print-architecture)"
           for arch in amd64 arm64; do
             manifest="$(docker buildx imagetools inspect "$index" --raw | jq -r --arg a "$arch" '.manifests[] | select(.platform.os=="linux" and .platform.architecture==$a) | .digest')"
@@ -51,7 +52,7 @@ jobs:
               docker run --rm --platform "linux/${arch}" "${emulated[@]}" \
                 -v "$PWD/bin/tests:/t:ro" -v "$PWD:/src:ro" -w "/src/internal/${pkg}" \
                 --entrypoint "/t/${pkg}-${arch}.test" \
-                "ghcr.io/denoland/celld@${manifest}" -test.count=1 -test.v 2>&1 | grep -E "^(--- (FAIL|SKIP)|FAIL|ok|PASS)"
+                "$repository@${manifest}" -test.count=1 -test.v 2>&1 | grep -E "^(--- (FAIL|SKIP)|FAIL|ok|PASS)"
             done
           done
   publish:
@@ -147,13 +148,13 @@ jobs:
       - run: |
           sudo sysctl -w fs.inotify.max_user_instances=1024
           sudo sysctl -w fs.inotify.max_user_watches=1048576
-      - name: Run the persistent lifecycle suite against the published image
+      - name: Run both runtime profiles against the published operator image
         env:
           IMAGE: ${{ needs.publish.outputs.image }}
           DIGEST: ${{ needs.publish.outputs.digest }}
         run: |
           docker pull "$IMAGE@$DIGEST"
-          go run ./hack/integration --persistent-lifecycle --operator-image "$IMAGE@$DIGEST"
+          CELLD_RUNTIME_IMAGE="$(cat hack/runtime-image.txt)" go run ./hack/integration --suite lifecycle --operator-image "$IMAGE@$DIGEST"
 
   release:
     needs: [publish, qualify]
@@ -200,7 +201,6 @@ jobs:
           cp config/crd/*.yaml dist/
           printf '%s@%s\n' "$IMAGE" "$DIGEST" > dist/image.txt
           printf 'ghcr.io/%s/charts/celld-operator@%s\n' "$owner" "$chart_digest" > dist/chart.txt
-          journal="$(grep -o 'j.Version = [0-9]*' internal/controller/lifecycle.go | grep -o '[0-9]*$')"
           (cd dist && sha256sum ./*.tgz ./*.yaml image.txt chart.txt > SHA256SUMS)
           cosign sign-blob --yes --bundle dist/SHA256SUMS.sigstore.json dist/SHA256SUMS
           cat > dist/notes.md <<EOF
@@ -208,8 +208,8 @@ jobs:
 
           - Image: \`$IMAGE@$DIGEST\` (linux/amd64, linux/arm64), signed keyless by this workflow run.
           - Chart: \`ghcr.io/$owner/charts/celld-operator:$version\` (digest in chart.txt), signed keyless.
-          - Lifecycle journal version: $journal. Operators older than the first release writing this version cannot read fleets touched by this one; downgrading is unsupported.
-          - CRD upgrades are explicit: apply the bundled CRDs before upgrading the chart. Retained data and storage reservations must never be deleted on uninstall.
+          - Bounded current-operation state version: 1. This is a fresh-install cutover; migration from the retired lifecycle controller is unsupported.
+          - CRD upgrades are explicit: apply the bundled CRDs before upgrading the chart. Bucket data and storage reservations must never be deleted on uninstall.
 
           Verify: \`cosign verify --certificate-identity-regexp 'https://github.com/$REPOSITORY/' --certificate-oidc-issuer https://token.actions.githubusercontent.com $IMAGE@$DIGEST\`
           EOF

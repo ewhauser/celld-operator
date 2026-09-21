@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-celld operator runs a [celld](https://github.com/denoland/celld) fleet on Kubernetes. You provide an EKS cluster, a dedicated S3 bucket, AWS identities and a container image for the operator. A `CelldFleet` names the runtime ServiceAccount, bucket and zones. The operator creates the workload, internal Services and network policy. Your application then talks to the fleet's port 8080.
+celld operator runs a [celld](https://github.com/denoland/celld) fleet on Kubernetes. You provide an EKS cluster, a dedicated S3 bucket, a runtime AWS identity and digest-pinned fork and operator/launcher images. A `CelldFleet` names the runtime ServiceAccount, bucket and zones. The operator creates the workload, internal Services and network policy. Your application then talks to the fleet's port 8080.
 
 The path to a first request is:
 
@@ -15,7 +15,7 @@ The path to a first request is:
 4. [Deploy an application and send a request](../first-application/).
 5. [Verify and troubleshoot](../verify/) the fleet when a condition stays false.
 
-Start with a **Bucket** fleet. A PersistentFleet adds EBS CSI, a retained StorageClass and the launcher image; see [fleet profiles](../../concepts/profiles/) when you need retained disks. Each fleet runs one application from its own bucket. The operator does not create the bucket, IAM roles, worker nodes or public ingress.
+Start with a **Bucket** fleet. Both profiles require the strict launcher. A PersistentFleet adds CSI volumes using the disposable-disk policy; see [fleet profiles](../../concepts/profiles/) before selecting persistent local disks. Each fleet runs one application from its own bucket. The operator does not create the bucket, IAM roles, worker nodes or public ingress.
 
 :::caution[Experimental software]
 The API requires `qualification: Experimental`. Cloud qualification is still outstanding and the operator reports `ProductionQualified=False`. Use a nonproduction cluster and bucket for this guide. See the [capability and qualification limits](../../reference/limitations/) before relying on a lifecycle operation.

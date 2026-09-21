@@ -64,21 +64,17 @@ func TestTuningIsAppliedToTheTemplate(t *testing.T) {
 	if *pod.TerminationGracePeriodSeconds != 180 {
 		t.Fatalf("grace not applied: %d", *pod.TerminationGracePeriodSeconds)
 	}
-	// Bucket keeps the emptyDir sizing from storage and never gets launcher settings.
+	// Bucket uses the same strict launcher on its temporary disk.
 	b := fixture("beta", "bucket-beta", "Bucket")
 	b.Spec.Lifecycle = &fleet.LifecycleSpec{ShutdownSeconds: 60, TerminationGraceSeconds: 90}
 	bp := podTemplate(b, opts).Spec
-	if _, has := envValue(bp.Containers[0].Env, "LAUNCHER_TERMINATION_GRACE_SECONDS"); has {
-		t.Fatal("Bucket template carries launcher settings")
+	if v, has := envValue(bp.Containers[0].Env, "LAUNCHER_TERMINATION_GRACE_SECONDS"); !has || v != "90" {
+		t.Fatal("Bucket lacks bounded launcher termination")
 	}
 	if *bp.TerminationGracePeriodSeconds != 90 {
 		t.Fatal("Bucket grace not applied")
 	}
-	// The v0.4.1 drain-token wait tracks the shutdown budget.
-	f.Spec.RuntimeImage = "ghcr.io/denoland/celld@sha256:ce8bbc3c26a16c9ee00e3ce0501f36bfea2663b5af8285a08fc16a54568060a5"
-	if v, _ := envValue(podTemplate(f, opts).Spec.Containers[0].Env, "CELLD_DRAIN_TOKEN_WAIT_MS"); v != "90000" {
-		t.Fatalf("drain wait not derived from shutdown budget: %s", v)
-	}
+
 }
 
 // Tuning is part of the reservation's immutable spec hash for new fleets, and
