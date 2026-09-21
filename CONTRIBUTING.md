@@ -20,6 +20,8 @@ make vet         # Standalone go vet
 make fmt         # Apply goimports through the pinned lint tool
 make lint        # Full lint suite
 make lint-new    # Report issues introduced relative to HEAD
+make security-check # Workflow audit and security regression tests (GH_TOKEN enables online audits)
+make vuln-check  # Go module integrity and vulnerability scan
 ```
 
 golangci-lint v2.13.2 runs through `go run` with Go 1.27.1 and CGO disabled for
@@ -69,7 +71,7 @@ Chart validation also needs Helm and the pinned Python dependencies used by CI:
 
 ```sh
 python3 -m venv .qualification-venv
-.qualification-venv/bin/pip install -r hack/chart-requirements.txt
+.qualification-venv/bin/pip install --require-hashes --only-binary=:all: -r hack/chart-requirements.txt
 make chart-check
 ```
 
@@ -95,8 +97,12 @@ update documentation when behavior changes. Run `make check` before opening a
 pull request. For workflow changes, also run:
 
 ```sh
-actionlint .github/workflows/ci.yaml
+make security-check
 ```
+
+Security reports belong in [private vulnerability reporting](SECURITY.md).
+See [release security](docs/release-security.md) before changing publication,
+workflow permissions, action pins, or dependency installation.
 
 CI has separate build, race-test, and lint jobs using the same Make targets.
 The kind integration suites need Docker and a three-node kind cluster. Every

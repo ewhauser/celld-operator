@@ -32,3 +32,6 @@ launcher. Qualify the exact compatible celld fork image separately; native binar
 artifacts do not identify a container digest. Chart packaging and registry
 verification are release workflow responsibilities. A local build is not a
 published or cloud-qualified release.
+
+Use the [release security guide](release-security.md) for the approved publishing
+workflow and exact artifact verification commands.

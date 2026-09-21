@@ -32,10 +32,14 @@ def main():
     username = os.environ['GH_USER']
     if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repository):
         raise SystemExit('Invalid repository')
-    if not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?', version):
+    number = r'(?:0|[1-9][0-9]*)'
+    prerelease = r'(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
+    if not re.fullmatch(rf'v{number}\.{number}\.{number}(?:-{prerelease}(?:\.{prerelease})*)?', version):
         raise SystemExit('Invalid release tag')
     require_absent(f'https://api.github.com/repos/{repository}/releases/tags/{version}',
                    {'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json'}, 'GitHub release')
+    require_absent(f'https://api.github.com/repos/{repository}/git/ref/tags/{version}',
+                   {'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json'}, 'release tag')
     owner = repository.split('/')[0].lower()
     basic = base64.b64encode(f'{username}:{token}'.encode()).decode()
     for name, tag in [(repository.lower(), version), (f'{owner}/charts/celld-operator', version[1:])]:
@@ -48,7 +52,7 @@ def main():
                        {'Authorization': 'Bearer ' + authorization,
                         'Accept': 'application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json'},
                        f'OCI artifact {name}:{tag}')
-    print('Release, image tag and chart version are absent.')
+    print('Release, Git tag, image tag and chart version are absent.')
 
 
 if __name__ == '__main__':

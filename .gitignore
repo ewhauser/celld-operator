@@ -8,3 +8,4 @@ coverage.out
 __pycache__/
 
 dist/
+.security-venv/

@@ -1,32 +1,48 @@
 name: Release
 on:
-  push:
-    tags: ['v*']
-permissions:
-  contents: read
+  workflow_dispatch:
+    inputs:
+      version:
+        description: New release version (vX.Y.Z or vX.Y.Z-rc.N)
+        required: true
+        type: string
+permissions: {}
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
+env:
+  RELEASE_VERSION: ${{ inputs.version }}
+  # QEMU and BuildKit are executable dependencies, pinned independently of actions.
+  BINFMT_IMAGE: tonistiigi/binfmt:qemu-v10.2.3@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+
 jobs:
   validate:
+    name: validate
+    if: github.repository == 'ewhauser/celld-operator' && github.ref == 'refs/heads/main'
+    timeout-minutes: 30
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
           go-version-file: go.mod
-      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
-        with:
-          version: v4.2.4
+          cache: false
+      - run: python3 hack/install-ci-tools.py helm buildx
       - run: |
           python3 -m venv .qualification-venv
-          .qualification-venv/bin/pip install -r hack/chart-requirements.txt
-          make check manifests-check chart-check
-      - name: Validate release version and packaging
+          .qualification-venv/bin/pip install --require-hashes --only-binary=:all: -r hack/chart-requirements.txt
+          make check manifests-check chart-check security-check vuln-check
         env:
-          RELEASE_VERSION: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+      - name: Validate release version and packaging
         run: python3 hack/package-release.py --version "$RELEASE_VERSION" --image ghcr.io/ewhauser/celld-operator --digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - name: Install pinned QEMU handlers
+        run: docker run --privileged --rm "$BINFMT_IMAGE" --install arm64
       - name: Launcher and controller tests on both Linux architectures
         # The launcher's lock inheritance and PID 1 behavior are Linux-specific and
         # arch-independent only in principle; run the real suites under each arch
@@ -56,28 +72,34 @@ jobs:
             done
           done
   publish:
+    name: publish
     needs: validate
+    environment: release
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
+      packages: write # Push the image and its provenance to GHCR.
+      id-token: write # Sign provenance with this workflow identity.
+      attestations: write # Record the image provenance on GitHub.
     outputs:
       image: ${{ steps.repository.outputs.image }}
       digest: ${{ steps.image.outputs.digest }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          version: v4.2.4
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - run: python3 hack/install-ci-tools.py buildx
+      - name: Create a fresh builder with pinned BuildKit
+        run: docker buildx create --name release-builder --driver docker-container --driver-opt image=moby/buildkit:v0.33.0@sha256:6c2fa84a6b61ccd72899dde4239f8d5717f05f9a8ca6f3cad185fb1a95a94de3 --use
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Refuse existing or partially published version
         env:
-          RELEASE_VERSION: ${{ github.ref_name }}
           REPOSITORY: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_USER: ${{ github.actor }}
@@ -87,27 +109,29 @@ jobs:
         env:
           REPOSITORY: ${{ github.repository }}
         run: echo "image=ghcr.io/${REPOSITORY,,}" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         id: image
         with:
           context: .
+          no-cache: true
+          pull: true
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.repository.outputs.image }}:${{ github.ref_name }}
-          build-args: VERSION=${{ github.ref_name }}
+          tags: ${{ steps.repository.outputs.image }}:${{ inputs.version }}
+          build-args: VERSION=${{ inputs.version }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
           provenance: mode=max
-          sbom: true
-      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+          sbom: generator=docker/buildkit-syft-scanner:stable-1@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9
+      - name: Install pinned QEMU handlers
+        run: docker run --privileged --rm "$BINFMT_IMAGE" --install arm64
       - name: Smoke test the published image on both architectures
         # A multi-arch manifest proves nothing about either binary. Run each platform
         # of the exact pushed digest: version banner and the launcher install path.
         env:
           IMAGE: ${{ steps.repository.outputs.image }}
           DIGEST: ${{ steps.image.outputs.digest }}
-          RELEASE_VERSION: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           docker buildx imagetools inspect "$IMAGE@$DIGEST" --raw > index.json
@@ -120,27 +144,35 @@ jobs:
             test "$version" = "$RELEASE_VERSION"
             docker run --rm --platform "linux/${arch}" --entrypoint /celld-launcher "$IMAGE@$manifest" install /home/nonroot/launcher/celld-launcher
           done
+      - name: Attest the published image
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-name: ${{ steps.repository.outputs.image }}
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
   # The pushed digest, not a rebuild, must pass the in-cluster kind suite before
   # any chart or GitHub release points at it. A failure here leaves a tagged
   # image with no chart or release; the version is then burned by policy.
   qualify:
+    name: qualify
     needs: publish
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
       contents: read
-      packages: read
+      packages: read # Pull the exact image published by this run.
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
           go-version-file: go.mod
-          cache: true
-      - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
-        with:
-          install_only: true
-          version: v0.33.0
-      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+          cache: false
+      - run: python3 hack/install-ci-tools.py kind kubectl
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -157,26 +189,32 @@ jobs:
           CELLD_RUNTIME_IMAGE="$(cat hack/runtime-image.txt)" go run ./hack/integration --suite lifecycle --operator-image "$IMAGE@$DIGEST"
 
   release:
+    name: release
     needs: [publish, qualify]
+    environment: release-artifacts
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      packages: write
-      id-token: write
+      contents: write # Create the protected tag and publish the immutable release.
+      packages: write # Publish the chart and keyless OCI signatures.
+      id-token: write # Obtain the workflow signing identity.
+      attestations: write # Record provenance for the release files.
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          version: v4.2.4
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - run: python3 hack/install-ci-tools.py helm
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          cosign-release: v3.0.6
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Publish immutable chart and experimental release artifacts
+      - name: Sign and verify the qualified image and chart
         env:
-          RELEASE_VERSION: ${{ github.ref_name }}
           IMAGE: ${{ needs.publish.outputs.image }}
           DIGEST: ${{ needs.publish.outputs.digest }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -189,7 +227,7 @@ jobs:
           owner="${REPOSITORY%%/*}"
           owner="${owner,,}"
           printf '%s' "$GH_TOKEN" | helm registry login ghcr.io --username "$GH_USER" --password-stdin
-          helm push "dist/celld-operator-${version}.tgz" "oci://ghcr.io/${owner}/charts" | tee dist/helm-push.txt
+          helm push "dist/celld-operator-${version}.tgz" "oci://ghcr.io/${owner}/charts" 2>&1 | tee dist/helm-push.txt
           chart_digest="$(sed -n 's/^Digest: //p' dist/helm-push.txt)"
           test -n "$chart_digest"
           mkdir -p dist/verified
@@ -198,6 +236,9 @@ jobs:
           # Keyless signatures bind the artifacts to this workflow run's OIDC identity.
           cosign sign --yes "$IMAGE@$DIGEST"
           cosign sign --yes "ghcr.io/${owner}/charts/celld-operator@${chart_digest}"
+          identity="https://github.com/$REPOSITORY/.github/workflows/release.yaml@refs/heads/main"
+          cosign verify --certificate-identity "$identity" --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE@$DIGEST"
+          cosign verify --certificate-identity "$identity" --certificate-oidc-issuer https://token.actions.githubusercontent.com "ghcr.io/${owner}/charts/celld-operator@${chart_digest}"
           cp config/crd/*.yaml dist/
           printf '%s@%s\n' "$IMAGE" "$DIGEST" > dist/image.txt
           printf 'ghcr.io/%s/charts/celld-operator@%s\n' "$owner" "$chart_digest" > dist/chart.txt
@@ -211,6 +252,27 @@ jobs:
           - Bounded current-operation state version: 1. This is a fresh-install cutover; migration from the retired lifecycle controller is unsupported.
           - CRD upgrades are explicit: apply the bundled CRDs before upgrading the chart. Bucket data and storage reservations must never be deleted on uninstall.
 
-          Verify: \`cosign verify --certificate-identity-regexp 'https://github.com/$REPOSITORY/' --certificate-oidc-issuer https://token.actions.githubusercontent.com $IMAGE@$DIGEST\`
+          Verify: \`cosign verify --certificate-identity "$identity" --certificate-oidc-issuer https://token.actions.githubusercontent.com $IMAGE@$DIGEST\`
           EOF
-          gh release create "$RELEASE_VERSION" dist/*.tgz dist/*.yaml dist/image.txt dist/chart.txt dist/SHA256SUMS dist/SHA256SUMS.sigstore.json --verify-tag --prerelease --title "$RELEASE_VERSION (experimental)" --notes-file dist/notes.md
+      - name: Attest release files
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-path: |
+            dist/*.tgz
+            dist/*.yaml
+            dist/image.txt
+            dist/chart.txt
+            dist/SHA256SUMS
+      - name: Create protected tag and publish the complete draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # The tag ruleset requires a successful deployment to the release
+          # environment, which is produced by the approved publish job above.
+          gh api --method POST "repos/$REPOSITORY/git/refs" -f "ref=refs/tags/$RELEASE_VERSION" -f "sha=$SOURCE_SHA"
+          gh release create "$RELEASE_VERSION" dist/*.tgz dist/*.yaml dist/image.txt dist/chart.txt dist/SHA256SUMS dist/SHA256SUMS.sigstore.json --verify-tag --draft --prerelease --title "$RELEASE_VERSION (experimental)" --notes-file dist/notes.md
+          gh release edit "$RELEASE_VERSION" --draft=false
+          test "$(gh api "repos/$REPOSITORY/releases/tags/$RELEASE_VERSION" --jq .immutable)" = true
