@@ -28,8 +28,15 @@ func TestDefaultsAndValidation(t *testing.T) {
 		t.Fatal("incorrect defaults")
 	}
 	tests := map[string]func(*CelldFleet){
-		"mutable tag":     func(f *CelldFleet) { f.Spec.RuntimeImage = "ghcr.io/denoland/celld:v0.5.0" },
-		"foreign image":   func(f *CelldFleet) { f.Spec.RuntimeImage = "example.org/celld@sha256:abc" },
+		"mutable tag":  func(f *CelldFleet) { f.Spec.RuntimeImage = "ghcr.io/denoland/celld:v0.5.0" },
+		"short digest": func(f *CelldFleet) { f.Spec.RuntimeImage = "example.org/celld@sha256:abc" },
+		"no registry":  func(f *CelldFleet) { f.Spec.RuntimeImage = "celld@sha256:" + strings.Repeat("a", 64) },
+		"uppercase digest": func(f *CelldFleet) {
+			f.Spec.RuntimeImage = "mirror.example.com/celld@sha256:" + strings.Repeat("A", 64)
+		},
+		"embedded tag": func(f *CelldFleet) {
+			f.Spec.RuntimeImage = "mirror.example.com/celld:v1@sha256:" + strings.Repeat("a", 64)
+		},
 		"long token":      func(f *CelldFleet) { f.Spec.Maintenance = &MaintenanceSpec{RestartToken: strings.Repeat("a", 129)} },
 		"production":      func(f *CelldFleet) { f.Spec.Qualification = "Production" },
 		"prefix":          func(f *CelldFleet) { f.Spec.Storage.Bucket = "example-bucket/shared" },
@@ -52,6 +59,20 @@ func TestDefaultsAndValidation(t *testing.T) {
 				t.Fatal("invalid configuration accepted")
 			}
 		})
+	}
+}
+
+func TestMirroredRuntimeImage(t *testing.T) {
+	for _, image := range []string{
+		"ghcr.io/ewhauser/celld@sha256:" + strings.Repeat("a", 64),
+		"123456789012.dkr.ecr.us-east-1.amazonaws.com/cache/celld@sha256:" + strings.Repeat("b", 64),
+		"localhost:5000/team/celld@sha256:" + strings.Repeat("c", 64),
+	} {
+		f := valid()
+		f.Spec.RuntimeImage = image
+		if err := f.Validate(); err != nil {
+			t.Errorf("%s: %v", image, err)
+		}
 	}
 }
 

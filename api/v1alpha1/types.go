@@ -47,7 +47,7 @@ type CelldFleetSpec struct {
 	// Requested immutable runtime digest. Required for provisioning; no default release is assumed.
 	// Use a homogeneous compatible fork; release and recovery qualification remain required.
 	// +optional
-	// +kubebuilder:validation:Pattern=`^ghcr.io/ewhauser/celld@sha256:[a-f0-9]{64}$`
+	// +kubebuilder:validation:Pattern=`^([a-z0-9]+([.-][a-z0-9]+)*|localhost)(:[0-9]{1,5})?(/[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*)+@sha256:[a-f0-9]{64}$`
 	RuntimeImage string `json:"runtimeImage,omitempty"`
 	// Maintenance requests share the bounded current operation.
 	Maintenance *MaintenanceSpec `json:"maintenance,omitempty"`

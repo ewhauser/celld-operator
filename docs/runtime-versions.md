@@ -1,7 +1,7 @@
 # Runtime requirements
 
-Provisioning requires an explicit image matching
-`ghcr.io/ewhauser/celld@sha256:<64 lowercase hex digits>` and a digest-pinned
+Provisioning requires an explicit registry-qualified OCI image ending in
+`@sha256:<64 lowercase hex digits>` and a digest-pinned
 launcher image. There is no default runtime image and no list of stock upstream
 releases accepted as substitutes.
 
@@ -13,6 +13,10 @@ recovery participant must understand its native `bucket_complete` proof. See
 Pin validation is syntactic. Before deployment, verify the artifact's source,
 platform and digest and qualify a homogeneous fleet against the required API and
 recovery behavior. A native binary checksum is not a container image digest.
+An ECR pull-through cache or other mirror may be used, for example
+`123456789012.dkr.ecr.us-east-1.amazonaws.com/cache/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29`.
+Confirm that the mirror serves the qualified fork under the pinned digest; the
+operator cannot infer image provenance from the reference.
 
 A runtime-image change requests coordinated maintenance, with explicit
 `allowCoordinatedDowntime`. The executor strictly stops the current working set
