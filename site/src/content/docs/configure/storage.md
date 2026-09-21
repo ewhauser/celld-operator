@@ -3,6 +3,15 @@ title: Storage
 description: Configure fresh CSI disks that can be deleted after verified strict shutdown.
 ---
 
+:::caution[Local storage requires the celld fork]
+If you use celld with persistent local storage (`PersistentFleet`), you must use
+the [ewhauser/celld fork](https://github.com/ewhauser/celld). The operator relies
+on its strict shutdown and recovery contract before deleting local disks; stock
+upstream celld does not provide that contract. All runtime and recovery nodes
+must use a compatible fork. The fork is also required for `Bucket` fleets. See
+[compatibility](../../reference/compatibility/) for the required release and image digest.
+:::
+
 Bucket uses disk-backed `emptyDir`; `storage.sizeGiB` sets its size limit. It needs
 no StorageClass. PersistentFleet requires dynamic CSI provisioning with
 `ReadWriteOncePod` claims and a class such as:

@@ -3,6 +3,15 @@ title: Choose a storage profile
 description: Understand celld's durability model, then configure its Kubernetes workload and disks.
 ---
 
+:::caution[Local storage requires the celld fork]
+If you use celld with persistent local storage (`PersistentFleet`), you must use
+the [ewhauser/celld fork](https://github.com/ewhauser/celld). The operator relies
+on its strict shutdown and recovery contract before deleting local disks; stock
+upstream celld does not provide that contract. All runtime and recovery nodes
+must use a compatible fork. The fork is also required for `Bucket` fleets. See
+[compatibility](../../reference/compatibility/) for the required release and image digest.
+:::
+
 Read celld's [ownership and durability overview](https://github.com/denoland/celld/blob/main/docs/README.md#ownership-and-durability)
 and [durability guarantees](https://github.com/denoland/celld/blob/main/docs/guarantees.md)
 to understand how it uses object storage and peer disks, when writes are
@@ -10,9 +19,8 @@ acknowledged, and how recovery works. Those runtime tradeoffs should guide your
 choice of profile.
 
 This page covers the Kubernetes configuration for that choice. Both profiles
-require the operator's [compatible fork runtime](../../reference/compatibility/)
-and strict launcher; upstream documentation does not replace the operator's
-disk-removal contract.
+also require the strict launcher; upstream documentation does not replace the
+operator's disk-removal contract.
 
 For `profile: Bucket`, choose `bucketWorkload: Ordered` if you need deterministic
 scale-in. Bucket uses temporary local disk and does not need CSI or PVCs.
