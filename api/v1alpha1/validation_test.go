@@ -28,8 +28,15 @@ func TestDefaultsAndValidation(t *testing.T) {
 		t.Fatal("incorrect defaults")
 	}
 	tests := map[string]func(*CelldFleet){
-		"mutable tag":     func(f *CelldFleet) { f.Spec.RuntimeImage = "ghcr.io/denoland/celld:v0.5.0" },
-		"foreign image":   func(f *CelldFleet) { f.Spec.RuntimeImage = "example.org/celld@sha256:abc" },
+		"mutable tag":  func(f *CelldFleet) { f.Spec.RuntimeImage = "ghcr.io/denoland/celld:v0.5.0" },
+		"short digest": func(f *CelldFleet) { f.Spec.RuntimeImage = "example.org/celld@sha256:abc" },
+		"no registry":  func(f *CelldFleet) { f.Spec.RuntimeImage = "celld@sha256:" + strings.Repeat("a", 64) },
+		"uppercase digest": func(f *CelldFleet) {
+			f.Spec.RuntimeImage = "mirror.example.com/celld@sha256:" + strings.Repeat("A", 64)
+		},
+		"embedded tag": func(f *CelldFleet) {
+			f.Spec.RuntimeImage = "mirror.example.com/celld:v1@sha256:" + strings.Repeat("a", 64)
+		},
 		"long token":      func(f *CelldFleet) { f.Spec.Maintenance = &MaintenanceSpec{RestartToken: strings.Repeat("a", 129)} },
 		"production":      func(f *CelldFleet) { f.Spec.Qualification = "Production" },
 		"prefix":          func(f *CelldFleet) { f.Spec.Storage.Bucket = "example-bucket/shared" },
@@ -50,6 +57,78 @@ func TestDefaultsAndValidation(t *testing.T) {
 			mutate(f)
 			if f.Validate() == nil {
 				t.Fatal("invalid configuration accepted")
+			}
+		})
+	}
+}
+
+func TestMirroredRuntimeImage(t *testing.T) {
+	for _, image := range []string{
+		"ghcr.io/ewhauser/celld@sha256:" + strings.Repeat("a", 64),
+		"123456789012.dkr.ecr.us-east-1.amazonaws.com/cache/celld@sha256:" + strings.Repeat("b", 64),
+		"localhost:5000/team/celld@sha256:" + strings.Repeat("c", 64),
+	} {
+		f := valid()
+		f.Spec.RuntimeImage = image
+		if err := f.Validate(); err != nil {
+			t.Errorf("%s: %v", image, err)
+		}
+	}
+}
+
+func TestAdditionalEnvironmentValidation(t *testing.T) {
+	value := "debug"
+	validEntries := []FleetEnvVar{
+		{Name: "CELLD_LOG", Value: &value},
+		{Name: "CELLD_API_TOKEN", SecretKeyRef: &SecretKeyRef{Name: "runtime-auth", Key: "token"}},
+	}
+	f := valid()
+	f.Spec.Env = validEntries
+	if err := f.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for name, entries := range map[string][]FleetEnvVar{
+		"override bucket":   {{Name: "CELLD_BUCKET", Value: &value}},
+		"override launcher": {{Name: "CELLD_REEXEC_PROBE_SIGNING_KEY", Value: &value}},
+		"override otel":     {{Name: "CELLD_OTEL", Value: &value}},
+		"duplicate":         {{Name: "CELLD_LOG", Value: &value}, {Name: "CELLD_LOG", Value: &value}},
+		"both sources":      {{Name: "CELLD_LOG", Value: &value, SecretKeyRef: &SecretKeyRef{Name: "s", Key: "k"}}},
+		"no source":         {{Name: "CELLD_LOG"}},
+		"bad key":           {{Name: "CELLD_LOG", SecretKeyRef: &SecretKeyRef{Name: "s", Key: "bad/key"}}},
+		"unrelated env":     {{Name: "AWS_REGION", Value: &value}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := valid()
+			f.Spec.Env = entries
+			if err := f.Validate(); err == nil {
+				t.Fatal("accepted invalid environment")
+			}
+		})
+	}
+}
+
+func TestTelemetryValidation(t *testing.T) {
+	f := valid()
+	f.Spec.Telemetry = &TelemetrySpec{CollectorURL: "http://collector.fleets.svc:4318", Egress: CollectorEgress{PodLabels: map[string]string{"app": "otel"}}, Sampler: "traceidratio", SamplerArg: "0.25", FlushMilliseconds: 5000, FlushBytes: 4096, HeadersSecretKeyRef: &TelemetrySecretKeyRef{Name: "otel-auth", Key: "headers"}}
+	if err := f.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for name, edit := range map[string]func(*TelemetrySpec){
+		"missing egress": func(s *TelemetrySpec) { s.Egress = CollectorEgress{} },
+		"broad CIDR":     func(s *TelemetrySpec) { s.Egress = CollectorEgress{CIDR: "10.0.0.0/8"} },
+		"query":          func(s *TelemetrySpec) { s.CollectorURL += "?token=secret" },
+		"credentials":    func(s *TelemetrySpec) { s.CollectorURL = "https://user:pass@collector.example.com" },
+		"bad sampler":    func(s *TelemetrySpec) { s.Sampler = "unknown" },
+		"bad ratio":      func(s *TelemetrySpec) { s.SamplerArg = "2.0" },
+		"missing ratio":  func(s *TelemetrySpec) { s.SamplerArg = "" },
+		"bad secret":     func(s *TelemetrySpec) { s.HeadersSecretKeyRef.Key = "bad/key" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := valid()
+			f.Spec.Telemetry = &TelemetrySpec{CollectorURL: "http://collector.fleets.svc:4318", Egress: CollectorEgress{PodLabels: map[string]string{"app": "otel"}}, Sampler: "traceidratio", SamplerArg: "0.25", HeadersSecretKeyRef: &TelemetrySecretKeyRef{Name: "otel-auth", Key: "headers"}}
+			edit(f.Spec.Telemetry)
+			if err := f.Validate(); err == nil {
+				t.Fatal("accepted invalid telemetry")
 			}
 		})
 	}

@@ -1,0 +1,31 @@
+apiVersion: celld.eric.dev/v1alpha1
+kind: CelldFleet
+metadata:
+  name: telemetry-example
+  namespace: fleets
+spec:
+  qualification: Experimental
+  profile: Bucket
+  replicas: 3
+  # Replace with the verified compatible fork digest.
+  runtimeImage: ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29
+  serviceAccountName: runtime
+  storage:
+    bucket: replace-with-dedicated-bucket
+    region: us-east-1
+    sizeGiB: 10
+  placement:
+    azCount: 3
+    zones: [us-east-1a, us-east-1b, us-east-1c]
+  telemetry:
+    collectorURL: http://otel-collector.fleets.svc:4318
+    egress:
+      podLabels:
+        app: otel-collector
+    sampler: parentbased_traceidratio
+    samplerArg: "0.1"
+    flushMilliseconds: 5000
+    flushBytes: 1048576
+    headersSecretKeyRef:
+      name: otel-auth
+      key: headers

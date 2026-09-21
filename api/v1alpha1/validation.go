@@ -30,8 +30,8 @@ func (f *CelldFleet) Default() {
 
 func (f *CelldFleet) Validate() error {
 	s := f.Spec
-	if s.RuntimeImage != "" && !regexp.MustCompile(`^ghcr.io/ewhauser/celld@sha256:[a-f0-9]{64}$`).MatchString(s.RuntimeImage) {
-		return fmt.Errorf("runtimeImage must be an immutable celld sha256 digest")
+	if s.RuntimeImage != "" && !ValidRuntimeImage(s.RuntimeImage) {
+		return fmt.Errorf("runtimeImage must be an immutable, registry-qualified OCI sha256 digest")
 	}
 	if s.Maintenance != nil && len(s.Maintenance.RestartToken) > 128 {
 		return fmt.Errorf("restartToken exceeds 128 characters")
@@ -45,6 +45,12 @@ func (f *CelldFleet) Validate() error {
 		}
 	}
 	if err := validateTuning(&s); err != nil {
+		return err
+	}
+	if err := validateFleetEnv(s.Env); err != nil {
+		return err
+	}
+	if err := validateTelemetry(s.Telemetry); err != nil {
 		return err
 	}
 	switch {

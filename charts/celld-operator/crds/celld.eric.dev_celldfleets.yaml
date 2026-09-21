@@ -219,6 +219,55 @@ spec:
                 - message: invalid sampling windows
                   rule: self.minWindowSeconds <= self.maxWindowSeconds && self.sampleIntervalSeconds
                     <= self.maxAgeSeconds
+              env:
+                description: |-
+                  Additional celld settings, fixed at creation. Secret values stay in the
+                  referenced Secret; changes to Secret data take effect only in new Pods.
+                items:
+                  properties:
+                    name:
+                      maxLength: 128
+                      pattern: ^CELLD_[A-Z][A-Z0-9_]*$
+                      type: string
+                    secretKeyRef:
+                      description: Secret in the same namespace as the fleet.
+                      properties:
+                        key:
+                          maxLength: 253
+                          minLength: 1
+                          pattern: ^[-._a-zA-Z0-9]+$
+                          type: string
+                        name:
+                          maxLength: 253
+                          minLength: 1
+                          pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                          type: string
+                      required:
+                      - key
+                      - name
+                      type: object
+                    value:
+                      description: Literal, including an empty string. Use secretKeyRef
+                        for credentials.
+                      maxLength: 4096
+                      type: string
+                  required:
+                  - name
+                  type: object
+                  x-kubernetes-validations:
+                  - message: exactly one of value or secretKeyRef is required
+                    rule: has(self.value) != has(self.secretKeyRef)
+                maxItems: 32
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+                x-kubernetes-validations:
+                - message: env may not override operator-owned or reserved celld variables
+                  rule: self.all(e, !(['CELLD_NODE','CELLD_ADVERTISE','CELLD_BUCKET','CELLD_DURABILITY','CELLD_ADDR','CELLD_INTERNAL_ADDR','CELLD_WATCH','CELLD_TTL_MS','CELLD_SHUTDOWN_TOTAL_MS','CELLD_TOKIO_THREADS','CELLD_MAX_RESIDENT_CELLS','CELLD_IDLE_EVICT_S'].exists(n,
+                    n == e.name) || e.name.startsWith('CELLD_REEXEC_') || e.name.startsWith('CELLD_OTEL')
+                    || e.name.startsWith('CELLD_UNSAFE_') || e.name.startsWith('CELLD_TEST_')
+                    || e.name.startsWith('CELLD_STRICT_')))
               execution:
                 description: |-
                   Per-fleet runtime sizing. Immutable after creation: the operator never rolls
@@ -378,7 +427,7 @@ spec:
                 description: |-
                   Requested immutable runtime digest. Required for provisioning; no default release is assumed.
                   Use a homogeneous compatible fork; release and recovery qualification remain required.
-                pattern: ^ghcr.io/ewhauser/celld@sha256:[a-f0-9]{64}$
+                pattern: ^([a-z0-9]+([.-][a-z0-9]+)*|localhost)(:[0-9]{1,5})?(/[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*)+@sha256:[a-f0-9]{64}$
                 type: string
               serviceAccountName:
                 description: Existing ServiceAccount in the fleet namespace with the
@@ -425,6 +474,81 @@ spec:
                 - bucket
                 - region
                 type: object
+              telemetry:
+                description: |-
+                  Optional OTLP collector; omission leaves telemetry disabled. Immutable
+                  because the operator does not roll out ordinary pod-template changes.
+                properties:
+                  collectorURL:
+                    description: HTTP(S) collector base URL; celld appends /v1/traces
+                      and /v1/logs.
+                    pattern: ^https?://[^/?#@]+(/[^?#]*)?$
+                    type: string
+                  egress:
+                    properties:
+                      cidr:
+                        description: Single collector address, /32 for IPv4 or /128
+                          for IPv6.
+                        type: string
+                      namespace:
+                        description: Collector namespace; only valid with podLabels.
+                        type: string
+                      podLabels:
+                        additionalProperties:
+                          type: string
+                        description: Labels on collector pods. A namespace is optional
+                          for same-namespace pods.
+                        minProperties: 1
+                        type: object
+                    type: object
+                    x-kubernetes-validations:
+                    - message: exactly one of cidr or podLabels is required
+                      rule: has(self.cidr) != has(self.podLabels)
+                  flushBytes:
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  flushMilliseconds:
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  headersSecretKeyRef:
+                    description: Secret value contains comma-separated OTLP headers;
+                      it never enters status.
+                    properties:
+                      key:
+                        pattern: ^[-._a-zA-Z0-9]+$
+                        type: string
+                      name:
+                        pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                        type: string
+                    required:
+                    - key
+                    - name
+                    type: object
+                  sampler:
+                    enum:
+                    - always_on
+                    - always_off
+                    - parentbased_always_on
+                    - parentbased_always_off
+                    - traceidratio
+                    - parentbased_traceidratio
+                    type: string
+                  samplerArg:
+                    description: Decimal ratio in [0,1], serialized as a string for
+                      portable CRD clients.
+                    pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
+                    type: string
+                required:
+                - collectorURL
+                - egress
+                type: object
+                x-kubernetes-validations:
+                - message: samplerArg is required only for ratio samplers
+                  rule: 'has(self.sampler) && (self.sampler == ''traceidratio'' ||
+                    self.sampler == ''parentbased_traceidratio'') ? has(self.samplerArg)
+                    : !has(self.samplerArg)'
             required:
             - placement
             - profile
@@ -434,14 +558,17 @@ spec:
             type: object
             x-kubernetes-validations:
             - message: only replicas, capacity, runtimeImage and maintenance may change;
-                layout, execution and lifecycle tuning are fixed at creation
+                layout, execution, lifecycle, env and telemetry are fixed at creation
               rule: self.qualification == oldSelf.qualification && self.profile ==
                 oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName
                 && self.storage == oldSelf.storage && self.placement == oldSelf.placement
                 && has(self.execution) == has(oldSelf.execution) && (!has(self.execution)
                 || self.execution == oldSelf.execution) && has(self.lifecycle) ==
                 has(oldSelf.lifecycle) && (!has(self.lifecycle) || self.lifecycle
-                == oldSelf.lifecycle) && self.bucketWorkload == oldSelf.bucketWorkload
+                == oldSelf.lifecycle) && has(self.env) == has(oldSelf.env) && (!has(self.env)
+                || self.env == oldSelf.env) && has(self.telemetry) == has(oldSelf.telemetry)
+                && (!has(self.telemetry) || self.telemetry == oldSelf.telemetry) &&
+                self.bucketWorkload == oldSelf.bucketWorkload
             - message: Ordered bucketWorkload requires Bucket profile
               rule: self.bucketWorkload != 'Ordered' || self.profile == 'Bucket'
             - message: azCount must equal the zones count

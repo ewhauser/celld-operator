@@ -167,6 +167,25 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 	if f.Spec.Replicas != 3 || f.Spec.Storage.SizeGiB != 10 || f.Spec.Placement.Mode != "Strict" {
 		t.Fatalf("CRD defaults not applied by the API server: %+v", f.Spec)
 	}
+	withEnv := base()
+	withEnv.Name = "env-valid"
+	value := "debug"
+	withEnv.Spec.Env = []fleet.FleetEnvVar{{Name: "CELLD_LOG", Value: &value}, {Name: "CELLD_API_TOKEN", SecretKeyRef: &fleet.SecretKeyRef{Name: "runtime-auth", Key: "token"}}}
+	if err := c.Create(ctx, withEnv); err != nil {
+		t.Fatalf("valid literal and Secret env rejected: %v", err)
+	}
+	mirrored := base()
+	mirrored.Name = "mirrored"
+	mirrored.Spec.RuntimeImage = "123456789012.dkr.ecr.us-east-1.amazonaws.com/cache/celld@sha256:" + strings.Repeat("a", 64)
+	if err := c.Create(ctx, mirrored); err != nil {
+		t.Fatalf("mirrored runtime pin rejected: %v", err)
+	}
+	withTelemetry := base()
+	withTelemetry.Name = "telemetry-valid"
+	withTelemetry.Spec.Telemetry = &fleet.TelemetrySpec{CollectorURL: "http://collector:4318", Egress: fleet.CollectorEgress{PodLabels: map[string]string{"app": "otel"}}, Sampler: "traceidratio", SamplerArg: "0.25"}
+	if err := c.Create(ctx, withTelemetry); err != nil {
+		t.Fatalf("valid telemetry rejected: %v", err)
+	}
 
 	// CEL cross-field rules reject at creation time.
 	invalid := []struct {
@@ -182,6 +201,22 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 		{"storageClassName on Bucket", func(f *fleet.CelldFleet) { f.Spec.Storage.StorageClassName = "disposable" }},
 		{"PersistentFleet without storageClassName", func(f *fleet.CelldFleet) { f.Spec.Profile = "PersistentFleet" }},
 		{"production qualification", func(f *fleet.CelldFleet) { f.Spec.Qualification = "Production" }},
+		{"runtime tag", func(f *fleet.CelldFleet) { f.Spec.RuntimeImage = "example.com/celld:latest" }},
+		{"owned env", func(f *fleet.CelldFleet) {
+			v := "bad"
+			f.Spec.Env = []fleet.FleetEnvVar{{Name: "CELLD_BUCKET", Value: &v}}
+		}},
+		{"duplicate env", func(f *fleet.CelldFleet) {
+			v := "debug"
+			f.Spec.Env = []fleet.FleetEnvVar{{Name: "CELLD_LOG", Value: &v}, {Name: "CELLD_LOG", Value: &v}}
+		}},
+		{"missing env value", func(f *fleet.CelldFleet) { f.Spec.Env = []fleet.FleetEnvVar{{Name: "CELLD_LOG"}} }},
+		{"telemetry missing egress", func(f *fleet.CelldFleet) {
+			f.Spec.Telemetry = &fleet.TelemetrySpec{CollectorURL: "http://collector:4318"}
+		}},
+		{"telemetry invalid ratio", func(f *fleet.CelldFleet) {
+			f.Spec.Telemetry = &fleet.TelemetrySpec{CollectorURL: "http://collector:4318", Egress: fleet.CollectorEgress{PodLabels: map[string]string{"app": "otel"}}, Sampler: "traceidratio", SamplerArg: "2.0"}
+		}},
 		{"capacity minimum below azCount", func(f *fleet.CelldFleet) {
 			f.Spec.Placement = fleet.PlacementSpec{AZCount: 2, Zones: []string{"us-east-1a", "us-east-1b"}}
 			f.Spec.Capacity = &fleet.CapacityPolicy{MinReplicas: 1}
@@ -211,6 +246,13 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 		{"bucket", func(f *fleet.CelldFleet) { f.Spec.Storage.Bucket = "other-" + ns }},
 		{"zones", func(f *fleet.CelldFleet) { f.Spec.Placement.Zones = []string{"us-east-1b"} }},
 		{"serviceAccountName", func(f *fleet.CelldFleet) { f.Spec.ServiceAccountName = "other" }},
+		{"env", func(f *fleet.CelldFleet) {
+			value := "debug"
+			f.Spec.Env = []fleet.FleetEnvVar{{Name: "CELLD_LOG", Value: &value}}
+		}},
+		{"telemetry", func(f *fleet.CelldFleet) {
+			f.Spec.Telemetry = &fleet.TelemetrySpec{CollectorURL: "http://collector:4318", Egress: fleet.CollectorEgress{PodLabels: map[string]string{"app": "otel"}}}
+		}},
 	} {
 		t.Run("immutable "+tc.name, func(t *testing.T) {
 			got := &fleet.CelldFleet{}
