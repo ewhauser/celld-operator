@@ -14,6 +14,22 @@ Those older reports remain available in Git history.
 | Disposable Kind integration | Real workload controllers, networking and acknowledged application writes against an explicitly supplied fork artifact. | Local storage and simulated zones are not EKS/EBS. |
 | EKS/EBS qualification | Real IAM, S3, CSI finalizers, attachment behavior and physical deletion. | Outstanding until a recorded exact-artifact run passes. |
 
+## Current artifact evidence
+
+Use the [published `.3` runtime](../runtime-versions.md). The final merged
+implementation's [four-suite Kind matrix](https://github.com/ewhauser/celld-operator/actions/runs/35550557670),
+[standard CI](https://github.com/ewhauser/celld-operator/actions/runs/35550557823)
+and [site build](https://github.com/ewhauser/celld-operator/actions/runs/35550557853)
+passed at `a893b9b`. The [delayed-witness report](native-peer-startup/README.md)
+contains native `.3` and hosted evidence: 10/10 native and 24/24 Kind writes per
+fleet after recovery. Native full-stop cases recover 28/28, 20/20 and 21/21
+writes through every fresh node, and failed-deadline checks retain storage.
+The [actual `.2 → .3` upgrade](runtime-upgrade/README.md) preserves 12/12 values
+in each profile while replacing compute and storage identities. Hostpath CSI
+has no attach operation; these results do not establish EBS detach or deletion.
+
+## Earlier evidence
+
 The [launcher](../launcher-supervision.md#verification) and
 [current-operation](../current-operation.md#regression-and-qualification-coverage)
 records include opt-in test commands and the September 20 binary evidence.

@@ -21,4 +21,10 @@ Point that client's application configuration at my-fleet:8080 in the fleet name
 
 Peer traffic on 8081 is limited to same-fleet Pods and operator Pods in the operator namespace. The launcher port 8083 in both profiles admits only operator Pods and is not exposed by a Service. Fleet egress includes peers, kube-dns, HTTPS for S3/STS and the EKS Pod Identity Agent endpoint. The policy assumes the kube-dns Pod label k8s-app: kube-dns; check your CNI and DNS deployment.
 
+PersistentFleet advertises `POD.FLEET-peers.NAMESPACE.svc:8081`, so predecessor
+recovery can resolve the retained peer after its Pod IP changes. The headless
+Service publishes addresses before readiness: peers may need each other's
+follower service to finish startup. Do not replace these addresses with Pod IPs
+or gate peer DNS on application readiness. See [recovery](../../troubleshoot/recovery/).
+
 The operator cannot determine whether the CNI enforces NetworkPolicy. The chart's networkPolicyEnforced flag is an administrator assertion after checking enforcement; provisioning stays blocked until it is true. Read [install](../../start/install/) and [security boundaries](../../reference/security-boundaries/). Do not publish the peer or launcher ports through ingress.

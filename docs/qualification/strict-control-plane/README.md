@@ -1,5 +1,11 @@
 # Strict control-plane local qualification
 
+This is a historical `.2` run. Use the [`.3` qualification](../native-peer-startup/README.md)
+and [actual `.2 → .3` upgrade](../runtime-upgrade/README.md) for the current
+artifact. A later hosted `.2` run exposed startup-skew data loss despite stable
+DNS; `.2` is not the recommended runtime.
+
+
 Date: 2026-09-20. This directory records actual local Kind results and their
 failures. It does not establish AWS/EBS or production qualification.
 
@@ -117,9 +123,10 @@ and arm64 manifest `sha256:5e0ac98b4ef6d626db46af2c28228524e5d2aa34011d00d70979f
 
 Recovery above is an explicit administrative same-host replacement of failed,
 nonretired Pods, not automatic restart or generic cross-host disk reuse. No
-retirement marker or host-binding file was reset. The runtime's bounded-loss
+retirement marker or host-binding file was reset. That `.2` runtime's bounded-loss
 policy when predecessor peers are unavailable or sufficiently delayed at startup
-remains a separate limitation; stable DNS does not remove that policy.
+was a separate limitation of this run; stable DNS alone did not fix it. The
+linked `.3` report records the runtime correction.
 
 These fixtures do not replace the MinIO Pod and do not establish object-store
 durability across its replacement. They do not qualify EBS deletion, EC2 loss,

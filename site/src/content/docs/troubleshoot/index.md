@@ -14,6 +14,7 @@ kubectl --context YOUR_CONTEXT -n fleets get celldfleet my-fleet -o yaml
 | --- | --- |
 | Operator unavailable, missing CRD or namespace access | [Installation](installation/). |
 | Pod Pending, claim unbound or newcomer unready | [Scheduling and storage](scheduling/). |
+| Runtime child stopped or waiting for a retained peer | [Runtime recovery](recovery/). |
 | Scale-in, restart, upgrade or deletion blocked | [Current operation](lifecycle/). |
 | Incomplete or ineffective capacity observations | [Capacity policy](../operate/capacity/). |
 

@@ -81,10 +81,14 @@ existing private networking and credential binding remain in force.
 
 ## Failures and exclusion
 
-Capability absence, request rejection, status failure, timeout, a mismatched or
-lost operation, malformed response and HTTP outage all withhold successful
-removal authority. A failed or ambiguous capture is terminal for this launcher
-operation. It preserves celld's recovery service until the fixed deadline, child
+Capability absence, request rejection, terminal status failure, timeout, a
+mismatched or lost operation, and malformed responses withhold successful removal
+authority. After one accepted shutdown mutation, incomplete status reads caused
+by transport errors are retried within the original deadline while the exact
+child remains alive. This covers celld closing keepalive connections before its
+terminal control-only listener is ready. HTTP rejection, malformed JSON and
+identity mismatch remain terminal; the mutation is not replayed by this poller.
+A failed or ambiguous capture is terminal for this launcher operation. It preserves celld's recovery service until the fixed deadline, child
 exit or Pod termination; termination after that point cannot repair the missing
 proof. Duplicate requests cannot retry a failed capture into success.
 
@@ -134,3 +138,8 @@ verified `0.5.1-ewhauser.2` fork release. It captured the control-only result, e
 generation, child exit, inherited-lock release and restart denial. This empty-disk
 handshake does not qualify replicated recovery, a published runtime image, or
 EKS/EBS removal. Those remain separate integration gates.
+
+The [September 21 `.3` qualification](qualification/native-peer-startup/README.md)
+repeats both real-binary handshakes and adds populated native recovery, hosted
+Kind faults and a [real version upgrade](qualification/runtime-upgrade/README.md).
+The earlier `.2` handshake is historical evidence, not a runtime recommendation.

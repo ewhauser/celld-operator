@@ -26,7 +26,7 @@ aws eks create-pod-identity-association   --cluster-name CLUSTER --region REGION
 
 The runtime role needs the fork's S3 list, read, write, delete and multipart
 operations for its dedicated bucket. Align permissions with the deployed
-[fork bucket client](https://github.com/ewhauser/celld/blob/main/crates/celld/bucket.rs)
+[fork bucket client](https://github.com/ewhauser/celld/blob/v0.5.1-ewhauser.3/crates/celld/bucket.rs)
 and object-store client; grant required KMS access separately when applicable.
 Do not copy runtime write permissions onto the operator.
 

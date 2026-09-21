@@ -15,6 +15,11 @@ kubectl --context YOUR_CONTEXT get nodes -L topology.kubernetes.io/zone
 
 Use `kubectl --context YOUR_CONTEXT -n fleets describe pod POD_NAME` for the affected Pod. Replace `POD_NAME` with a name from the previous command. `FailedScheduling` usually states whether the cluster lacks eligible nodes, resources, or a matching zone. The operator does not add nodes or change your explicit zone allowlist. Strict placement also keeps replicas apart on hosts; choose enough eligible nodes in the configured zones. [Placement](../../configure/placement/) explains the constraint.
 
+If `install-launcher` reports `no space left on device`, inspect node/Docker VM
+bytes and inodes, image layers and ephemeral storage. This can fail before celld
+starts and is not a recovery-protocol result. Reclaim only known disposable
+artifacts; never delete fleet disks or recovery evidence to free space.
+
 For PersistentFleet, inspect the PVC and StorageClass:
 
 ```bash

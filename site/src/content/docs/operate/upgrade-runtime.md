@@ -8,6 +8,12 @@ compatibility with the currently deployed version. Every possible recovery
 participant must understand the fork's strict proof. A matching image-name
 pattern does not establish compatibility.
 
+The [recorded `.2 → .3` upgrade](../../qualification/runtime-upgrade/) passes
+for both profiles, with 12/12 acknowledged values preserved in each fleet.
+That is graceful maintenance evidence, not permission to use `.2` for crash
+recovery or proof that other source/target pairs are compatible. Use the
+[current artifact](../../reference/compatibility/) for new fleets.
+
 Request the new image and allow whole-fleet downtime:
 
 ```bash

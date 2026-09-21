@@ -20,7 +20,7 @@ kubectl --context YOUR_CONTEXT -n fleets get celldfleet my-fleet   -o json | jq 
 | `DiskCleanupPending` | Current DeleteClaims phase is waiting for exact CSI cleanup; not historical deletion authority. |
 | `OperationSizeWarning` | Current authority is nearing its bounded encoded-state limit. |
 | `ProductionQualified` | False while cloud qualification remains outstanding. |
-| `LifecycleBlocked` | Reports the experimental lifecycle qualification boundary. |
+| `LifecycleBlocked` | Always true with `QualificationIncomplete` in this experimental implementation, even after successful operations. Use `Blocked` and `status.lifecycle` for an actual stalled request. |
 
 `status.lifecycle` gives the operation ID, phase, fixed deadline, target and
 blocker. `lastOutcome` is an informational last completion projection. Editing

@@ -60,7 +60,7 @@ const routeBySource = new Map(pages.map((page) => [page.source, routeOf(page)]))
 routeBySource.set('docs/README.md', 'start/overview/');
 routeBySource.set('README.md', 'start/overview/');
 routeBySource.set('config/samples', 'api/samples/');
-for (const file of ['bucket', 'bucket-ordered', 'capacity-shadow', 'maintenance-paused', 'persistent']) {
+for (const file of ['bucket', 'bucket-ordered', 'capacity-shadow', 'capacity-external', 'maintenance-paused', 'persistent', 'tuned']) {
 	routeBySource.set(`config/samples/${file}.yaml`, `api/samples/#${file}`);
 }
 routeBySource.set('charts/celld-operator/values.yaml', 'api/helm-values/');
@@ -378,7 +378,8 @@ const sampleNotes = {
 	'bucket-ordered.yaml': 'Bucket fleet using the Ordered StatefulSet layout with deterministic highest-ordinal retirement, across two zones.',
 	'capacity-shadow.yaml': 'A Bucket fleet with a `capacity` block in `Shadow` mode: recommendations are recorded and reported, nothing scales.',
 	'maintenance-paused.yaml': 'PersistentFleet with maintenance paused and a commented restart token, showing the request fields.',
-	'persistent-fleet.yaml': '',
+	'capacity-external.yaml': 'Ordered Bucket with an HPA targeting the CelldFleet /scale subresource; exact scale-in uses the strict executor.',
+	'tuned.yaml': 'Immutable execution sizing and lifecycle budgets selected before creation.',
 	'persistent.yaml': 'Three-replica PersistentFleet on a Delete-policy CSI StorageClass with strict placement.',
 };
 

@@ -21,4 +21,8 @@ For capacity policy, read `status.capacity.reason` and its explanation. `Pending
 
 The chart can expose the controller metrics port through a ClusterIP Service. Enable `metrics.enabled=true` in chart values. `metrics.serviceMonitor.enabled` and `metrics.prometheusRule.enabled` require Prometheus Operator CRDs already installed. The included alert rules cover stalled operations and zero ready replicas. Restrict access to the metrics Service through cluster policy.
 
+A Pod can stay `Running` after its celld child exits; the launcher keeps the
+child stopped and readiness fails. See [runtime recovery](../../troubleshoot/recovery/)
+for S3 lease expiry, delayed witnesses and the limits of administrative recovery.
+
 Metrics and `Ready=True` are operational signals. Neither proves acknowledged writes survived, follower placement, or safe removal. A failed or ambiguous strict operation requires investigation; preserve the current reservation authority and affected storage. Follow [lifecycle troubleshooting](../../troubleshoot/lifecycle/) before intervening.
