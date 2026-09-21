@@ -33,6 +33,10 @@ with stable endpoints. It motivated PersistentFleet ordinal DNS. The later
 [delayed-witness qualification](native-peer-startup/README.md) reproduced a
 separate startup-skew defect in `.2` and tracks its fail-closed correction.
 
+The [published runtime upgrade](runtime-upgrade/README.md) verifies the actual
+`.2 → .3` change for both modes, including fresh Pod/storage identities and all
+acknowledged values after strict coordinated shutdown.
+
 Use [the EKS test plan](eks-smoke-plan.md) for cloud validation. Keep unsupported
 or blocked outcomes visible; never clear authority or force storage finalizers
 to make a test pass.
