@@ -26,8 +26,16 @@ acknowledged while MinIO was paused.
 [The native receipt](result.json) records source and binary checksums, the matched
 harness checksum, events, full-log paths and checksums. These are native/MinIO
 checks. The [`.3` artifacts are published](https://github.com/ewhauser/celld/releases/tag/v0.5.1-ewhauser.3),
-including the Linux amd64/arm64 image. Final Kind qualification remains
-outstanding at this report revision. EKS/EBS qualification is separate.
+including the Linux amd64/arm64 image. The hosted four-suite Kind matrix passed
+at operator source `010aca2aa797f868cbd9ceca44e7e50dcb564fe1` with that image:
+[run 35549007431](https://github.com/ewhauser/celld-operator/actions/runs/35549007431).
+The fault case kept the exact replacement child unready for at least two seconds
+while its exact retained witness stayed stopped, then explicitly released that
+witness. Both PersistentFleet Pod IPs changed under stable DNS. Both fleets
+recovered **24/24** acknowledged writes. The
+[hosted receipt](hosted-receipt.json) and [events](hosted-events.log) preserve
+identities, job IDs, checksums and proof boundaries. Standard CI and site checks
+also passed at that source. EKS/EBS qualification is separate.
 
 The same `.3` binary also passes the launcher/controller HTTP handshake,
 populated sequential Bucket full-stop recovery (28/28), concurrent Bucket full
