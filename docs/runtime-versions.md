@@ -23,19 +23,24 @@ from two valid digest strings.
 
 ## Published fork artifact
 
-Release `v0.5.1-ewhauser.2` has a Linux amd64/arm64 image index:
+Release `v0.5.1-ewhauser.3` has a Linux amd64/arm64 image index:
 
 ```text
-ghcr.io/ewhauser/celld@sha256:a00da2bcaeaee6879d658477cd1bdb354a5de55fa9e7f0ab5e2fd95e6e0ce080
+ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29
 ```
 
-Version `.2` fixes populated full-stop removal: strict shutdown completes after
+Version `.3` fixes retained-witness startup skew: unreachable witnesses stay
+undecided regardless of lease age, and exhausted startup retries fail without
+sealing the predecessor merely because a peer is unavailable. Do not use `.2`
+for retained-disk recovery. It also includes the `.2` populated full-stop fix:
+strict shutdown completes after
 durability, runtime stop and ownership release without waiting for successor
 adoption. Do not use `.1` for coordinated maintenance.
 
-The source revision is `2a65a4df99bed5254bdd679df57ed98556454dec`.
-[Release build 35542493819](https://github.com/ewhauser/celld/actions/runs/35542493819)
-completed and the published index was verified anonymously. Native binaries and
-checksums are attached to the [fork release](https://github.com/ewhauser/celld/releases/tag/v0.5.1-ewhauser.2).
+The source revision is `739f2baa87a5bfc4bfe04e317adf6d774edf8740`.
+[Release build 35547238694](https://github.com/ewhauser/celld/actions/runs/35547238694)
+and [image build 35548054541](https://github.com/ewhauser/celld/actions/runs/35548054541)
+completed; the published index was verified anonymously. Native binaries and
+checksums are attached to the [fork release](https://github.com/ewhauser/celld/releases/tag/v0.5.1-ewhauser.3).
 Published and attested artifacts still require the deployment qualification
 described above. The operator/launcher image is built and pinned separately.

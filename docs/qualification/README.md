@@ -29,8 +29,9 @@ native/MinIO evidence, separate from Kind and EBS.
 
 The [native peer-address comparison](native-peer-addresses/README.md) reproduces
 acknowledged-tail loss after changed peer endpoints and verifies 10/10 recovery
-with stable endpoints. It motivated PersistentFleet ordinal DNS; delayed or
-unavailable peer startup remains a separate runtime limitation.
+with stable endpoints. It motivated PersistentFleet ordinal DNS. The later
+[delayed-witness qualification](native-peer-startup/README.md) reproduced a
+separate startup-skew defect in `.2` and tracks its fail-closed correction.
 
 Use [the EKS test plan](eks-smoke-plan.md) for cloud validation. Keep unsupported
 or blocked outcomes visible; never clear authority or force storage finalizers
@@ -39,7 +40,7 @@ to make a test pass.
 Run the disposable suite with an actual published fork image digest:
 
 ```sh
-CELLD_RUNTIME_IMAGE=ghcr.io/ewhauser/celld@sha256:a00da2bcaeaee6879d658477cd1bdb354a5de55fa9e7f0ab5e2fd95e6e0ce080 \
+CELLD_RUNTIME_IMAGE=ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29 \
 go run ./hack/integration --suite all
 ```
 

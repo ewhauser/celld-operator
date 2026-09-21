@@ -1,0 +1,51 @@
+{
+  "result": "FAIL",
+  "suite": "faults",
+  "operator_commit": "aed136125f2d4682db1e4f5f608901acb3e4318a",
+  "runtime": "0.5.1-ewhauser.2",
+  "job_url": "https://github.com/ewhauser/celld-operator/actions/runs/35545705153/job/106171122233",
+  "full_log": "/Users/ewhauser/.codex/artifacts/celld-operator/strict-control-plane/2026-09-20/hosted-aed1361-35545705153/logs/faults.log",
+  "full_log_sha256": "f0ae32d29641f6b17ed476108c738c60645aad51901027e58bd6c02c83134214",
+  "first_failed_invariant": "Acknowledged fresh beta write /?cell=integration-7&id=ack-1789948982864255323-7 was not readable after ordinary same-host retained-disk recovery.",
+  "observed_dns": "Both PersistentFleet Pod IPs changed and expanded stable DNS assertions passed.",
+  "runtime_observation": "beta-0 declared bounded loss seven milliseconds after starting predecessor recovery; beta-1 started its isolate roughly one second later, then opened its stable internal listener.",
+  "inference": "The earlier peer can irreversibly declare bounded loss while its retained witness peer is still starting. Stable endpoint identity alone does not make this recovery safe.",
+  "evidence": [
+    {
+      "line": 6020,
+      "text": "2026-09-21T00:03:57.5308543Z PASS: PersistentFleet DNS rebinding pod=beta-0 old_ip=192.168.116.9 new_ip=192.168.116.12 advertise=beta-0.beta-peers.fleets.svc:8081"
+    },
+    {
+      "line": 6021,
+      "text": "2026-09-21T00:03:57.7071655Z PASS: PersistentFleet DNS rebinding pod=beta-1 old_ip=192.168.72.199 new_ip=192.168.72.203 advertise=beta-1.beta-peers.fleets.svc:8081"
+    },
+    {
+      "line": 6022,
+      "text": "2026-09-21T00:04:00.3659889Z PASS: alpha 24/24 acknowledged writes readable"
+    },
+    {
+      "line": 6023,
+      "text": "2026-09-21T00:04:33.3779611Z FAIL: assertion failed: acknowledged write lost: beta /?cell=integration-7&id=ack-1789948982864255323-7"
+    },
+    {
+      "line": 7055,
+      "text": "2026-09-21T00:04:34.4387431Z [pod/beta-0/celld] 2026-09-21T00:03:47.472109Z  INFO celld::node_log: recovering a predecessor session's node log session=\"beta-0/9396dfd5fa2157e7a8690d0505a57c74d351bdd8e8804605823b2cd3fb6c9420\""
+    },
+    {
+      "line": 7056,
+      "text": "2026-09-21T00:04:34.4389263Z [pod/beta-0/celld] 2026-09-21T00:03:47.479328Z  WARN celld::node_log: declared bounded loss: no complete true witness for an active log; recovery record written dead=\"beta-0/9396dfd5fa2157e7a8690d0505a57c74d351bdd8e8804605823b2cd3fb6c9420\" epoch=1"
+    },
+    {
+      "line": 7057,
+      "text": "2026-09-21T00:04:34.4392481Z [pod/beta-0/celld] 2026-09-21T00:03:47.514943Z  INFO celld::node_log: node log recovered and sealed dead=\"beta-0/9396dfd5fa2157e7a8690d0505a57c74d351bdd8e8804605823b2cd3fb6c9420\" entries=13 pass=0 members_ms=3 bundles_read=3 windows=1 gathered_bytes=18886 bundles_ms=6 upload_ms=26 total_ms=40"
+    },
+    {
+      "line": 7209,
+      "text": "2026-09-21T00:04:34.4711368Z [pod/beta-1/celld] 2026-09-21T00:03:48.468116Z  INFO celld::pool: isolate started isolate=1 slot=0 total=1"
+    },
+    {
+      "line": 7217,
+      "text": "2026-09-21T00:04:34.4720724Z [pod/beta-1/celld] celld internal listening on 0.0.0.0:8081 (advertise=beta-1.beta-peers.fleets.svc:8081)"
+    }
+  ]
+}

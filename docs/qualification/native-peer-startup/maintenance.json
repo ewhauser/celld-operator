@@ -1,0 +1,132 @@
+{
+  "inputs": {
+    "binary": "/Users/ewhauser/.codex/artifacts/celld/0.5.1-ewhauser.3/macos-arm64/celld",
+    "binary_sha256": "88ecc31e36462d3d7762f131de60279308e3a18e4e7df44190523a70f6198fd4",
+    "runtime_source": "739f2baa87a5bfc4bfe04e317adf6d774edf8740",
+    "operator_source": "d2ac7e22a61fbce599951bf24e2085422fdc4e23",
+    "harness": "/Users/ewhauser/working/celld-strict-shutdown-fix/examples/disk-removal/demo.py",
+    "harness_sha256": "189c89dbfbe4d36d3279a27dab30093665131a27f0b1c3fda202395faa2121ed",
+    "platform": "darwin/arm64",
+    "esbuild": "/tmp/celld-strict-tools/node_modules/@esbuild/darwin-arm64/bin/esbuild",
+    "fixture_storage": "Docker MinIO /data tmpfs, 1 GiB per owned fixture",
+    "cases": []
+  },
+  "cases": [
+    {
+      "case": "operator-handshake",
+      "command": [
+        "go",
+        "test",
+        "-count=1",
+        "-p",
+        "1",
+        "-v",
+        "-timeout",
+        "5m",
+        "./internal/launcher",
+        "./internal/controller",
+        "-run",
+        "^TestStrictRuntime(SupervisorHTTP|CurrentOperation)$"
+      ],
+      "cwd": "/Users/ewhauser/working/celld-operator-control-plane",
+      "started_at_utc": "2026-09-21T00:30:34.592449+00:00",
+      "completed_at_utc": "2026-09-21T00:30:43.264568+00:00",
+      "exit_code": 0,
+      "log": "/Users/ewhauser/.codex/artifacts/celld/0.5.1-ewhauser.3/native-qualification-20260921T003010Z/operator-handshake.log",
+      "log_sha256": "5aa7e4f20696cb38459204fe8035a3aba38e615c91f069077f56a8cd019b2324"
+    },
+    {
+      "case": "bucket-sequential",
+      "command": [
+        "uv",
+        "run",
+        "/Users/ewhauser/working/celld-strict-shutdown-fix/examples/disk-removal/demo.py",
+        "--binary",
+        "/Users/ewhauser/.codex/artifacts/celld/0.5.1-ewhauser.3/macos-arm64/celld",
+        "--esbuild",
+        "/tmp/celld-strict-tools/node_modules/@esbuild/darwin-arm64/bin/esbuild",
+        "--output",
+        "/Users/ewhauser/.codex/artifacts/celld/0.5.1-ewhauser.3/native-qualification-20260921T003010Z/bucket-sequential",
+        "--full-stop",
+        "sequential",
+        "--durability",
+        "bucket"
+      ],
+      "cwd": "/Users/ewhauser/working/celld-strict-shutdown-fix",
+      "started_at_utc": "2026-09-21T00:30:43.265219+00:00",
+      "completed_at_utc": "2026-09-21T00:30:52.673072+00:00",
+      "exit_code": 0,
+      "log": "/Users/ewhauser/.codex/artifacts/celld/0.5.1-ewhauser.3/native-qualification-20260921T003010Z/bucket-sequential.log",
+      "log_sha256": "f408eda7465afb2d341998dd1619bf7c451bd39efd1911fb84a03778c1cfeec2"
+    },
+    {
+      "case": "bucket-concurrent",
+      "command": [
+        "uv",
+        "run",
+        "/Users/ewhauser/working/celld-strict-shutdown-fix/examples/disk-removal/demo.py",
+        "--binary",
+        "/Users/ewhauser/.codex/artifacts/celld/0.5.1-ewhauser.3/macos-arm64/celld",
+        "--esbuild",
+        "/tmp/celld-strict-tools/node_modules/@esbuild/darwin-arm64/bin/esbuild",
+        "--output",
+        "/Users/ewhauser/.codex/artifacts/celld/0.5.1-ewhauser.3/native-qualification-20260921T003010Z/bucket-concurrent",
+        "--full-stop",
+        "concurrent",
+        "--durability",
+        "bucket"
+      ],
+      "cwd": "/Users/ewhauser/working/celld-strict-shutdown-fix",
+      "started_at_utc": "2026-09-21T00:30:52.673789+00:00",
+      "completed_at_utc": "2026-09-21T00:31:00.578580+00:00",
+      "exit_code": 0,
+      "log": "/Users/ewhauser/.codex/artifacts/celld/0.5.1-ewhauser.3/native-qualification-20260921T003010Z/bucket-concurrent.log",
+      "log_sha256": "1d3bfca996e4d1f22eeb6d446c363516222d42fbc2f74e0bd94510f5cc383f96"
+    },
+    {
+      "case": "fleet-concurrent",
+      "command": [
+        "uv",
+        "run",
+        "/Users/ewhauser/working/celld-strict-shutdown-fix/examples/disk-removal/demo.py",
+        "--binary",
+        "/Users/ewhauser/.codex/artifacts/celld/0.5.1-ewhauser.3/macos-arm64/celld",
+        "--esbuild",
+        "/tmp/celld-strict-tools/node_modules/@esbuild/darwin-arm64/bin/esbuild",
+        "--output",
+        "/Users/ewhauser/.codex/artifacts/celld/0.5.1-ewhauser.3/native-qualification-20260921T003010Z/fleet-concurrent",
+        "--full-stop",
+        "concurrent",
+        "--durability",
+        "fleet"
+      ],
+      "cwd": "/Users/ewhauser/working/celld-strict-shutdown-fix",
+      "started_at_utc": "2026-09-21T00:31:00.579062+00:00",
+      "completed_at_utc": "2026-09-21T00:31:19.888945+00:00",
+      "exit_code": 0,
+      "log": "/Users/ewhauser/.codex/artifacts/celld/0.5.1-ewhauser.3/native-qualification-20260921T003010Z/fleet-concurrent.log",
+      "log_sha256": "8f344d6cbfdac1fc2f9b85dd69bf0c04be6a90181254baf0032dd7e130e2cda4"
+    },
+    {
+      "case": "strict-deadline",
+      "command": [
+        "uv",
+        "run",
+        "/Users/ewhauser/working/celld-strict-shutdown-fix/examples/disk-removal/demo.py",
+        "--binary",
+        "/Users/ewhauser/.codex/artifacts/celld/0.5.1-ewhauser.3/macos-arm64/celld",
+        "--esbuild",
+        "/tmp/celld-strict-tools/node_modules/@esbuild/darwin-arm64/bin/esbuild",
+        "--output",
+        "/Users/ewhauser/.codex/artifacts/celld/0.5.1-ewhauser.3/native-qualification-20260921T003010Z/strict-deadline",
+        "--deadline"
+      ],
+      "cwd": "/Users/ewhauser/working/celld-strict-shutdown-fix",
+      "started_at_utc": "2026-09-21T00:31:19.889688+00:00",
+      "completed_at_utc": "2026-09-21T00:31:27.048773+00:00",
+      "exit_code": 0,
+      "log": "/Users/ewhauser/.codex/artifacts/celld/0.5.1-ewhauser.3/native-qualification-20260921T003010Z/strict-deadline.log",
+      "log_sha256": "64ac7aea50b47ce73802dca00ec512b14d23600a1aabff662e9583f107b88862"
+    }
+  ]
+}

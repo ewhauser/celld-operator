@@ -27,10 +27,12 @@ StatefulSet Pod DNS through its existing headless Service, which publishes
 addresses before readiness. Native unchanged endpoints demonstrate the protocol;
 actual DNS rebinding after Pod IP replacement requires the separate Kind run.
 
-This does not establish arbitrary delayed-peer recovery. The current runtime can
+This historical `.2` test does not establish delayed-peer recovery. That runtime can
 declare permanent bounded loss after a member lease expires by
 `max(3 × TTL, 20 seconds)` and a witness request fails. A refused connection or
 DNS error can return immediately; the HTTP timeout is not a minimum grace.
 Retaining the writer's local image alone is not a complete recovery witness.
 Simultaneous reachable-peer recovery, slow attachment, delayed startup and
-cross-host recovery are distinct boundaries.
+cross-host recovery are distinct boundaries. The subsequent
+[delayed-witness report](../native-peer-startup/README.md) reproduces startup-skew
+loss and verifies the `.3` correction for unreachable retained witnesses.

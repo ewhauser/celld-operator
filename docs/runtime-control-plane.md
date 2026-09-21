@@ -39,23 +39,28 @@ PersistentFleet advertises each stable StatefulSet Pod DNS name through the
 headless peer Service, which publishes addresses before readiness. celld consults
 the predecessor lease address while recovering retained follower logs, before it
 can publish a new lease. Advertising an ephemeral Pod IP makes those old peer
-addresses unreachable after replacement and can cause celld to declare bounded
-loss despite retained disks. Bucket uses a fresh runtime identity and Pod address.
+addresses unreachable after replacement and block recovery. Older `.2` builds
+could declare bounded loss despite those retained disks. Bucket uses a fresh
+runtime identity and Pod address.
 
-Stable addressing does not guarantee recovery from arbitrarily delayed peer
-startup. In the current fork, a failed witness request after a peer lease has
-expired by `max(3 × lease TTL, 20 seconds)` can be treated as conclusive loss.
-Simultaneous same-host recovery with reachable retained followers is a distinct
-qualification case from unavailable disks, delayed startup or cross-host reuse.
-Strict shutdown does not change that existing recovery policy. The operator
-leaves unsolicited child exits stopped and does not inspect private recovery
-metadata.
+The required `.3` fork keeps an unavailable recovery witness undecided regardless
+of lease age. It serves retained follower data during the existing bounded
+startup retries and refuses to seal the predecessor or declare loss merely
+because a peer has not started. If retries are exhausted, startup fails with
+recovery data retained. Stable addressing and this runtime behavior are both
+required; `.2` lost acknowledged writes under ordinary startup skew.
+
+This does not promise automatic recovery from permanently unavailable disks or
+cross-host reuse. The runtime retains its explicit-loss policy when reachable
+members conclusively report missing or incomplete fragments and no complete
+witness remains. The operator leaves unsolicited child exits stopped and does
+not inspect private recovery metadata. See the [delayed-witness evidence](qualification/native-peer-startup/README.md).
 
 ## Strict schema alignment
 
 The adapter follows the implemented `State::snapshot` in
 `crates/celld/disk_removal.rs` and `handle_internal` in `crates/celld/main.rs` on
-`ewhauser/celld`, strict-shutdown release `v0.5.1-ewhauser.2` (upstream v0.5.1 base).
+`ewhauser/celld`, strict-shutdown release `v0.5.1-ewhauser.3` (upstream v0.5.1 base).
 Stock v0.5.1 does not implement this extension.
 
 `GET /state` adds a `shutdown` object containing:

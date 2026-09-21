@@ -28,9 +28,11 @@ Kubernetes and CSI versions, StorageClass, region, zones and IAM roles.
 8. Partition S3 across node-lease expiry after fresh acknowledged writes. Verify
    fail-stop and unchanged disks, then explicit same-host administrative recovery
    with changed Pod IPs and stable peer DNS. Preserve logs before Pod replacement
-   and verify every acknowledgment. Test delayed peer startup separately: the
-   current runtime can declare bounded loss after its expired-member grace, so a
-   simultaneous local restart does not establish this boundary.
+   and verify every acknowledgment. Deliberately delay one retained witness:
+   the corrected runtime must remain unready while that witness is unreachable,
+   then recover every acknowledgment when it returns. Keep it unavailable through
+   retry exhaustion and verify startup fails without sealing the predecessor or
+   recording loss; restart both retained disks and verify recovery again.
 
 Archive commands, timestamps, artifacts and failure results for the exact run.
 A local MinIO or Kind pass does not close any unexecuted AWS gate.
