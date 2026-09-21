@@ -6,7 +6,7 @@ import (
 )
 
 func TestRecoveryWaitBindsExactPredecessorAndWitness(t *testing.T) {
-	line := `2026-09-21T00:03:47Z celld predecessor recovery attempt 1 failed: node-log recovery for beta-0/old-generation: no complete true witness among ["beta-1"] and 1 member(s) undecided; refusing to seal while member state remains unverified`
+	line := `2026-09-21T00:03:47Z celld predecessor recovery attempt 1 failed: node-log recovery for beta-0/old-generation: no complete true witness among {"beta-1"} and 1 member(s) undecided; refusing to seal while member state remains unverified`
 	if !recoveryWaitObserved(line, "beta-0", "old-generation", "beta-1") {
 		t.Fatal("exact unavailable-witness retry was not recognized")
 	}
