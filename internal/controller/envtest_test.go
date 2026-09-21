@@ -167,6 +167,13 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 	if f.Spec.Replicas != 3 || f.Spec.Storage.SizeGiB != 10 || f.Spec.Placement.Mode != "Strict" {
 		t.Fatalf("CRD defaults not applied by the API server: %+v", f.Spec)
 	}
+	withEnv := base()
+	withEnv.Name = "env-valid"
+	value := "debug"
+	withEnv.Spec.Env = []fleet.FleetEnvVar{{Name: "CELLD_LOG", Value: &value}, {Name: "CELLD_API_TOKEN", SecretKeyRef: &fleet.SecretKeyRef{Name: "runtime-auth", Key: "token"}}}
+	if err := c.Create(ctx, withEnv); err != nil {
+		t.Fatalf("valid literal and Secret env rejected: %v", err)
+	}
 	mirrored := base()
 	mirrored.Name = "mirrored"
 	mirrored.Spec.RuntimeImage = "123456789012.dkr.ecr.us-east-1.amazonaws.com/cache/celld@sha256:" + strings.Repeat("a", 64)
