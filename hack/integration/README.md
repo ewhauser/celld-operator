@@ -49,7 +49,13 @@ runtime's S3 lease TTL. Authenticated launcher observations must show every chil
 stopped without a strict removal proof, while Pod/PVC/PV identities remain intact
 after storage returns. Recovery is an explicit administrative replacement of only
 those failed Pods, with UID preconditions and ordinary deletion grace. The test
-requires new runtime generations, all acknowledged writes, and unchanged
+replaces beta-0 first and keeps beta-1's exact failed child stopped until the new
+beta-0 child reports an undecided-witness retry for its captured predecessor
+generation. It then holds that observed condition for at least two seconds,
+rejecting readiness, bounded loss, disk changes or removal authority before
+replacing beta-1. A child merely starting does not satisfy this recovery check.
+The delay belongs only to the disposable test, not operator orchestration.
+Successful recovery requires new runtime generations, all acknowledged writes, and unchanged
 PersistentFleet PVC/PV/CSI identity on the same Node UID and boot. This is not
 automatic controller recovery or permission to move an old disk to another host.
 No retirement markers or binding files are reset. The external suite uses a real

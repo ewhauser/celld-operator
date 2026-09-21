@@ -12,6 +12,13 @@ import (
 
 const launcherInspector = "launcher-inspector"
 
+type leaseLossTarget struct {
+	fleet string
+	pod   object
+	state launcher.State
+	node  string
+}
+
 // launcherState makes only authenticated observations, never stop requests.
 // The probe is created after the crash tests and removed before maintenance.
 func (h *harness) launcherState(fleetName string, pod object) (launcher.State, error) {
@@ -43,13 +50,7 @@ func (h *harness) launcherState(fleetName string, pod object) (launcher.State, e
 func (h *harness) exerciseLeaseLoss() {
 	h.probe(launcherInspector, operatorNS, map[string]string{"app.kubernetes.io/name": "celld-operator"})
 	defer h.k("-n", operatorNS, "delete", "pod", launcherInspector, "--wait=true")
-	type target struct {
-		fleet string
-		pod   object
-		state launcher.State
-		node  string
-	}
-	var targets []target
+	var targets []leaseLossTarget
 	oldClaims := map[string]map[string]claimIdentity{}
 	oldPods := map[string]map[string]string{}
 	for _, fleetName := range []string{"alpha", "beta"} {
@@ -61,7 +62,7 @@ func (h *harness) exerciseLeaseLoss() {
 			state, err := h.launcherState(fleetName, pod)
 			must(err)
 			assert(state.Phase == "Running", "lease-loss target is not running")
-			targets = append(targets, target{fleetName, pod, state, uidOf(h.cluster("node", str(pod, "spec", "nodeName")))})
+			targets = append(targets, leaseLossTarget{fleetName, pod, state, uidOf(h.cluster("node", str(pod, "spec", "nodeName")))})
 		}
 	}
 	unchanged := func() bool {
@@ -115,15 +116,29 @@ func (h *harness) exerciseLeaseLoss() {
 	// This is an explicit administrative action in the disposable test. It is
 	// ordinary same-host recovery of nonretired storage with no active operation,
 	// never a substitute for a strict retirement proof or cross-host fencing.
-	for _, target := range targets {
-		assert(len(sub(h.currentState(target.fleet), "Operation")) == 0, "administrative recovery raced a lifecycle operation")
-		state, err := h.launcherState(target.fleet, target.pod)
-		must(err)
-		assert(state.Phase == "ExitedUnrequested" && state.ChildExited && !state.RemovalReady(), "refusing to replace a runtime that has not failed")
-		body := encode(object{"apiVersion": "v1", "kind": "DeleteOptions", "preconditions": object{"uid": uidOf(target.pod)}})
-		path := h.writeFile("delete-failed-"+nameOf(target.pod)+".json", []byte(body))
-		h.k("delete", "--raw", "/api/v1/namespaces/fleets/pods/"+nameOf(target.pod), "-f", path)
+	var recovering, witness *leaseLossTarget
+	for i := range targets {
+		target := &targets[i]
+		switch {
+		case target.fleet != "beta":
+			h.replaceFailedPod(*target)
+		case nameOf(target.pod) == "beta-0":
+			recovering = target
+		case nameOf(target.pod) == "beta-1":
+			witness = target
+		}
 	}
+	assert(recovering != nil && witness != nil, "delayed-witness recovery requires both persistent ordinals")
+	h.replaceFailedPod(*recovering)
+	h.delayPersistentWitness(*recovering, *witness, func() bool {
+		for fleetName, claims := range oldClaims {
+			if specReplicas(h.get("statefulset", fleetName)) != 2 || len(sub(h.currentState(fleetName), "Operation")) != 0 || !same(h.claims(fleetName), claims) {
+				return false
+			}
+		}
+		return true
+	})
+	h.replaceFailedPod(*witness)
 	h.waitFor("explicit administrative Pod replacement restores both fleets", 8*time.Minute, func() bool {
 		for _, target := range targets {
 			var pod object
@@ -163,4 +178,16 @@ func (h *harness) exerciseLeaseLoss() {
 	h.readLedger("client", "alpha")
 	h.readLedger("client-beta", "beta")
 	fmt.Println("PASS: explicit administrative recovery uses new Pod/runtime identities and retains same-host PersistentFleet disks and every acknowledged write")
+}
+
+func (h *harness) replaceFailedPod(target leaseLossTarget) {
+	assert(len(sub(h.currentState(target.fleet), "Operation")) == 0, "administrative recovery raced a lifecycle operation")
+	pod := h.get("pod", nameOf(target.pod))
+	assert(uidOf(pod) == uidOf(target.pod), "administrative recovery target Pod changed")
+	state, err := h.launcherState(target.fleet, pod)
+	must(err)
+	assert(state.Generation == target.state.Generation && state.Invocation == target.state.Invocation && state.Phase == "ExitedUnrequested" && state.ChildExited && !state.RemovalReady(), "refusing to replace a different or nonfailed runtime")
+	body := encode(object{"apiVersion": "v1", "kind": "DeleteOptions", "preconditions": object{"uid": uidOf(pod)}})
+	path := h.writeFile("delete-failed-"+nameOf(pod)+".json", []byte(body))
+	h.k("delete", "--raw", "/api/v1/namespaces/fleets/pods/"+nameOf(pod), "-f", path)
 }
