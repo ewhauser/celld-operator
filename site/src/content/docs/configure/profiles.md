@@ -1,11 +1,21 @@
 ---
 title: Choose a storage profile
-description: Select the workload and disk contract before creating a fleet.
+description: Understand celld's durability model, then configure its Kubernetes workload and disks.
 ---
 
-Start with `profile: Bucket` and `bucketWorkload: Ordered` if you need deterministic
-scale-in with temporary local disk. Bucket does not need CSI or PVCs. Both Bucket
-layouts still require the strict launcher and compatible fork runtime.
+Read celld's [ownership and durability overview](https://github.com/denoland/celld/blob/main/docs/README.md#ownership-and-durability)
+and [durability guarantees](https://github.com/denoland/celld/blob/main/docs/guarantees.md)
+to understand how it uses object storage and peer disks, when writes are
+acknowledged, and how recovery works. Those runtime tradeoffs should guide your
+choice of profile.
+
+This page covers the Kubernetes configuration for that choice. Both profiles
+require the operator's [compatible fork runtime](../../reference/compatibility/)
+and strict launcher; upstream documentation does not replace the operator's
+disk-removal contract.
+
+For `profile: Bucket`, choose `bucketWorkload: Ordered` if you need deterministic
+scale-in. Bucket uses temporary local disk and does not need CSI or PVCs.
 
 Choose `profile: PersistentFleet` when the runtime should use persistent local
 peer disks. Configure `storage.storageClassName` with a supported dynamic CSI
