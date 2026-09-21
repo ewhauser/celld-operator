@@ -29,6 +29,8 @@ func (h *harness) exerciseMaintenance() {
 		h.restartOperator()
 		h.hold(12*time.Second, "completed token does not replay: "+f.name, func() bool { return same(podUIDs(h.fleetPods(f.name)), after) })
 		if h.opts.upgradeImage != "" {
+			upgradePods := podUIDs(h.fleetPods(f.name))
+			upgradeClaims := h.claims(f.name)
 			h.merge(f.name, encode(object{"spec": object{"runtimeImage": h.opts.upgradeImage}}))
 			h.waitFor("fork digest upgrade: "+f.name, 10*time.Minute, func() bool {
 				return h.settled(f.name, 2) && str(h.currentState(f.name), "RuntimeImage") == h.opts.upgradeImage
@@ -36,7 +38,17 @@ func (h *harness) exerciseMaintenance() {
 			for _, pod := range h.fleetPods(f.name) {
 				assert(str(list(pod, "spec", "containers")[0], "image") == h.opts.upgradeImage, "old runtime digest remains")
 			}
+			assert(disjoint(upgradePods, podUIDs(h.fleetPods(f.name))), "upgrade retained an old Pod UID")
+			h.goneVolumes(upgradeClaims)
+			freshClaims := h.claims(f.name)
+			assert(len(freshClaims) == len(upgradeClaims), "upgrade changed the expected claim count")
+			for name, current := range freshClaims {
+				old, captured := upgradeClaims[name]
+				assert(captured, "upgrade introduced an unexpected claim: %s", name)
+				assert(current.UID != old.UID && current.VolumeUID != old.VolumeUID && current.Handle != old.Handle, "upgrade reused retired PVC/PV/CSI identity: %s", name)
+			}
 			h.readLedger(f.probe, f.name)
+			fmt.Println("PASS:", f.name, "different-digest upgrade replaced every Pod and disk; old PVs and attachments gone; all acknowledged writes preserved")
 		}
 		oldClaims = h.claims(f.name)
 		fleetUID := uidOf(h.get("celldfleet", f.name))
