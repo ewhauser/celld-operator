@@ -1,0 +1,143 @@
+{
+  "method": "Read-only 10-second snapshots supplement maintained synchronous harness assertions. Before uses last healthy old-image snapshot after restart; after uses first healthy new-image snapshot.",
+  "fleets": {
+    "alpha": {
+      "profile": "Bucket",
+      "before_upgrade": {
+        "observed_at_utc": "2026-09-21T01:11:48.793370+00:00",
+        "pods": {
+          "alpha-0": {
+            "uid": "9533649f-aeb2-4aa6-9f0e-6980ef6910f7",
+            "node": "celld-strict-507fb9f1-worker2",
+            "ip": "192.168.202.201",
+            "image": "ghcr.io/ewhauser/celld@sha256:a00da2bcaeaee6879d658477cd1bdb354a5de55fa9e7f0ab5e2fd95e6e0ce080",
+            "ready": true
+          },
+          "alpha-1": {
+            "uid": "0fdc1f58-9c64-4b41-90bf-8824175bb0d1",
+            "node": "celld-strict-507fb9f1-worker",
+            "ip": "192.168.61.75",
+            "image": "ghcr.io/ewhauser/celld@sha256:a00da2bcaeaee6879d658477cd1bdb354a5de55fa9e7f0ab5e2fd95e6e0ce080",
+            "ready": true
+          }
+        },
+        "claims": {}
+      },
+      "after_upgrade": {
+        "observed_at_utc": "2026-09-21T01:12:39.704813+00:00",
+        "pods": {
+          "alpha-0": {
+            "uid": "7a3bba8b-a7d9-44a8-8c2d-628f2f40e090",
+            "node": "celld-strict-507fb9f1-worker2",
+            "ip": "192.168.202.202",
+            "image": "ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29",
+            "ready": true
+          },
+          "alpha-1": {
+            "uid": "9a54e742-63fc-4ff8-82b5-e17bccd75fc7",
+            "node": "celld-strict-507fb9f1-worker",
+            "ip": "192.168.61.76",
+            "image": "ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29",
+            "ready": true
+          }
+        },
+        "claims": {}
+      },
+      "checks": {
+        "all_pod_uids_changed": true,
+        "fresh_pvc_pv_csi_identities": "not applicable: emptyDir",
+        "old_pvs_absent_at_after_snapshot": true,
+        "no_old_volumeattachments": true
+      },
+      "final_resources_absent_at_utc": "2026-09-21T01:13:10.217294+00:00"
+    },
+    "beta": {
+      "profile": "PersistentFleet",
+      "before_upgrade": {
+        "observed_at_utc": "2026-09-21T01:14:31.766939+00:00",
+        "pods": {
+          "beta-0": {
+            "uid": "56e0819f-6c48-4e0a-a96e-81463cea4182",
+            "node": "celld-strict-507fb9f1-worker2",
+            "ip": "192.168.202.203",
+            "image": "ghcr.io/ewhauser/celld@sha256:a00da2bcaeaee6879d658477cd1bdb354a5de55fa9e7f0ab5e2fd95e6e0ce080",
+            "ready": true
+          },
+          "beta-1": {
+            "uid": "30354710-f52f-4e79-b67f-71121efda9cc",
+            "node": "celld-strict-507fb9f1-worker",
+            "ip": "192.168.61.77",
+            "image": "ghcr.io/ewhauser/celld@sha256:a00da2bcaeaee6879d658477cd1bdb354a5de55fa9e7f0ab5e2fd95e6e0ce080",
+            "ready": true
+          }
+        },
+        "claims": {
+          "data-beta-0": {
+            "pvc_uid": "659f5c9a-dca7-4545-b38b-1f97a5f217bc",
+            "pv_name": "pvc-659f5c9a-dca7-4545-b38b-1f97a5f217bc",
+            "pv_uid": "d13b3f2d-2c1a-4b5f-9d64-300da365087d",
+            "csi_driver": "hostpath.csi.k8s.io",
+            "csi_handle": "b68973c5-b559-11f1-820e-324c298da362",
+            "deletion_finalizer_observed": true,
+            "reclaim_policy": "Delete"
+          },
+          "data-beta-1": {
+            "pvc_uid": "880b76ae-fc15-439b-8e7e-8b74207aea38",
+            "pv_name": "pvc-880b76ae-fc15-439b-8e7e-8b74207aea38",
+            "pv_uid": "7a21e4ce-8821-42a1-9806-667f13f15b6e",
+            "csi_driver": "hostpath.csi.k8s.io",
+            "csi_handle": "b68a4a2b-b559-11f1-90ca-769ff0a41bc7",
+            "deletion_finalizer_observed": true,
+            "reclaim_policy": "Delete"
+          }
+        }
+      },
+      "after_upgrade": {
+        "observed_at_utc": "2026-09-21T01:15:32.888280+00:00",
+        "pods": {
+          "beta-0": {
+            "uid": "6d1c7968-909c-4fae-a06e-d059f903c0ec",
+            "node": "celld-strict-507fb9f1-worker2",
+            "ip": "192.168.202.204",
+            "image": "ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29",
+            "ready": true
+          },
+          "beta-1": {
+            "uid": "e9f7693c-59fc-4f0b-b336-4005b489e7ab",
+            "node": "celld-strict-507fb9f1-worker",
+            "ip": "192.168.61.78",
+            "image": "ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29",
+            "ready": true
+          }
+        },
+        "claims": {
+          "data-beta-0": {
+            "pvc_uid": "5d2ad95a-e79e-417f-b7e4-6a4815451da8",
+            "pv_name": "pvc-5d2ad95a-e79e-417f-b7e4-6a4815451da8",
+            "pv_uid": "bdd3a05a-ec52-4e79-92f6-3f1591afad87",
+            "csi_driver": "hostpath.csi.k8s.io",
+            "csi_handle": "e6060a50-b559-11f1-820e-324c298da362",
+            "deletion_finalizer_observed": true,
+            "reclaim_policy": "Delete"
+          },
+          "data-beta-1": {
+            "pvc_uid": "2b40ef51-ac15-4ff1-9c27-e66e30de1ccb",
+            "pv_name": "pvc-2b40ef51-ac15-4ff1-9c27-e66e30de1ccb",
+            "pv_uid": "fd7ab679-9bd6-41a7-8ebe-52de7387529d",
+            "csi_driver": "hostpath.csi.k8s.io",
+            "csi_handle": "e6079b11-b559-11f1-90ca-769ff0a41bc7",
+            "deletion_finalizer_observed": true,
+            "reclaim_policy": "Delete"
+          }
+        }
+      },
+      "checks": {
+        "all_pod_uids_changed": true,
+        "fresh_pvc_pv_csi_identities": true,
+        "old_pvs_absent_at_after_snapshot": true,
+        "no_old_volumeattachments": true
+      },
+      "final_resources_absent_at_utc": "2026-09-21T01:16:13.557620+00:00"
+    }
+  }
+}

@@ -1,0 +1,60 @@
+Command: CELLD_RUNTIME_IMAGE=ghcr.io/ewhauser/celld@sha256:a00da2bcaeaee6879d658477cd1bdb354a5de55fa9e7f0ab5e2fd95e6e0ce080 CELLD_UPGRADE_IMAGE=ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29 make integration-maintenance
+Source: 010aca2aa797f868cbd9ceca44e7e50dcb564fe1
+go run ./hack/integration --suite maintenance
+Creating isolated cluster celld-strict-507fb9f1
+Pulling into disposable nodes: ghcr.io/ewhauser/celld@sha256:a00da2bcaeaee6879d658477cd1bdb354a5de55fa9e7f0ab5e2fd95e6e0ce080
+Pulled image: ghcr.io/ewhauser/celld@sha256:a00da2bcaeaee6879d658477cd1bdb354a5de55fa9e7f0ab5e2fd95e6e0ce080 on celld-strict-507fb9f1-worker2
+Pulled image: ghcr.io/ewhauser/celld@sha256:a00da2bcaeaee6879d658477cd1bdb354a5de55fa9e7f0ab5e2fd95e6e0ce080 on celld-strict-507fb9f1-control-plane
+Pulled image: ghcr.io/ewhauser/celld@sha256:a00da2bcaeaee6879d658477cd1bdb354a5de55fa9e7f0ab5e2fd95e6e0ce080 on celld-strict-507fb9f1-worker
+Loaded cached image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+Loaded cached image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+Loaded cached image: curlimages/curl:8.12.1
+Loaded cached image: registry.k8s.io/metrics-server/metrics-server:v0.8.0
+Loaded cached image: ghcr.io/shopify/toxiproxy:2.12.0
+Pulling into disposable nodes: ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29
+Pulled image: ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29 on celld-strict-507fb9f1-worker2
+Pulled image: ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29 on celld-strict-507fb9f1-control-plane
+Pulled image: ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29 on celld-strict-507fb9f1-worker
+Loaded cached image: registry.k8s.io/sig-storage/csi-provisioner:v6.3.0
+Loaded cached image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.17.0
+Loaded cached image: registry.k8s.io/sig-storage/hostpathplugin:v1.17.1
+Loaded cached image: registry.k8s.io/sig-storage/livenessprobe:v2.19.0
+PASS: create two isolated test buckets
+PASS: qualification app deployed to bucket-alpha
+PASS: qualification app deployed to bucket-beta
+PASS: pre-existing PVC blocks initial StatefulSet creation
+PASS: both runtime profiles ready through operator reconciliation
+PASS: strict replicas use distinct nodes within the configured zone
+PASS: strict placement blocks a missing eligible zone
+PASS: probe same-fleet running
+PASS: probe client running
+PASS: probe client-beta running
+PASS: probe untrusted running
+PASS: probe operator running
+PASS: application writes readable only in their own fleet storage scope
+PASS: same-fleet/operator peer access, cross-fleet/untrusted/client peer denial, ClusterIP health routing
+PASS: cross-namespace storage conflict blocked
+PASS: fleet in a namespace without the fleet Role is reported, not reconciled
+PASS: schema rejects invalid specs and lifecycle mutations
+PASS: additional probe and bucket override are reported as unsafe drift
+PASS: restored original template matches normalized API defaults
+PASS: coordinated restart accepted: alpha
+PASS: restart completes across manager replacement: alpha
+PASS: alpha 12/12 acknowledged writes readable
+PASS: completed token does not replay: alpha held for 12 s
+PASS: fork digest upgrade: alpha
+PASS: alpha 12/12 acknowledged writes readable
+PASS: alpha different-digest upgrade replaced every Pod and disk; old PVs and attachments gone; all acknowledged writes preserved
+PASS: strict final deletion: alpha
+PASS: alpha compute and disks deleted; bucket reservation retained
+PASS: coordinated restart accepted: beta
+PASS: restart completes across manager replacement: beta
+PASS: beta 12/12 acknowledged writes readable
+PASS: completed token does not replay: beta held for 12 s
+PASS: fork digest upgrade: beta
+PASS: beta 12/12 acknowledged writes readable
+PASS: beta different-digest upgrade replaced every Pod and disk; old PVs and attachments gone; all acknowledged writes preserved
+PASS: strict final deletion: beta
+PASS: beta compute and disks deleted; bucket reservation retained
+PASS: strict control-plane integration suite maintenance runtime ghcr.io/ewhauser/celld@sha256:a00da2bcaeaee6879d658477cd1bdb354a5de55fa9e7f0ab5e2fd95e6e0ce080
+Cleaning up only cluster celld-strict-507fb9f1

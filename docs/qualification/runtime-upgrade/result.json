@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "result": "PASS",
+  "suite": "maintenance",
+  "repository_commit": "010aca2aa797f868cbd9ceca44e7e50dcb564fe1",
+  "cluster": "celld-strict-507fb9f1",
+  "host_platform": "darwin/arm64",
+  "runtime_platform": "linux/arm64",
+  "operator_and_launcher": "built from exact repository commit",
+  "command": [
+    "make",
+    "integration-maintenance"
+  ],
+  "environment": {
+    "CELLD_RUNTIME_IMAGE": "ghcr.io/ewhauser/celld@sha256:a00da2bcaeaee6879d658477cd1bdb354a5de55fa9e7f0ab5e2fd95e6e0ce080",
+    "CELLD_UPGRADE_IMAGE": "ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29"
+  },
+  "started_at_utc": "2026-09-21T01:01:25.936909+00:00",
+  "completed_at_utc": "2026-09-21T01:16:14.858188+00:00",
+  "exit_code": 0,
+  "runtime_from": {
+    "version": "0.5.1-ewhauser.2",
+    "source": "2a65a4df99bed5254bdd679df57ed98556454dec",
+    "arm64_manifest": "sha256:e4014d56abd9b8830a0a4a908fd8cdcd806a8b2220892bc4d3d962b9f9319e06"
+  },
+  "runtime_to": {
+    "version": "0.5.1-ewhauser.3",
+    "source": "739f2baa87a5bfc4bfe04e317adf6d774edf8740",
+    "arm64_manifest": "sha256:a7218bbe812a798786c89fb95f2bc434d04f6e5ebf74ad5c742bf93c0bddcf64"
+  },
+  "profiles": [
+    "Bucket",
+    "PersistentFleet"
+  ],
+  "oracle": {
+    "acknowledged_ids_per_fleet": 12,
+    "distinct_cells_per_fleet": 12,
+    "exact_returned_id_and_stored_value_required": true,
+    "false_stored_value_not_retried": true,
+    "read_all_after_restart": true,
+    "read_all_after_upgrade": true
+  },
+  "checks": [
+    "coordinated restart across operator replacement",
+    "completed restart token does not replay",
+    "different runtime digest deployed on every new Pod",
+    "disjoint old/new Pod UIDs",
+    "old CSI PVs absent and no VolumeAttachments referring to them",
+    "fresh PVC UID, PV UID, CSI handle for both PersistentFleet claims",
+    "all 12 acknowledged writes readable in each fleet after restart and upgrade",
+    "final compute/PVC/PV deletion with same bucket reservation retained"
+  ],
+  "cleanup": {
+    "owned_cluster_removed": true,
+    "resource_observer_exit_code": 0,
+    "storage_observer_exit_code": 0
+  },
+  "source_boundary": "Only base isolation and graceful maintenance were executed locally. No old .2 lease-loss path was exercised. Hosted .3 suite results are separate.",
+  "not_qualified": [
+    "AWS EKS/EBS CSI deletion, EC2 loss and managed services",
+    "Actual attach/detach: local hostpath CSI has no attach operation",
+    "Cross-host or cross-boot retained-disk recovery",
+    "Object-store durability across MinIO Pod replacement",
+    "Published operator image: operator/launcher built locally from source"
+  ],
+  "preceding_local_fault_attempt": {
+    "result": "ENVIRONMENT_SETUP_FAILURE",
+    "runtime": "0.5.1-ewhauser.3",
+    "repository_commit": "010aca2aa797f868cbd9ceca44e7e50dcb564fe1",
+    "cluster": "celld-strict-a4b7efd8",
+    "exit_code": 2,
+    "runtime_started": false,
+    "fault_scenarios_executed": false,
+    "reason": "Launcher init copy failed with ENOSPC on all four Pods. Readiness timed out before celld started.",
+    "cleanup": "Owned cluster removed automatically; only exact task-owned unused image/cache entries were subsequently removed.",
+    "decision": "No local fault rerun; hosted .3 faults independently qualifies the fault scenario."
+  },
+  "raw_archives": {
+    "upgrade.log": {
+      "path": "/Users/ewhauser/.codex/artifacts/celld-operator/strict-control-plane/2026-09-21/ewhauser3-local-004747Z/upgrade.log",
+      "sha256": "642210ac6a39159b4c62b53cc9f5b0f4290f0d8daa971fd801da85d2b7858ceb",
+      "bytes": 4080
+    },
+    "upgrade-run.json": {
+      "path": "/Users/ewhauser/.codex/artifacts/celld-operator/strict-control-plane/2026-09-21/ewhauser3-local-004747Z/upgrade-run.json",
+      "sha256": "e8f7238974249577bf6e370bfefdaffac2b2608c2e4821d00dd43006ef6fb219",
+      "bytes": 610
+    },
+    "upgrade-resources-observer.jsonl": {
+      "path": "/Users/ewhauser/.codex/artifacts/celld-operator/strict-control-plane/2026-09-21/ewhauser3-local-004747Z/upgrade-resources-observer.jsonl",
+      "sha256": "3e50261912f1a2c3d266a6bbe24601907776e8cd028817e1ab915bd7683edd31",
+      "bytes": 3423700
+    },
+    "upgrade-storage-observer.jsonl": {
+      "path": "/Users/ewhauser/.codex/artifacts/celld-operator/strict-control-plane/2026-09-21/ewhauser3-local-004747Z/upgrade-storage-observer.jsonl",
+      "sha256": "77cbbbb271aa5ac68c5a0c6f77ebbe25a943f3a5b26823c694250dda50f9107b",
+      "bytes": 31811
+    },
+    "faults.log": {
+      "path": "/Users/ewhauser/.codex/artifacts/celld-operator/strict-control-plane/2026-09-21/ewhauser3-local-004747Z/faults.log",
+      "sha256": "1ce371d22fad27e09f5ac37c046028068a950d8c199b95fe7ad1550006ca1c2e",
+      "bytes": 43062
+    },
+    "faults-run.json": {
+      "path": "/Users/ewhauser/.codex/artifacts/celld-operator/strict-control-plane/2026-09-21/ewhauser3-local-004747Z/faults-run.json",
+      "sha256": "3c969d169ea1dc7382e6fbe28b38feee563a011148d1edcb7ed209c449f16f4b",
+      "bytes": 332
+    },
+    "setup-failure.json": {
+      "path": "/Users/ewhauser/.codex/artifacts/celld-operator/strict-control-plane/2026-09-21/ewhauser3-local-004747Z/setup-failure.json",
+      "sha256": "334c28bf518064e3cd87546474d5caa96dc4630fc31ffde860c46cfd4b920592",
+      "bytes": 995
+    },
+    "scoped-cache-cleanup.json": {
+      "path": "/Users/ewhauser/.codex/artifacts/celld-operator/strict-control-plane/2026-09-21/ewhauser3-local-004747Z/scoped-cache-cleanup.json",
+      "sha256": "b23c0cd8e7d49f10c6b8bc5af64de4404b1f172663d792ca5f60fa8f7870d85e",
+      "bytes": 2448
+    }
+  }
+}
