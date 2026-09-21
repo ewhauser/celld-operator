@@ -10,6 +10,15 @@ disposable CSI disks after verified shutdown.
 **Experimental: for evaluation.** Cloud deployment and failure testing are still
 incomplete. See [capabilities and limitations](docs/critical-features.md).
 
+> [!WARNING]
+> If you use celld with persistent local storage (`PersistentFleet`), you must
+> use the [ewhauser/celld fork](https://github.com/ewhauser/celld). The operator
+> relies on its strict shutdown and recovery contract before deleting local
+> disks; stock upstream celld does not provide that contract. All runtime and
+> recovery nodes must use a compatible fork. The fork is also required for
+> `Bucket` fleets. See [compatibility](site/src/content/docs/reference/compatibility.md)
+> for the required release and image digest.
+
 ## Use the operator
 
 - [Install](site/src/content/docs/start/install.mdx), [create a fleet](site/src/content/docs/start/first-fleet.mdx), and [run an application](site/src/content/docs/start/first-application.md).

@@ -21,6 +21,15 @@ hero:
 AWS deployment and failure testing are still incomplete. Review [capabilities and limitations](./reference/limitations/) before choosing a workload for evaluation.
 :::
 
+:::caution[Local storage requires the celld fork]
+If you use celld with persistent local storage (`PersistentFleet`), you must use
+the [ewhauser/celld fork](https://github.com/ewhauser/celld). The operator relies
+on its strict shutdown and recovery contract before deleting local disks; stock
+upstream celld does not provide that contract. All runtime and recovery nodes
+must use a compatible fork. The fork is also required for `Bucket` fleets. See
+[compatibility](./reference/compatibility/) for the required release and image digest.
+:::
+
 ## From a manifest to a working application
 
 [celld](https://github.com/denoland/celld) runs stateful JavaScript applications using durable cells. The operator manages the Kubernetes fleet that hosts them. You supply the cluster, an S3 bucket, runtime AWS permissions and a compatible fork image; the operator creates the workloads, Services, and network policies.
