@@ -378,7 +378,7 @@ spec:
                 description: |-
                   Requested immutable runtime digest. Required for provisioning; no default release is assumed.
                   Use a homogeneous compatible fork; release and recovery qualification remain required.
-                pattern: ^ghcr.io/ewhauser/celld@sha256:[a-f0-9]{64}$
+                pattern: ^([a-z0-9]+([.-][a-z0-9]+)*|localhost)(:[0-9]{1,5})?(/[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*)+@sha256:[a-f0-9]{64}$
                 type: string
               serviceAccountName:
                 description: Existing ServiceAccount in the fleet namespace with the
