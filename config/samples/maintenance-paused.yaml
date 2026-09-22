@@ -4,7 +4,6 @@ metadata:
   name: maintenance-example
   namespace: fleets
 spec:
-  qualification: Experimental
   profile: PersistentFleet
   replicas: 3
   maintenance:

@@ -16,7 +16,3 @@ The path to a first request is:
 5. [Verify and troubleshoot](../verify/) the fleet when a condition stays false.
 
 Start with a **Bucket** fleet. Both profiles require the strict launcher. A PersistentFleet adds CSI volumes using the disposable-disk policy; see [fleet profiles](../../concepts/profiles/) before selecting persistent local disks. Each fleet runs one application from its own bucket. The operator does not create the bucket, IAM roles, worker nodes or public ingress.
-
-:::caution[Experimental software]
-The API requires `qualification: Experimental`. Cloud qualification is still outstanding and the operator reports `ProductionQualified=False`. Use a nonproduction cluster and bucket for this guide. See the [capability and qualification limits](../../reference/limitations/) before relying on a lifecycle operation.
-:::

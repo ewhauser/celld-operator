@@ -14,7 +14,6 @@ metadata:
   name: my-fleet
   namespace: fleets
 spec:
-  qualification: Experimental
   profile: Bucket
   bucketWorkload: Ordered
   runtimeImage: ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29
@@ -46,8 +45,7 @@ victim. Layout is immutable after creation.
 
 Look for three ready replicas, `Ready=True` and `Blocked=False`.
 `InfrastructureReady=True` alone does not mean Pods have scheduled.
-`ProductionQualified=False` is expected. See [verification](../verify/) if the
-workload does not become ready.
+See [verification](../verify/) if the workload does not become ready.
 
 The application Service uses port 8080. In-cluster clients need the label
 `celld.eric.dev/client-of: my-fleet` in the fleet namespace. Internal port 8081

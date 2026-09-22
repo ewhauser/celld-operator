@@ -115,7 +115,7 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 			return r.report(ctx, f, nil, "StorageClassMissing", "Referenced StorageClass does not exist", false)
 		}
 		if sc.ReclaimPolicy == nil || *sc.ReclaimPolicy != corev1.PersistentVolumeReclaimDelete || sc.VolumeBindingMode == nil || *sc.VolumeBindingMode != storagev1.VolumeBindingWaitForFirstConsumer || !r.supportedCSI(sc.Provisioner) {
-			return r.report(ctx, f, nil, "InvalidStorageClass", "Requires EBS CSI, Delete reclaim policy and WaitForFirstConsumer binding (local test permits the qualified hostpath CSI driver)", false)
+			return r.report(ctx, f, nil, "InvalidStorageClass", "Requires EBS CSI, Delete reclaim policy and WaitForFirstConsumer binding (local test permits the hostpath CSI driver)", false)
 		}
 	}
 	reservation := &fleet.CelldStorageReservation{Name: reservationName(f), Spec: fleet.ReservationSpec{InitialReplicas: f.Spec.Replicas, Bucket: f.Spec.Storage.Bucket, FleetNamespace: f.Namespace, FleetName: f.Name, FleetUID: string(f.UID), SpecHash: specHash(f)}}
@@ -147,7 +147,7 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 	err := r.Get(ctx, client.ObjectKeyFromObject(desired), actual)
 	if apierrors.IsNotFound(err) {
 		if !knownRuntime(runtimeImage(f)) || r.Options.LauncherImage == "" {
-			return r.report(ctx, f, h, "UnsupportedTransition", "Provisioning requires an independently qualified fork digest and trusted launcher; there is no default compatible image", false)
+			return r.report(ctx, f, h, "UnsupportedTransition", "Provisioning requires a verified compatible fork digest and trusted launcher; there is no default compatible image", false)
 		}
 		if reservation.Annotations[attemptAnnotation] != "" {
 			return r.report(ctx, f, h, "LifecycleBlocked", "Workload is missing after a recorded creation attempt; automatic recreation could reuse an unsafe identity or disk", false)
@@ -209,7 +209,7 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 	if readyReplicas(actual) != replicas(actual) {
 		return r.report(ctx, f, h, "Provisioning", "Waiting for ready replicas; inspect Pod scheduling, PVC binding and runtime readiness. Capacity is externally provisioned", true)
 	}
-	return r.report(ctx, f, h, "Provisioned", "Initial infrastructure and runtime readiness observed; this is not production or durability qualification", true)
+	return r.report(ctx, f, h, "Provisioned", "Initial infrastructure and runtime readiness observed", true)
 }
 
 func (r *Reconciler) ensure(ctx context.Context, desired client.Object) error {
@@ -340,8 +340,9 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, h *loadedS
 	set("InfrastructureReady", provisioned || reason == "LifecycleProgress", reason, message)
 	set("Progressing", reason == "LifecycleProgress" || reason == "Provisioning", reason, message)
 	set("Blocked", !provisioned && reason != "LifecycleProgress", reason, message)
-	set("LifecycleBlocked", true, "QualificationIncomplete", "Strict removal requires captured celld and launcher proof; production and cloud storage qualification remain outstanding")
-	set("ProductionQualified", false, "QualificationIncomplete", "Local tests do not qualify real CSI/EBS cleanup, cross-host disk reuse or cloud recovery")
+	// Clear obsolete qualification projections on fleets created by older releases.
+	meta.RemoveStatusCondition(&f.Status.Conditions, "LifecycleBlocked")
+	meta.RemoveStatusCondition(&f.Status.Conditions, "ProductionQualified")
 	footprint := stateFootprint{}
 	if h.res != nil {
 		footprint = measureState(h.res)

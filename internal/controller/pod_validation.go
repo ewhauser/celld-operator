@@ -11,7 +11,7 @@ import (
 
 func validatePersistentPod(f *fleet.CelldFleet, pod *corev1.Pod, opts Options) error {
 	if len(pod.Spec.Containers) != 1 || len(pod.Spec.EphemeralContainers) != 0 || len(pod.Spec.InitContainers) != 1 || pod.Spec.HostPID || pod.Spec.HostNetwork || pod.Spec.HostIPC || !pod.DeletionTimestamp.IsZero() {
-		return errors.New("unqualified persistent pod composition")
+		return errors.New("unsupported persistent pod composition")
 	}
 	expected := podTemplate(f, opts).Spec
 	actual := *pod.Spec.DeepCopy()
@@ -41,7 +41,7 @@ func validatePersistentPod(f *fleet.CelldFleet, pod *corev1.Pod, opts Options) e
 			switch env.Name {
 			case "AWS_WEB_IDENTITY_TOKEN_FILE", "AWS_ROLE_ARN", "AWS_CONTAINER_CREDENTIALS_FULL_URI", "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE", "AWS_STS_REGIONAL_ENDPOINTS", "AWS_DEFAULT_REGION":
 			default:
-				return errors.New("unqualified runtime environment")
+				return errors.New("unsupported runtime environment")
 			}
 		}
 	}
@@ -60,7 +60,7 @@ func validatePersistentPod(f *fleet.CelldFleet, pod *corev1.Pod, opts Options) e
 			continue
 		}
 		if !mount.ReadOnly || (mount.MountPath != "/var/run/secrets/eks.amazonaws.com/serviceaccount" && mount.MountPath != "/var/run/secrets/pods.eks.amazonaws.com/serviceaccount") {
-			return errors.New("unqualified runtime mount")
+			return errors.New("unsupported runtime mount")
 		}
 	}
 	for _, volume := range expected.Volumes {

@@ -9,7 +9,6 @@ func valid() *CelldFleet {
 	f := &CelldFleet{
 		Name: "test",
 		Spec: CelldFleetSpec{
-			Qualification:      "Experimental",
 			Profile:            "Bucket",
 			ServiceAccountName: "runtime",
 			Storage:            StorageSpec{Bucket: "example-bucket", Region: "us-east-1"},
@@ -38,7 +37,6 @@ func TestDefaultsAndValidation(t *testing.T) {
 			f.Spec.RuntimeImage = "mirror.example.com/celld:v1@sha256:" + strings.Repeat("a", 64)
 		},
 		"long token":      func(f *CelldFleet) { f.Spec.Maintenance = &MaintenanceSpec{RestartToken: strings.Repeat("a", 129)} },
-		"production":      func(f *CelldFleet) { f.Spec.Qualification = "Production" },
 		"prefix":          func(f *CelldFleet) { f.Spec.Storage.Bucket = "example-bucket/shared" },
 		"alias":           func(f *CelldFleet) { f.Spec.Storage.Bucket = "EXAMPLE-bucket" },
 		"profile":         func(f *CelldFleet) { f.Spec.Profile = "Unknown" },

@@ -76,6 +76,5 @@ Unit regressions cover identity/policy/finalizer drift, lost responses, stale
 issuers, attachment waits, restart/delete sequencing and fresh growth. Envtest
 uses a real API server to exercise UID/resource-version preconditions and PVC/PV
 finalizers; CSI completion is simulated there. The 100-member bounded-state test
-includes every cleanup intent and captured protection flag. These checks do not
-qualify EKS/EBS. Real CSI teardown, underlying EBS disappearance, and acknowledged
-writes across shrink/grow and failure still require the cloud qualification run.
+includes every cleanup intent and captured protection flag. For an EKS deployment, check that the installed CSI driver completes EBS deletion
+and that acknowledged writes survive the recovery procedures you intend to use.

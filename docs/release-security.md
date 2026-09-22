@@ -24,6 +24,8 @@ with the qualified image digest, verifies the registry round trip, signs both OC
 artifacts, and attests the release files. Only then does it create the Git tag,
 upload all assets to a draft, and publish the immutable GitHub release. The tag
 ruleset requires the earlier `release` deployment to have succeeded.
+Stable version tags publish regular releases; version tags with a prerelease
+suffix publish prereleases.
 
 Both environments allow only the `main` branch and prohibit administrator
 bypass of approval. Eric approves both stages. Self-approval is intentionally
@@ -70,7 +72,8 @@ exactly; accepting any workflow in the repository weakens the guarantee.
 Earlier releases used a tag-based identity and do not gain these controls
 retroactively. GitHub immutability covers GitHub release assets and associated
 tags; GHCR tags are still mutable at the registry, so consume OCI digests and
-verify signatures. Passing Kind qualification does not establish AWS/EKS safety.
+verify signatures. The Kind suite exercises the published artifact against local storage; see the
+[test records](qualification/README.md) for its scope.
 
 ## CI and dependencies
 

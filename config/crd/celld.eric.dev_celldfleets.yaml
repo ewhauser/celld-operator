@@ -408,12 +408,6 @@ spec:
                 - Bucket
                 - PersistentFleet
                 type: string
-              qualification:
-                description: A required acknowledgment of the qualification boundary;
-                  production is unavailable.
-                enum:
-                - Experimental
-                type: string
               replicas:
                 default: 3
                 description: Manual replica target. Capacity policy can choose a different
@@ -426,7 +420,7 @@ spec:
               runtimeImage:
                 description: |-
                   Requested immutable runtime digest. Required for provisioning; no default release is assumed.
-                  Use a homogeneous compatible fork; release and recovery qualification remain required.
+                  Use a homogeneous compatible fork; verify release and recovery compatibility.
                 pattern: ^([a-z0-9]+([.-][a-z0-9]+)*|localhost)(:[0-9]{1,5})?(/[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*)+@sha256:[a-f0-9]{64}$
                 type: string
               serviceAccountName:
@@ -552,23 +546,21 @@ spec:
             required:
             - placement
             - profile
-            - qualification
             - serviceAccountName
             - storage
             type: object
             x-kubernetes-validations:
             - message: only replicas, capacity, runtimeImage and maintenance may change;
                 layout, execution, lifecycle, env and telemetry are fixed at creation
-              rule: self.qualification == oldSelf.qualification && self.profile ==
-                oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName
-                && self.storage == oldSelf.storage && self.placement == oldSelf.placement
-                && has(self.execution) == has(oldSelf.execution) && (!has(self.execution)
-                || self.execution == oldSelf.execution) && has(self.lifecycle) ==
-                has(oldSelf.lifecycle) && (!has(self.lifecycle) || self.lifecycle
-                == oldSelf.lifecycle) && has(self.env) == has(oldSelf.env) && (!has(self.env)
-                || self.env == oldSelf.env) && has(self.telemetry) == has(oldSelf.telemetry)
-                && (!has(self.telemetry) || self.telemetry == oldSelf.telemetry) &&
-                self.bucketWorkload == oldSelf.bucketWorkload
+              rule: self.profile == oldSelf.profile && self.serviceAccountName ==
+                oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement
+                == oldSelf.placement && has(self.execution) == has(oldSelf.execution)
+                && (!has(self.execution) || self.execution == oldSelf.execution) &&
+                has(self.lifecycle) == has(oldSelf.lifecycle) && (!has(self.lifecycle)
+                || self.lifecycle == oldSelf.lifecycle) && has(self.env) == has(oldSelf.env)
+                && (!has(self.env) || self.env == oldSelf.env) && has(self.telemetry)
+                == has(oldSelf.telemetry) && (!has(self.telemetry) || self.telemetry
+                == oldSelf.telemetry) && self.bucketWorkload == oldSelf.bucketWorkload
             - message: Ordered bucketWorkload requires Bucket profile
               rule: self.bucketWorkload != 'Ordered' || self.profile == 'Bucket'
             - message: azCount must equal the zones count
@@ -630,8 +622,8 @@ spec:
                     type: integer
                 type: object
               conditions:
-                description: Current readiness, progress, blocked, maintenance, and
-                  experimental-validation conditions.
+                description: Current readiness, progress, blocked, and maintenance
+                  conditions.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.

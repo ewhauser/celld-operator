@@ -427,7 +427,7 @@ func (h *harness) newFleet(name, bucket, profile, namespace string) *v1alpha1.Ce
 		APIVersion: "celld.eric.dev/v1alpha1", Kind: "CelldFleet",
 		Name: name, Namespace: namespace,
 		Spec: v1alpha1.CelldFleetSpec{
-			Qualification: "Experimental", Profile: profile, Replicas: 2, RuntimeImage: h.opts.runtimeImage, ServiceAccountName: "runtime",
+			Profile: profile, Replicas: 2, RuntimeImage: h.opts.runtimeImage, ServiceAccountName: "runtime",
 			Storage:   storage,
 			Placement: v1alpha1.PlacementSpec{AZCount: 1, Zones: []string{"us-east-1a"}},
 		},

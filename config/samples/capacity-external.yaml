@@ -6,7 +6,6 @@ metadata:
   name: agents
   namespace: agents-prod
 spec:
-  qualification: Experimental
   profile: Bucket
   bucketWorkload: Ordered # HPA scale-in requires an exact highest-ordinal victim.
   replicas: 3

@@ -18,9 +18,8 @@ kubectl --context YOUR_CONTEXT -n fleets get celldfleet my-fleet -o yaml
 | Scale-in, restart, upgrade or deletion blocked | [Current operation](lifecycle/). |
 | Incomplete or ineffective capacity observations | [Capacity policy](../operate/capacity/). |
 
-`Ready` describes availability. `ProductionQualified=False` and the lifecycle
-qualification condition describe the experimental boundary. Neither is a
-shortcut around an operation's strict proof requirements.
+`Ready` describes availability. It does not replace an operation's strict proof
+requirements.
 
 Use the [conditions reference](../reference/conditions/) to interpret the type,
 reason and message together. Preserve current authority and storage whenever

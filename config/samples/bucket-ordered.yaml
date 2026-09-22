@@ -4,7 +4,6 @@ metadata:
   name: ordered-bucket-example
   namespace: default
 spec:
-  qualification: Experimental
   profile: Bucket
   bucketWorkload: Ordered
   replicas: 3

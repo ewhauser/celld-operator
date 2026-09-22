@@ -245,7 +245,7 @@ jobs:
           (cd dist && sha256sum ./*.tgz ./*.yaml image.txt chart.txt > SHA256SUMS)
           cosign sign-blob --yes --bundle dist/SHA256SUMS.sigstore.json dist/SHA256SUMS
           cat > dist/notes.md <<EOF
-          Experimental operator release. See docs/operations.md for installation, verification and qualification limits; local kind suites, including the one this release's image passed, do not establish AWS/EKS qualification.
+          Operator release. See docs/operations.md for installation, verification and operational requirements. This release's image passed the Kind lifecycle suite.
 
           - Image: \`$IMAGE@$DIGEST\` (linux/amd64, linux/arm64), signed keyless by this workflow run.
           - Chart: \`ghcr.io/$owner/charts/celld-operator:$version\` (digest in chart.txt), signed keyless.
@@ -273,6 +273,10 @@ jobs:
           # The tag ruleset requires a successful deployment to the release
           # environment, which is produced by the approved publish job above.
           gh api --method POST "repos/$REPOSITORY/git/refs" -f "ref=refs/tags/$RELEASE_VERSION" -f "sha=$SOURCE_SHA"
-          gh release create "$RELEASE_VERSION" dist/*.tgz dist/*.yaml dist/image.txt dist/chart.txt dist/SHA256SUMS dist/SHA256SUMS.sigstore.json --verify-tag --draft --prerelease --title "$RELEASE_VERSION (experimental)" --notes-file dist/notes.md
+          release_flags=()
+          if [[ "$RELEASE_VERSION" == *-* ]]; then
+            release_flags+=(--prerelease)
+          fi
+          gh release create "$RELEASE_VERSION" dist/*.tgz dist/*.yaml dist/image.txt dist/chart.txt dist/SHA256SUMS dist/SHA256SUMS.sigstore.json --verify-tag --draft "${release_flags[@]}" --title "$RELEASE_VERSION" --notes-file dist/notes.md
           gh release edit "$RELEASE_VERSION" --draft=false
           test "$(gh api "repos/$REPOSITORY/releases/tags/$RELEASE_VERSION" --jq .immutable)" = true

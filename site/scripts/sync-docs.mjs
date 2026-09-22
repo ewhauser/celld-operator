@@ -45,7 +45,7 @@ for (const file of readdirSync(path.join(repoDir, 'docs/decisions')).sort()) {
 	pages.push({ source: `docs/decisions/${file}`, section: 'decisions', slug: file.replace(/\.md$/, '') });
 }
 
-pages.push({ source: 'docs/qualification/README.md', section: 'qualification', slug: 'index', label: 'Qualification index' });
+pages.push({ source: 'docs/qualification/README.md', section: 'qualification', slug: 'index', label: 'Test evidence' });
 pages.push({ source: 'docs/qualification/eks-smoke-plan.md', section: 'qualification', slug: 'eks-smoke-plan', label: 'EKS smoke suite plan' });
 for (const dir of readdirSync(path.join(repoDir, 'docs/qualification')).sort()) {
 	const readme = path.join(repoDir, 'docs/qualification', dir, 'README.md');
@@ -392,7 +392,7 @@ const samplesPage = () => {
 		`editUrl: ${yamlString(tree('config/samples'))}`,
 		'---',
 		'',
-		'Samples are not deployable as written. Set an explicit verified compatible fork runtime digest, replace the bucket name with a dedicated bucket, create the referenced ServiceAccount with a runtime IAM identity, and use zone names in the storage region. Every sample carries `qualification: Experimental`, which the API requires.',
+		'Samples are not deployable as written. Set an explicit verified compatible fork runtime digest, replace the bucket name with a dedicated bucket, create the referenced ServiceAccount with a runtime IAM identity, and use zone names in the storage region.',
 		'',
 	];
 	for (const file of files) {

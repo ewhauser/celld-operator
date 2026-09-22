@@ -25,5 +25,5 @@ exclusion across kernels. Growth uses fresh disks. No timeout, EC2 fence,
 force-detach or storage-finalizer removal bypass exists.
 
 Read [current operations](../current-operation/), [disk cleanup](../../contracts/disposable-disks/)
-and [qualification limits](../../reference/limitations/). A ready fleet and a
-passing local test are not production durability qualification.
+and [operational limits](../../reference/limitations/). A ready fleet reflects
+current availability; inspect the current operation before removing storage.

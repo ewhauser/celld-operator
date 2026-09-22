@@ -17,10 +17,6 @@ hero:
       variant: minimal
 ---
 
-:::note[Experimental — for evaluation]
-AWS deployment and failure testing are still incomplete. Review [capabilities and limitations](./reference/limitations/) before choosing a workload for evaluation.
-:::
-
 :::caution[Local storage requires the celld fork]
 If you use celld with persistent local storage (`PersistentFleet`), you must use
 the [ewhauser/celld fork](https://github.com/ewhauser/celld). The operator relies

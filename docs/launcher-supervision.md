@@ -136,8 +136,8 @@ The September 20 local macOS ARM64 run used binary SHA256
 `f9b68e9e9608d74c40a9d8e9dab1846c3532f4f51762dc25e863c0986f2146db`, from the
 verified `0.5.1-ewhauser.2` fork release. It captured the control-only result, exact seeded
 generation, child exit, inherited-lock release and restart denial. This empty-disk
-handshake does not qualify replicated recovery, a published runtime image, or
-EKS/EBS removal. Those remain separate integration gates.
+handshake does not exercise replicated recovery or CSI disk removal. Those
+behaviors have separate integration records and deployment checks.
 
 The [September 21 `.3` qualification](qualification/native-peer-startup/README.md)
 repeats both real-binary handshakes and adds populated native recovery, hosted
