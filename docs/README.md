@@ -2,7 +2,7 @@
 
 The [user guide](../site/src/content/docs/start/overview.md) covers installation,
 configuration and operations. The [capability matrix](critical-features.md)
-distinguishes implemented behavior from qualification.
+describes implemented behavior and operational limits.
 
 The implementation has three authority boundaries:
 

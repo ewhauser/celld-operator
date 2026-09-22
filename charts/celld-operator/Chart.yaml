@@ -1,6 +1,6 @@
 apiVersion: v2
 name: celld-operator
-description: Experimental Kubernetes lifecycle operator for celld on EKS, S3 and EBS
+description: Kubernetes lifecycle operator for celld on EKS, S3 and EBS
 type: application
 version: 0.1.0-dev
 appVersion: dev

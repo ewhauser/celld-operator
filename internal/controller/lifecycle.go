@@ -106,7 +106,7 @@ func (r *Reconciler) lifecycle(ctx context.Context, f *fleet.CelldFleet, h *load
 				return block("DisruptionBlocked", errors.New("restart and upgrade require coordinated downtime permission"))
 			}
 			if kind == "Upgrade" && !knownRuntime(runtimeImage(f)) {
-				return block("UnsupportedTransition", errors.New("target requires an independently qualified fork digest"))
+				return block("UnsupportedTransition", errors.New("target requires an verified compatible fork digest"))
 			}
 			s.Operation = newOperation(f, s, w, r.capacityNow(), kind, target, token)
 			resetMaintenanceCapacity(s)

@@ -3,13 +3,12 @@ title: Compatibility
 description: Required platform, strict runtime fork and immutable artifact pins.
 ---
 
-All paths remain experimental. Use an explicit compatible fork image; the
-operator supplies no default runtime digest.
+Use an explicit compatible fork image; the operator supplies no default runtime digest.
 
 | Component | Requirement |
 | --- | --- |
 | Kubernetes | 1.31 or newer, IPv4 Pod networking and enforced NetworkPolicy. |
-| Runtime | Registry-qualified OCI `@sha256:...` reference to the qualified celld fork, strict shutdown schema 1. |
+| Runtime | Registry-pinned OCI `@sha256:...` reference to the compatible celld fork, strict shutdown schema 1. |
 | Recovery fleet | Homogeneous compatible fork including native `bucket_complete` readers. |
 | Launcher | Digest-pinned image built from the matching operator source; required for both profiles. |
 | Persistent storage | Supported dynamic CSI, RWOP, `Delete`, `WaitForFirstConsumer` and external-provisioner deletion finalizer. |
@@ -34,8 +33,8 @@ loss already recorded by an older runtime. See [recovery troubleshooting](../../
 
 The [.2 → .3 upgrade](../../qualification/runtime-upgrade/) and the
 [.3 native and Kind qualification](../../qualification/native-peer-startup/)
-passed for the recorded artifacts. EKS/EBS remains unqualified; an image pin or
-schema number alone does not establish the same behavior for another build.
+passed for the recorded artifacts. An image pin or schema number alone does not
+establish the same behavior for another build.
 
 Runtime image changes use [coordinated maintenance](../../operate/upgrade-runtime/).
 They are not rolling updates and do not provide automatic format migration or
@@ -43,5 +42,5 @@ rollback compatibility. The caller must qualify the source/target pair.
 
 There is no migration from the former lifecycle journal, no stock-version
 adapter fallback, no layout conversion and no reuse of historical retained
-disks. Create fresh evaluation fleets with the current API and dedicated buckets.
+disks. Create fresh fleets with the current API and dedicated buckets.
 See [capabilities and limits](../limitations/) for actual validation boundaries.

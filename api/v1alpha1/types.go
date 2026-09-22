@@ -1,4 +1,4 @@
-// Package v1alpha1 contains the experimental fleet API under the celld.eric.dev group.
+// Package v1alpha1 contains the fleet API under the celld.eric.dev group.
 // +kubebuilder:object:generate=true
 // +groupName=celld.eric.dev
 package v1alpha1
@@ -28,7 +28,7 @@ var AddToScheme = SchemeBuilder.AddToScheme
 type CelldFleet struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	// +kubebuilder:validation:XValidation:rule="self.qualification == oldSelf.qualification && self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement && has(self.execution) == has(oldSelf.execution) && (!has(self.execution) || self.execution == oldSelf.execution) && has(self.lifecycle) == has(oldSelf.lifecycle) && (!has(self.lifecycle) || self.lifecycle == oldSelf.lifecycle) && has(self.env) == has(oldSelf.env) && (!has(self.env) || self.env == oldSelf.env) && has(self.telemetry) == has(oldSelf.telemetry) && (!has(self.telemetry) || self.telemetry == oldSelf.telemetry) && self.bucketWorkload == oldSelf.bucketWorkload",message="only replicas, capacity, runtimeImage and maintenance may change; layout, execution, lifecycle, env and telemetry are fixed at creation"
+	// +kubebuilder:validation:XValidation:rule="self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement && has(self.execution) == has(oldSelf.execution) && (!has(self.execution) || self.execution == oldSelf.execution) && has(self.lifecycle) == has(oldSelf.lifecycle) && (!has(self.lifecycle) || self.lifecycle == oldSelf.lifecycle) && has(self.env) == has(oldSelf.env) && (!has(self.env) || self.env == oldSelf.env) && has(self.telemetry) == has(oldSelf.telemetry) && (!has(self.telemetry) || self.telemetry == oldSelf.telemetry) && self.bucketWorkload == oldSelf.bucketWorkload",message="only replicas, capacity, runtimeImage and maintenance may change; layout, execution, lifecycle, env and telemetry are fixed at creation"
 	Spec   CelldFleetSpec   `json:"spec"`
 	Status CelldFleetStatus `json:"status,omitempty"`
 }
@@ -45,16 +45,13 @@ type CelldFleetSpec struct {
 	// +kubebuilder:validation:Enum=Deployment;Ordered
 	BucketWorkload string `json:"bucketWorkload,omitempty"`
 	// Requested immutable runtime digest. Required for provisioning; no default release is assumed.
-	// Use a homogeneous compatible fork; release and recovery qualification remain required.
+	// Use a homogeneous compatible fork; verify release and recovery compatibility.
 	// +optional
 	// +kubebuilder:validation:Pattern=`^([a-z0-9]+([.-][a-z0-9]+)*|localhost)(:[0-9]{1,5})?(/[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*)+@sha256:[a-f0-9]{64}$`
 	RuntimeImage string `json:"runtimeImage,omitempty"`
 	// Maintenance requests share the bounded current operation.
 	Maintenance *MaintenanceSpec `json:"maintenance,omitempty"`
 
-	// A required acknowledgment of the qualification boundary; production is unavailable.
-	// +kubebuilder:validation:Enum=Experimental
-	Qualification string `json:"qualification"`
 	// Storage profile: Bucket uses temporary local disk and S3; PersistentFleet adds peer disks disposed after strict shutdown. Immutable after creation.
 	// +kubebuilder:validation:Enum=Bucket;PersistentFleet
 	Profile string `json:"profile"`
@@ -394,7 +391,7 @@ type CelldFleetStatus struct {
 	ReadyReplicas int32 `json:"readyReplicas,omitempty"`
 	// Name of the cluster-scoped storage reservation holding this fleet's bucket ownership and current operation.
 	Reservation string `json:"reservation,omitempty"`
-	// Current readiness, progress, blocked, maintenance, and experimental-validation conditions.
+	// Current readiness, progress, blocked, and maintenance conditions.
 	// +listType=map
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`

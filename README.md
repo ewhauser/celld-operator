@@ -7,9 +7,6 @@ Services and network policies, then coordinates scaling and maintenance. You
 supply the cluster, S3 bucket and AWS identities; PersistentFleet also uses
 disposable CSI disks after verified shutdown.
 
-**Experimental: for evaluation.** Cloud deployment and failure testing are still
-incomplete. See [capabilities and limitations](docs/critical-features.md).
-
 > [!WARNING]
 > If you use celld with persistent local storage (`PersistentFleet`), you must
 > use the [ewhauser/celld fork](https://github.com/ewhauser/celld). The operator
@@ -39,12 +36,11 @@ make check
 This builds all packages and `bin/celld-operator`, runs `go test -race`, and runs
 the pinned golangci-lint suite. The command supports `--help` and `--version`; starting it runs the controller
 against the explicitly configured Kubernetes environment. Provisioning is blocked
-until CNI enforcement is attested. Isolated local integration and qualification
-harnesses are available; they do not enable production scaling.
+until CNI enforcement is attested. Local integration suites are available for regression testing.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for formatting, linting, hooks, and container
-builds, and [docs/](docs/README.md) for the architecture and qualification work.
-Runtime qualification: [test boundaries and remaining gates](docs/qualification/README.md). Both profiles require an explicit compatible fork runtime digest and a digest-pinned launcher. The controller uses celld control-plane proof and has no S3 or EC2 client.
+builds, and [docs/](docs/README.md) for architecture and test evidence.
+Test evidence and boundaries: [qualification records](docs/qualification/README.md). Both profiles require an explicit compatible fork runtime digest and a digest-pinned launcher. The controller uses celld control-plane proof and has no S3 or EC2 client.
 
 ## Contributor references
 

@@ -33,7 +33,7 @@ no controller callers of these mutations. The [launcher](launcher-supervision.md
 before terminating celld. The controller now uses the
 [bounded current-operation executor](current-operation.md); private S3 evidence,
 journal archives and old release adapters have no active reconciliation path.
-An explicitly qualified fork digest is still required for rollout.
+An explicitly verified compatible fork digest is still required for rollout.
 
 PersistentFleet advertises each stable StatefulSet Pod DNS name through the
 headless peer Service, which publishes addresses before readiness. celld consults
@@ -135,5 +135,5 @@ The fixture-generation source SHA256 values were:
 
 This validates the implemented wire serializer against the Go client, not real
 celld shutdown, S3 recovery or EBS removal. The opt-in real-binary tests described in [qualification](qualification/README.md)
-exercise the launcher/controller handshake separately; replicated recovery and
-real CSI/EBS deletion require their own exact-artifact qualification.
+exercise the launcher/controller handshake separately. See the native and Kind
+records for replicated recovery; verify CSI/EBS deletion in your deployment.

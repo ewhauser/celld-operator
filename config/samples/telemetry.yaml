@@ -4,7 +4,6 @@ metadata:
   name: telemetry-example
   namespace: fleets
 spec:
-  qualification: Experimental
   profile: Bucket
   replicas: 3
   # Replace with the verified compatible fork digest.

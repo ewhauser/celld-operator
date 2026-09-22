@@ -4,7 +4,6 @@ metadata:
   name: persistent-example
   namespace: default
 spec:
-  qualification: Experimental
   profile: PersistentFleet
   replicas: 3
   serviceAccountName: celld-runtime

@@ -150,7 +150,6 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 		return &fleet.CelldFleet{
 			Name: "alpha", Namespace: ns,
 			Spec: fleet.CelldFleetSpec{
-				Qualification:      "Experimental",
 				Profile:            "Bucket",
 				ServiceAccountName: "runtime",
 				Storage:            fleet.StorageSpec{Bucket: "bucket-" + ns, Region: "us-east-1"},
@@ -200,7 +199,6 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 		{"zone outside region", func(f *fleet.CelldFleet) { f.Spec.Placement.Zones = []string{"us-west-2a"} }},
 		{"storageClassName on Bucket", func(f *fleet.CelldFleet) { f.Spec.Storage.StorageClassName = "disposable" }},
 		{"PersistentFleet without storageClassName", func(f *fleet.CelldFleet) { f.Spec.Profile = "PersistentFleet" }},
-		{"production qualification", func(f *fleet.CelldFleet) { f.Spec.Qualification = "Production" }},
 		{"runtime tag", func(f *fleet.CelldFleet) { f.Spec.RuntimeImage = "example.com/celld:latest" }},
 		{"owned env", func(f *fleet.CelldFleet) {
 			v := "bad"
@@ -317,7 +315,7 @@ func TestEnvtestTuningAdmission(t *testing.T) {
 	}
 	base := func(name string) *fleet.CelldFleet {
 		return &fleet.CelldFleet{Name: name, Namespace: ns, Spec: fleet.CelldFleetSpec{
-			Qualification: "Experimental", Profile: "Bucket", ServiceAccountName: "runtime",
+			Profile: "Bucket", ServiceAccountName: "runtime",
 			Storage:   fleet.StorageSpec{Bucket: "bucket-" + ns + "-" + name, Region: "us-east-1"},
 			Placement: fleet.PlacementSpec{AZCount: 1, Zones: []string{"us-east-1a"}},
 		}}

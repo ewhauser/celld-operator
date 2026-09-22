@@ -32,7 +32,6 @@ func fixture(name, bucket, profile string) *fleet.CelldFleet {
 		Namespace: "fleets",
 		UID:       types.UID(name + "-uid"),
 		Spec: fleet.CelldFleetSpec{
-			Qualification:      "Experimental",
 			RuntimeImage:       fixtureRuntime,
 			Profile:            profile,
 			ServiceAccountName: "runtime",
@@ -357,6 +356,10 @@ func TestUnreadableOperationReportsInvalidState(t *testing.T) {
 
 func TestReadinessRequiresObservedWorkload(t *testing.T) {
 	f := fixture("alpha", "bucket-alpha", "Bucket")
+	f.Status.Conditions = []metav1.Condition{
+		{Type: "ProductionQualified", Status: metav1.ConditionFalse, Reason: "QualificationIncomplete", Message: "old qualification gate", LastTransitionTime: metav1.Now()},
+		{Type: "LifecycleBlocked", Status: metav1.ConditionTrue, Reason: "QualificationIncomplete", Message: "old qualification gate", LastTransitionTime: metav1.Now()},
+	}
 	r := setup(t, f)
 	reconcile(t, r, f)
 	d := &appsv1.Deployment{}
@@ -379,8 +382,8 @@ func TestReadinessRequiresObservedWorkload(t *testing.T) {
 	}
 	got := reconcile(t, r, f)
 	reason(t, got, "Provisioned")
-	if !meta.IsStatusConditionFalse(got.Status.Conditions, "ProductionQualified") || !meta.IsStatusConditionTrue(got.Status.Conditions, "LifecycleBlocked") {
-		t.Fatal("readiness erased safety boundary")
+	if !meta.IsStatusConditionTrue(got.Status.Conditions, "Ready") || meta.FindStatusCondition(got.Status.Conditions, "ProductionQualified") != nil || meta.FindStatusCondition(got.Status.Conditions, "LifecycleBlocked") != nil {
+		t.Fatal("ready fleet has stale qualification conditions")
 	}
 	if got.Status.Reservation != reservationName(f) {
 		t.Fatal("reservation missing from status")

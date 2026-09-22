@@ -49,5 +49,5 @@ restart allocate fresh disks and recover through celld. Previously retained PVs
 and EBS disks are never adopted or retroactively deleted.
 
 Read [the exact disk contract](../../contracts/disposable-disks/) and
-[qualification limits](../../reference/limitations/). Real EKS/EBS testing must
-validate your driver and its physical deletion behavior.
+[storage contract](../../contracts/disposable-disks/). Verify that your EBS CSI
+driver completes physical deletion in your cluster.

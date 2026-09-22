@@ -31,7 +31,7 @@ func (f *CelldFleet) Default() {
 func (f *CelldFleet) Validate() error {
 	s := f.Spec
 	if s.RuntimeImage != "" && !ValidRuntimeImage(s.RuntimeImage) {
-		return fmt.Errorf("runtimeImage must be an immutable, registry-qualified OCI sha256 digest")
+		return fmt.Errorf("runtimeImage must be an immutable, registry-pinned OCI sha256 digest")
 	}
 	if s.Maintenance != nil && len(s.Maintenance.RestartToken) > 128 {
 		return fmt.Errorf("restartToken exceeds 128 characters")
@@ -60,8 +60,6 @@ func (f *CelldFleet) Validate() error {
 		return fmt.Errorf("ordered bucketWorkload requires Bucket profile")
 	case len(f.Name) > 40 || len(validation.IsDNS1123Label(f.Name)) != 0:
 		return fmt.Errorf("fleet name must be a DNS label of at most 40 characters")
-	case s.Qualification != "Experimental":
-		return fmt.Errorf("qualification must be Experimental; production qualification is incomplete")
 	case s.Profile != "Bucket" && s.Profile != "PersistentFleet":
 		return fmt.Errorf("profile must be Bucket or PersistentFleet")
 	case s.Replicas < 1 || s.Replicas > 100:

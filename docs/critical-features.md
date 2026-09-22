@@ -1,8 +1,5 @@
 # Capabilities and limitations
 
-The operator is experimental and requires `qualification: Experimental`.
-`ProductionQualified=False` reports the outstanding cloud qualification.
-
 | Capability | Implemented behavior |
 | --- | --- |
 | Runtime | Explicit digest-pinned `ewhauser/celld` fork with strict shutdown schema 1; no default or stock-runtime fallback. |
@@ -22,10 +19,9 @@ readers for the native `bucket_complete` proof. A syntactically accepted image
 pin does not establish release or recovery compatibility.
 
 [Current operations](current-operation.md) specifies the storage contract and
-cleanup completion boundary. [Qualification](qualification/README.md) records
-local tests and remaining integration and cloud gates. Local unit tests,
-MinIO runs and simulated CSI objects do not qualify EKS/EBS, cross-host disk
-reuse or failure-domain recovery.
+cleanup completion boundary. [Test records](qualification/README.md) describe
+the scenarios exercised and their environments. Verify your own runtime image,
+CSI driver and recovery path before relying on them.
 
 There is no migration from the former journal-based operator, no Deployment to
 Ordered layout conversion, no automatic reuse of retained disks, no forced

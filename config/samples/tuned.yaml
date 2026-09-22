@@ -15,7 +15,6 @@ spec:
   #     secretKeyRef:
   #       name: runtime-auth
   #       key: token
-  qualification: Experimental
   profile: Bucket
   replicas: 3
   serviceAccountName: agents-celld

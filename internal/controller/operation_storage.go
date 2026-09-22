@@ -64,7 +64,7 @@ func (r *Reconciler) validateDisposableVolume(f *fleet.CelldFleet, v *volumeIden
 		return errors.New("target PV identity, claim binding or Delete policy changed")
 	}
 	if csi == nil || !r.supportedCSI(csi.Driver) || volumeHandle(pv) == "" || volumeHandle(pv) != v.Handle || pv.Spec.StorageClassName != f.Spec.Storage.StorageClassName || pv.Annotations["pv.kubernetes.io/provisioned-by"] != csi.Driver {
-		return errors.New("qualified dynamically provisioned CSI volume identity unavailable")
+		return errors.New("required dynamically provisioned CSI volume identity unavailable")
 	}
 	if !v.DeletionProtected || (!cleanupStarted && (!pv.DeletionTimestamp.IsZero() || !slices.Contains(pv.Finalizers, csiDeletionFinalizer))) {
 		return errors.New("CSI backing-volume deletion finalizer is required before cleanup")

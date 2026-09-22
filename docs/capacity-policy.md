@@ -14,8 +14,8 @@ do not establish removal safety. Manual and policy requests share the
 | External | One external `/scale` writer owns `spec.replicas`; no built-in demand collection. |
 
 StatefulSet contraction removes one highest ordinal after exact strict proof.
-Bucket Deployment contraction is blocked. These paths remain experimental;
-[cloud qualification](qualification/README.md) is separate from execution.
+Bucket Deployment contraction is blocked. [Test records](qualification/README.md)
+describe the capacity and lifecycle scenarios exercised.
 
 | Field under `capacity` | Default | Meaning |
 | --- | --- | --- |

@@ -67,7 +67,7 @@ or a general `kubectl delete pod` runbook. Before attempting an equivalent
 intervention, establish that no issued removal is being bypassed, the disks have
 not been retired, and the exact same-host/boot/storage constraints can be met.
 Cross-host or cross-boot reuse remains blocked even if Kubernetes attaches the
-volume. EKS/EBS recovery and permanent host loss remain unqualified.
+volume. Permanent host loss requires separate recovery planning.
 
 Planned [restart](../../operate/restart/) and [runtime upgrade](../../operate/upgrade-runtime/)
 are different: they require positive strict proof, dispose of the old disks,

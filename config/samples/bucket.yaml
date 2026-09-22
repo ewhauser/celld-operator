@@ -4,7 +4,6 @@ metadata:
   name: bucket-example
   namespace: default
 spec:
-  qualification: Experimental
   profile: Bucket
   replicas: 3
   serviceAccountName: celld-runtime

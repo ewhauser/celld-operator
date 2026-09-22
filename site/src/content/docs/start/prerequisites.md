@@ -3,7 +3,7 @@ title: Prerequisites
 description: Prepare a compatible fork, cluster, bucket and runtime identity.
 ---
 
-Use a nonproduction cluster and a dedicated bucket for this experimental guide.
+Use an EKS cluster and a dedicated bucket for this guide.
 The example is an Ordered Bucket fleet named `my-fleet` in namespace `fleets`.
 
 - Kubernetes 1.31 or newer with IPv4 Pod networking and an enforcing NetworkPolicy

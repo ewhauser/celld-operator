@@ -1,7 +1,7 @@
-# Qualification
+# Test evidence
 
-Qualification applies to an exact runtime, launcher/operator revision and test
-environment. The strict-control-plane replacement does not inherit qualification
+# Test evidence applies to an exact runtime, launcher/operator revision and test
+environment. The strict-control-plane replacement does not inherit results
 from the removed private-S3 readers, stock-release adapters or journal executor.
 Those older reports remain available in Git history.
 
@@ -12,7 +12,7 @@ Those older reports remain available in Git history.
 | `make test-linux` | Real Linux child processes, inherited locks, crashes and restart denial. | A test container is not runtime-image qualification. |
 | Opt-in strict-runtime tests | Real fork binary, MinIO, typed HTTP client, launcher and controller proof capture across controller restart. | Empty runtime disk and simulated Kubernetes resources. |
 | Disposable Kind integration | Real workload controllers, networking and acknowledged application writes against an explicitly supplied fork artifact. | Local storage and simulated zones are not EKS/EBS. |
-| EKS/EBS qualification | Real IAM, S3, CSI finalizers, attachment behavior and physical deletion. | Outstanding until a recorded exact-artifact run passes. |
+| AWS/EBS deployment | User reports v0.0.2 deployed with PersistentFleet and EBS volumes successfully. | The deployment has no archived failure or deletion test receipt here. |
 
 ## Current artifact evidence
 
@@ -26,7 +26,8 @@ fleet after recovery. Native full-stop cases recover 28/28, 20/20 and 21/21
 writes through every fresh node, and failed-deadline checks retain storage.
 The [actual `.2 → .3` upgrade](runtime-upgrade/README.md) preserves 12/12 values
 in each profile while replacing compute and storage identities. Hostpath CSI
-has no attach operation; these results do not establish EBS detach or deletion.
+has no attach operation; use the AWS deployment's CSI events and EBS records to
+verify detach and deletion.
 
 ## Earlier evidence
 
@@ -53,9 +54,9 @@ The [published runtime upgrade](runtime-upgrade/README.md) verifies the actual
 `.2 → .3` change for both modes, including fresh Pod/storage identities and all
 acknowledged values after strict coordinated shutdown.
 
-Use [the EKS test plan](eks-smoke-plan.md) for cloud validation. Keep unsupported
-or blocked outcomes visible; never clear authority or force storage finalizers
-to make a test pass.
+Use [the EKS test plan](eks-smoke-plan.md) when exercising additional cloud
+failure scenarios. Keep unsupported or blocked outcomes visible; never clear
+authority or force storage finalizers to make a test pass.
 
 Run the disposable suite with an actual published fork image digest:
 
