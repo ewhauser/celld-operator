@@ -28,7 +28,17 @@ func (f *CelldFleet) Default() {
 	}
 }
 
+// Validate checks both runtime configuration and optional routing.
 func (f *CelldFleet) Validate() error {
+	if err := f.ValidateRuntime(); err != nil {
+		return err
+	}
+	return validateRouting(f.Spec.Routing)
+}
+
+// ValidateRuntime checks the configuration needed for fleet lifecycle operations.
+// Optional routing errors must not strand an already-issued runtime operation.
+func (f *CelldFleet) ValidateRuntime() error {
 	s := f.Spec
 	if s.RuntimeImage != "" && !ValidRuntimeImage(s.RuntimeImage) {
 		return fmt.Errorf("runtimeImage must be an immutable, registry-pinned OCI sha256 digest")

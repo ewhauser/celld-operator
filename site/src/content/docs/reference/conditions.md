@@ -12,6 +12,7 @@ kubectl --context YOUR_CONTEXT -n fleets get celldfleet my-fleet   -o json | jq 
 | Signal | Meaning |
 | --- | --- |
 | `Ready` | The observed workload generation has ready replicas. Availability is not deletion proof. |
+| `RoutingReady` | Optional route status: current Gateway acceptance or an Ingress address. Independent of fleet readiness; not a DNS/TLS/connectivity test. |
 | `InfrastructureReady` | Required Kubernetes objects match; Pods may still be Pending. |
 | `Blocked` | A requested action cannot proceed; read its reason and message. |
 | `Progressing` | Provisioning or a current operation is advancing. |

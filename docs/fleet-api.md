@@ -16,7 +16,7 @@ is converted in place. Infrastructure outside Kubernetes, including bucket,
 IAM roles, worker nodes and EBS CSI, remains administrator-owned.
 
 The mutable request fields are `replicas`, `capacity`, `runtimeImage` and
-`maintenance`. Storage, layout, placement, execution sizing, lifecycle budgets,
+`maintenance` and `routing`. Storage, layout, placement, execution sizing, lifecycle budgets,
 `env`, and `telemetry` are fixed at creation. `maintenance.paused` stops new and unissued work;
 `allowCoordinatedDowntime` permits a whole-fleet restart or upgrade. A new
 `restartToken` requests a same-version restart.
@@ -57,3 +57,35 @@ never the managed Deployment or StatefulSet. They gain no deletion authority.
 Install with namespace-scoped RBAC for every managed namespace and attest CNI
 NetworkPolicy enforcement. See [installation](../site/src/content/docs/start/install.mdx)
 and [security boundaries](../site/src/content/docs/reference/security-boundaries.md).
+
+`spec.routing` optionally creates one Gateway API v1 HTTPRoute or a standard
+Ingress, named `FLEET-routing`. Both forward `/` for explicit `hostnames` to
+`FLEET:8080`. A required `source` namespace and Pod label selector admit only the
+selected data-plane Pods through a separate NetworkPolicy. Routing never exposes
+8081 or 8083. Gateway mode references an existing Gateway; Ingress mode specifies
+an IngressClass and optionally a same-namespace TLS Secret and annotations.
+
+Routing can be added, edited, switched or removed without changing the workload
+or storage reservation. The operator updates only resources controlled by the
+current fleet UID, deletes with UID/resourceVersion preconditions and waits for
+obsolete routes to disappear before creating a replacement. Before removing an
+existing route, it checks the selected API, Service, isolation setting and
+resource ownership; a failed preflight preserves the existing route and policy.
+Removed managed annotations are pruned; unrelated controller annotations are preserved. Removing
+`routing` deletes the owned route, then its ingress policy. Routing also closes
+when fleet deletion starts; it does not delay strict runtime recovery.
+
+Reserved or oversized Ingress annotations are rejected at admission. Invalid
+routing stored by older schemas or admission bypasses reports `RoutingReady=False`
+without blocking runtime operations.
+
+`RoutingReady` is separate from fleet readiness. HTTPRoute acceptance requires
+current-generation `Accepted=True` and `ResolvedRefs=True` for the configured
+parent. Ingress has no portable acceptance condition: an assigned address is
+reported, or `AwaitingAddress` remains Unknown. Neither observation proves DNS,
+TLS, Gateway listener programming or application connectivity. Missing optional
+Gateway CRDs report `GatewayAPIUnavailable` without blocking runtime operations.
+The operator polls routing status on normal reconciliation; it does not watch or
+provision Gateway, IngressClass, certificate or DNS resources. See the
+[networking guide](../site/src/content/docs/configure/networking.md) and the
+[routing samples](../config/samples/routing-gateway.yaml).

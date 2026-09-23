@@ -128,3 +128,20 @@ does not qualify celld durability or scaling behavior.
 By contributing, you agree that your contributions are licensed under the
 [Apache License, Version 2.0](LICENSE), as described in Section 5 of that
 license.
+
+## Optional Gateway API validation
+
+Normal `make test-envtest` covers Ingress admission, routing edits/removal and
+operation without Gateway CRDs. To also exercise HTTPRoute admission/defaulting
+and current-generation acceptance with the standard Gateway API schema:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.4.0/config/crd/standard/gateway.networking.k8s.io_httproutes.yaml -o /tmp/celld-httproute-v1.4.0.yaml
+CELLD_GATEWAY_CRD=/tmp/celld-httproute-v1.4.0.yaml \
+KUBEBUILDER_ASSETS="$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.1 use 1.37.0 -p path)" \
+go test -race ./internal/controller -run '^TestEnvtestGatewayRouting$' -count=1
+```
+
+This runs a disposable API server, not a Gateway controller or CNI data plane.
+Verify actual HTTP/TLS traffic and NetworkPolicy enforcement with the selected
+edge implementation in your deployment environment.

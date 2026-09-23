@@ -50,6 +50,7 @@ func specHash(f *fleet.CelldFleet) string {
 		spec.BucketWorkload = ""
 	}
 	spec.Capacity = nil
+	spec.Routing = nil
 	spec.RuntimeImage = ""
 	spec.Maintenance = nil
 	b, _ := json.Marshal(spec)
@@ -75,6 +76,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		f.Default()
 		return r.report(ctx, f, nil, "NamespaceAccessDenied", "Operator lacks the fleet-namespace Role in "+f.Namespace+"; apply config/rbac/fleet-namespace.yaml there ("+err.Error()+")", false)
 	}
+	if err == nil {
+		err = r.reportRouting(ctx, req.NamespacedName)
+		if result.RequeueAfter == 0 {
+			result.RequeueAfter = reconcileDelay(f)
+		}
+	}
 	return result, err
 }
 
@@ -83,7 +90,7 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 	if !f.DeletionTimestamp.IsZero() {
 		return r.deleteFleet(ctx, f)
 	}
-	if err := f.Validate(); err != nil {
+	if err := f.ValidateRuntime(); err != nil {
 		return r.report(ctx, f, nil, "InvalidConfiguration", err.Error(), false)
 	}
 	if !controllerutil.ContainsFinalizer(f, Finalizer) {

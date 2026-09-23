@@ -38,7 +38,8 @@ class using `Delete`, `WaitForFirstConsumer` and RWOP claims. See
 | Restart/upgrade | Whole captured working set with downtime permission. | Same, followed by old-disk cleanup and fresh claims. |
 
 Neither profile provisions your bucket, runtime AWS identity, worker nodes or
-public endpoint. Use one bucket per fleet. The reservation stays bound to the
+ingress controller. Optional [routing](../networking/) can configure a public
+HTTPRoute or Ingress to an existing edge. Use one bucket per fleet. The reservation stays bound to the
 original fleet UID after deletion.
 
 Profile and storage changes require a new fleet and bucket. There is no automatic
