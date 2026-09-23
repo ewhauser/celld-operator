@@ -461,7 +461,7 @@ for (const page of pages) {
 
 const generated = [
 	crdPage('config/crd/celld.eric.dev_celldfleets.yaml', 'celldfleet', [
-		'A `CelldFleet` describes one celld fleet in a namespace: its profile, replica target, storage bucket, placement, optional capacity policy and maintenance requests. Only `replicas`, `capacity`, `runtimeImage` and `maintenance` are mutable after creation. See the [fleet API contract](../../contracts/fleet-api/) for semantics and the [conditions reference](../../reference/conditions/) for what status reports.',
+		'A `CelldFleet` describes one celld fleet in a namespace: its profile, replica target, storage bucket, placement, optional capacity policy and maintenance requests. Only `replicas`, `capacity`, `runtimeImage`, `maintenance` and `routing` are mutable after creation. See the [fleet API contract](../../contracts/fleet-api/) for semantics and the [conditions reference](../../reference/conditions/) for what status reports.',
 	]),
 	crdPage('config/crd/celld.eric.dev_celldstoragereservations.yaml', 'celldstoragereservation', [
 		'A `CelldStorageReservation` is the cluster-scoped, never garbage-collected tombstone that binds a bucket to exactly one fleet identity and carries bounded current-operation authority. The operator creates it; administrators read it. Never delete one to reuse a bucket or a retained disk. See [current operations](../../concepts/current-operation/) and [the exact disk contract](../../contracts/disposable-disks/).',

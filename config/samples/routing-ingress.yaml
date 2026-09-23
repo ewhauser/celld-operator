@@ -1,0 +1,30 @@
+# Requires an existing edge controller; adapt hosts, source labels and bucket.
+apiVersion: celld.eric.dev/v1alpha1
+kind: CelldFleet
+metadata:
+  name: routed-example
+  namespace: default
+spec:
+  runtimeImage: ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29
+  profile: Bucket
+  bucketWorkload: Ordered
+  replicas: 3
+  serviceAccountName: celld-runtime
+  storage:
+    bucket: replace-with-dedicated-bucket
+    region: us-east-1
+    sizeGiB: 10
+  placement:
+    azCount: 2
+    zones: [us-east-1a, us-east-1b]
+  routing:
+    hostnames: [app.example.com]
+    ingress:
+      className: nginx
+      tlsSecretName: app-tls
+      annotations:
+        cert-manager.io/cluster-issuer: letsencrypt
+    source:
+      namespace: ingress-nginx
+      podLabels:
+        app.kubernetes.io/component: controller

@@ -417,6 +417,112 @@ spec:
                 maximum: 100
                 minimum: 1
                 type: integer
+              routing:
+                description: |-
+                  Optional public HTTP routing. Mutable without restarting the runtime.
+                  Omission removes operator-owned routes and their separate ingress policy.
+                properties:
+                  gateway:
+                    description: Attach an HTTPRoute to an existing Gateway. TLS belongs
+                      to its listener.
+                    properties:
+                      name:
+                        description: Name of an existing Gateway.
+                        maxLength: 253
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                        type: string
+                      namespace:
+                        description: Gateway namespace. Omission uses the fleet namespace.
+                        maxLength: 63
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                        type: string
+                      sectionName:
+                        description: Listener name. Omission attaches to compatible
+                          listeners.
+                        maxLength: 253
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  hostnames:
+                    description: Explicit hostnames; no catch-all route is created.
+                    items:
+                      maxLength: 253
+                      minLength: 1
+                      pattern: ^(\*\.)?[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                      type: string
+                    maxItems: 16
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-type: set
+                  ingress:
+                    description: Create a networking.k8s.io/v1 Ingress using an installed
+                      controller.
+                    properties:
+                      annotations:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          Controller-specific annotations, including optional cert-manager settings.
+                          Treat permission to configure these as privileged ingress administration.
+                        maxProperties: 16
+                        type: object
+                        x-kubernetes-validations:
+                        - message: operator annotations and the legacy ingress class
+                            annotation are reserved
+                          rule: self.all(k, !k.startsWith('celld.eric.dev/') && k
+                            != 'kubernetes.io/ingress.class')
+                        - message: annotation values must not exceed 4096 bytes
+                          rule: self.all(k, size(bytes(self[k])) <= 4096)
+                      className:
+                        description: Explicit installed IngressClass.
+                        maxLength: 253
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                        type: string
+                      tlsSecretName:
+                        description: TLS Secret in the fleet namespace, covering every
+                          configured hostname.
+                        maxLength: 253
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                        type: string
+                    required:
+                    - className
+                    type: object
+                  source:
+                    description: Pods that originate application traffic, not the
+                      control-plane controller.
+                    properties:
+                      namespace:
+                        description: Exact namespace containing the gateway or ingress
+                          data-plane pods.
+                        maxLength: 63
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                        type: string
+                      podLabels:
+                        additionalProperties:
+                          type: string
+                        description: Nonempty matchLabels selector in that namespace.
+                        maxProperties: 16
+                        minProperties: 1
+                        type: object
+                    required:
+                    - namespace
+                    - podLabels
+                    type: object
+                required:
+                - hostnames
+                - source
+                type: object
+                x-kubernetes-validations:
+                - message: choose exactly one of gateway or ingress
+                  rule: has(self.gateway) != has(self.ingress)
               runtimeImage:
                 description: |-
                   Requested immutable runtime digest. Required for provisioning; no default release is assumed.
@@ -550,8 +656,9 @@ spec:
             - storage
             type: object
             x-kubernetes-validations:
-            - message: only replicas, capacity, runtimeImage and maintenance may change;
-                layout, execution, lifecycle, env and telemetry are fixed at creation
+            - message: only replicas, capacity, runtimeImage, maintenance and routing
+                may change; layout, execution, lifecycle, env and telemetry are fixed
+                at creation
               rule: self.profile == oldSelf.profile && self.serviceAccountName ==
                 oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement
                 == oldSelf.placement && has(self.execution) == has(oldSelf.execution)

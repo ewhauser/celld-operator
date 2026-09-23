@@ -290,14 +290,7 @@ func workload(f *fleet.CelldFleet, opts Options) client.Object {
 }
 
 func prerequisites(f *fleet.CelldFleet, opts Options) []client.Object {
-	app := &corev1.Service{
-		ObjectMeta: metadata(f, f.Name),
-		Spec: corev1.ServiceSpec{
-			Type:     corev1.ServiceTypeClusterIP,
-			Selector: labels(f),
-			Ports:    []corev1.ServicePort{{Name: "application", Port: 8080, TargetPort: intstr.FromInt32(8080)}},
-		},
-	}
+	app := applicationService(f)
 	peers := &corev1.Service{
 		ObjectMeta: metadata(f, f.Name+"-peers"),
 		Spec: corev1.ServiceSpec{
@@ -390,4 +383,15 @@ func prerequisites(f *fleet.CelldFleet, opts Options) []client.Object {
 		Spec:       policyv1.PodDisruptionBudgetSpec{MaxUnavailable: new(intstr.FromInt32(0)), Selector: selector(f)},
 	}
 	return []client.Object{policy, pdb, app, peers}
+}
+
+func applicationService(f *fleet.CelldFleet) *corev1.Service {
+	return &corev1.Service{
+		ObjectMeta: metadata(f, f.Name),
+		Spec: corev1.ServiceSpec{
+			Type:     corev1.ServiceTypeClusterIP,
+			Selector: labels(f),
+			Ports:    []corev1.ServicePort{{Name: "application", Port: 8080, TargetPort: intstr.FromInt32(8080)}},
+		},
+	}
 }
