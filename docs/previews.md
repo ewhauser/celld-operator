@@ -160,9 +160,7 @@ Cell eviction releases cells, not the Pod or its coordination traffic. TTL remov
 compute through normal shutdown. With 1,000 active previews, default requests
 sum to 25 CPU cores, 62.5Gi memory and 62.5Gi scratch, before shared storage,
 Kubernetes and edge overhead. Actual use and node cost depend on workload and
-packing; this is not a fixed per-preview price. See the
-[density evidence](qualification/preview-density/README.md) and
-[cost investigation](research/cheap-dedicated-previews.md).
+packing; this is not a fixed per-preview price.
 
 ## Expiry, retention and recovery
 
@@ -197,7 +195,6 @@ a new preview rather than clearing creation-intent annotations or finalizers.
 
 Unit and API-server tests cover disjoint prefixes, reservation races and conflicts,
 endpoint/Secret rendering, resource limits, unique routes, immutable configuration,
-readiness, ownership and expiry. The density experiment exercised independent
-runtimes with shared MinIO locally. Those checks do not qualify a target Kubernetes
+readiness, ownership and expiry. Those checks do not qualify a target Kubernetes
 store, its availability, wildcard DNS/TLS, or an ingress data plane. Validate these
 and application requests in the deployment cluster.
