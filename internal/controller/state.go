@@ -13,6 +13,7 @@ import (
 	"github.com/ewhauser/celld-operator/internal/capacity"
 	"github.com/ewhauser/celld-operator/internal/launcher"
 	appsv1 "k8s.io/api/apps/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -228,7 +229,7 @@ func (r *Reconciler) reservationMatches(_ context.Context, f *fleet.CelldFleet, 
 	baseline.Spec.Replicas = h.res.Spec.InitialReplicas
 	want.InitialReplicas = h.res.Spec.InitialReplicas
 	want.SpecHash = specHash(baseline)
-	return want == h.res.Spec
+	return equality.Semantic.DeepEqual(want, h.res.Spec)
 }
 func replicas(w client.Object) int32 {
 	switch w := w.(type) {

@@ -18,18 +18,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-const previewSeedCreated = "celld.eric.dev/preview-seed-created"
+const seedReservationCreated = "celld.eric.dev/seed-reservation-created"
 const seedGate = "celld.eric.dev/seed-gate"
 const seedGateCanceled = "canceled"
 
-func seedName(p *fleet.CelldPreview) string { return previewName(p) + "-seed" }
-func seedTerminal(s *fleet.CelldPreviewSeed) bool {
+func seedTerminal(s *fleet.CelldStorageReservation) bool {
 	return s.Status.Phase == "Succeeded" || s.Status.Phase == "Failed" || s.Status.Phase == "Canceled"
 }
 
-func seedSource(pool *fleet.CelldPreviewPool, alias string) (fleet.SeedFleetReference, error) {
-	if pool.Spec.Seeding != nil && pool.Spec.Seeding.Executor != "" {
-		for _, s := range pool.Spec.Seeding.Sources {
+func seedSource(pool *fleet.CelldFleet, alias string) (fleet.SeedFleetReference, error) {
+	if pool.Spec.Previews.Seeding != nil && pool.Spec.Previews.Seeding.Executor != "" {
+		for _, s := range pool.Spec.Previews.Seeding.Sources {
 			if s.Name == alias {
 				return s.FleetRef, nil
 			}
@@ -38,7 +37,7 @@ func seedSource(pool *fleet.CelldPreviewPool, alias string) (fleet.SeedFleetRefe
 	return fleet.SeedFleetReference{}, fmt.Errorf("seed source %q is not authorized by this pool", alias)
 }
 
-func (r *PreviewReconciler) ensurePreviewSeed(ctx context.Context, p *fleet.CelldPreview, pool *fleet.CelldPreviewPool, f *fleet.CelldFleet, expires time.Time) (*fleet.CelldPreviewSeed, error) {
+func (r *PreviewReconciler) previewSeedRequest(ctx context.Context, p *fleet.CelldPreview, pool, f *fleet.CelldFleet, expires time.Time) (*fleet.PreviewSeedRequest, error) {
 	source, err := seedSource(pool, p.Spec.Seed.Source)
 	if err != nil {
 		return nil, err
@@ -53,15 +52,9 @@ func (r *PreviewReconciler) ensurePreviewSeed(ctx context.Context, p *fleet.Cell
 	if selection.Alarms == "" {
 		selection.Alarms = "Clear"
 	}
-	want := fleet.PreviewSeedRequest{Executor: pool.Spec.Seeding.Executor, SourceFleet: source, Selection: *selection, Deadline: metav1.NewTime(expires), Target: fleet.PreviewSeedTarget{PreviewName: p.Name, PreviewUID: string(p.UID), FleetName: f.Name, PoolRef: *f.Spec.Storage.PoolRef, StorageURL: f.Spec.Storage.URL()}}
-	s := &fleet.CelldPreviewSeed{}
-	err = r.Get(ctx, client.ObjectKey{Namespace: p.Namespace, Name: seedName(p)}, s)
-	if apierrors.IsNotFound(err) {
-		if p.Annotations[previewSeedCreated] != "" {
-			return nil, fmt.Errorf("seed request missing after creation intent; automatic recreation is forbidden")
-		}
-		// Verify the approved source identity and its retained storage authority. The
-		// executor rechecks this before exporting; this read does not claim a snapshot.
+	want := fleet.PreviewSeedRequest{Executor: pool.Spec.Previews.Seeding.Executor, SourceFleet: source, Selection: *selection, Deadline: metav1.NewTime(expires), Target: fleet.PreviewSeedTarget{PreviewName: p.Name, PreviewUID: string(p.UID), FleetName: f.Name, PreviewFleetRef: *f.Spec.Storage.PreviewFleetRef, StorageURL: f.Spec.Storage.URL()}}
+	// Existing children already pin their authorized request. Revisions never reseed.
+	if p.Annotations[previewCreated] == "" {
 		src := &fleet.CelldFleet{}
 		if err := r.Get(ctx, client.ObjectKey{Namespace: source.Namespace, Name: source.Name}, src); err != nil {
 			return nil, fmt.Errorf("seed source fleet: %w", err)
@@ -86,26 +79,33 @@ func (r *PreviewReconciler) ensurePreviewSeed(ctx context.Context, p *fleet.Cell
 		if !equality.Semantic.DeepEqual(reservation.Spec, fleetReservationSpec(original)) || len(reservation.OwnerReferences) != 0 || !reservation.DeletionTimestamp.IsZero() {
 			return nil, fmt.Errorf("seed source storage authority does not match the authorized fleet")
 		}
-		before := p.DeepCopy()
-		if p.Annotations == nil {
-			p.Annotations = map[string]string{}
+	}
+	return &want, nil
+}
+
+// ensureSeedReservation pins the destination's retained record before any worker
+// may claim it. A missing record after creation intent is never recreated.
+func ensureSeedReservation(ctx context.Context, c client.Client, f *fleet.CelldFleet) (*fleet.CelldStorageReservation, error) {
+	res := &fleet.CelldStorageReservation{}
+	err := c.Get(ctx, client.ObjectKey{Name: reservationName(f)}, res)
+	if apierrors.IsNotFound(err) {
+		if f.Annotations[seedReservationCreated] != "" {
+			return nil, fmt.Errorf("seed reservation missing after creation intent")
 		}
-		p.Annotations[previewSeedCreated] = "true"
-		p.Annotations[previewPoolUID] = string(pool.UID)
-		scheme := pool.Spec.Routing.Scheme
-		if scheme == "" {
-			scheme = "https"
+		before := f.DeepCopy()
+		if f.Annotations == nil {
+			f.Annotations = map[string]string{}
 		}
-		p.Annotations[previewURL] = scheme + "://" + f.Name + "." + pool.Spec.Routing.BaseDomain
-		if err := r.Patch(ctx, p, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); err != nil {
+		f.Annotations[seedReservationCreated] = "true"
+		if err := c.Patch(ctx, f, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); err != nil {
 			return nil, err
 		}
-		s = &fleet.CelldPreviewSeed{Name: seedName(p), Namespace: p.Namespace, Spec: fleet.CelldPreviewSeedSpec{Request: want}}
-		if err := r.Create(ctx, s); err != nil {
+		res = &fleet.CelldStorageReservation{Name: reservationName(f), Spec: fleetReservationSpec(f)}
+		if err := c.Create(ctx, res); err != nil {
 			if apierrors.IsForbidden(err) || apierrors.IsInvalid(err) {
-				before := p.DeepCopy()
-				delete(p.Annotations, previewSeedCreated)
-				if patchErr := r.Patch(ctx, p, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); patchErr != nil {
+				before := f.DeepCopy()
+				delete(f.Annotations, seedReservationCreated)
+				if patchErr := c.Patch(ctx, f, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); patchErr != nil {
 					return nil, patchErr
 				}
 			}
@@ -114,35 +114,36 @@ func (r *PreviewReconciler) ensurePreviewSeed(ctx context.Context, p *fleet.Cell
 	} else if err != nil {
 		return nil, err
 	}
-	if !equality.Semantic.DeepEqual(s.Spec.Request, want) || len(s.OwnerReferences) != 0 || !s.DeletionTimestamp.IsZero() || s.UID == "" {
-		return nil, fmt.Errorf("seed request identity or immutable configuration conflict")
+	if res.UID == "" || !equality.Semantic.DeepEqual(res.Spec, fleetReservationSpec(f)) || len(res.OwnerReferences) != 0 || !res.DeletionTimestamp.IsZero() {
+		return nil, fmt.Errorf("seed reservation authority conflict")
 	}
-	if identity := p.Annotations[previewSeedCreated]; identity != "" && identity != "true" && identity != string(s.UID) {
-		return nil, fmt.Errorf("seed request UID changed; automatic replacement is forbidden")
+	identity := f.Annotations[seedReservationCreated]
+	if identity != "" && identity != "true" && identity != string(res.UID) {
+		return nil, fmt.Errorf("seed reservation UID changed")
 	}
-	if p.Annotations[previewSeedCreated] != string(s.UID) {
-		before := p.DeepCopy()
-		if p.Annotations == nil {
-			p.Annotations = map[string]string{}
+	if identity != string(res.UID) {
+		before := f.DeepCopy()
+		if f.Annotations == nil {
+			f.Annotations = map[string]string{}
 		}
-		p.Annotations[previewSeedCreated] = string(s.UID)
-		if err := r.Patch(ctx, p, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); err != nil {
+		f.Annotations[seedReservationCreated] = string(res.UID)
+		if err := c.Patch(ctx, f, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); err != nil {
 			return nil, err
 		}
 	}
-	return s, nil
+	return res, nil
 }
 
 // cancelSeed claims unclaimed requests with the same optimistic CAS required of
 // executors. If the executor won Running first, only it may attest quiescence.
-func cancelSeed(ctx context.Context, c client.Client, s *fleet.CelldPreviewSeed) (bool, error) {
+func cancelSeed(ctx context.Context, c client.Client, s *fleet.CelldStorageReservation) (bool, error) {
 	if seedTerminal(s) {
 		return true, nil
 	}
-	if !s.Spec.Canceled {
+	if !s.Status.Canceled {
 		before := s.DeepCopy()
-		s.Spec.Canceled = true
-		if err := c.Patch(ctx, s, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); err != nil {
+		s.Status.Canceled = true
+		if err := c.Status().Patch(ctx, s, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); err != nil {
 			return false, err
 		}
 	}
@@ -158,49 +159,65 @@ func cancelSeed(ctx context.Context, c client.Client, s *fleet.CelldPreviewSeed)
 	return false, nil
 }
 
-func (r *PreviewReconciler) cancelPreviewSeed(ctx context.Context, p *fleet.CelldPreview) (bool, error) {
+func (r *PreviewReconciler) cancelPreviewSeed(ctx context.Context, p *fleet.CelldPreview, f *fleet.CelldFleet, missing bool) (bool, error) {
 	if p.Spec.Seed == nil {
 		return true, nil
 	}
-	s := &fleet.CelldPreviewSeed{}
-	if err := r.Get(ctx, client.ObjectKey{Namespace: p.Namespace, Name: seedName(p)}, s); err != nil {
-		if apierrors.IsNotFound(err) && p.Annotations[previewSeedCreated] == "" {
+	// No child means no executor can claim a destination. After deletion, the
+	// fleet finalizer has already verified quiescence in its retained reservation.
+	if missing {
+		name := p.Annotations[previewSeedReservation]
+		if name == "" {
+			if p.Annotations[previewCreated] != "" {
+				return false, fmt.Errorf("missing seed reservation identity")
+			}
 			return true, nil
 		}
+		res := &fleet.CelldStorageReservation{}
+		if err := r.Get(ctx, client.ObjectKey{Name: name}, res); err != nil {
+			return false, err
+		}
+		if res.Spec.Initialization == nil || res.Spec.Initialization.Target.PreviewUID != string(p.UID) || res.Spec.FleetNamespace != p.Namespace || len(res.OwnerReferences) != 0 || !res.DeletionTimestamp.IsZero() {
+			return false, fmt.Errorf("seed reservation identity conflict")
+		}
+		return cancelSeed(ctx, r.Client, res)
+	}
+	s, err := ensureSeedReservation(ctx, r.Client, f)
+	if err != nil {
 		return false, err
 	}
-	if (p.Annotations[previewSeedCreated] != "" && p.Annotations[previewSeedCreated] != "true" && p.Annotations[previewSeedCreated] != string(s.UID)) || s.Spec.Request.Target.PreviewUID != string(p.UID) || s.Spec.Request.Target.PreviewName != p.Name || len(s.OwnerReferences) != 0 || !s.DeletionTimestamp.IsZero() {
-		return false, fmt.Errorf("seed cancellation identity conflict")
+	if _, err := getFleetSeed(ctx, r.Client, f); err != nil {
+		return false, err
 	}
 	return cancelSeed(ctx, r.Client, s)
 }
 
-func getFleetSeed(ctx context.Context, c client.Client, f *fleet.CelldFleet) (*fleet.CelldPreviewSeed, error) {
-	ref := f.Spec.Storage.Initialization
-	if ref == nil {
+func getFleetSeed(ctx context.Context, c client.Client, f *fleet.CelldFleet) (*fleet.CelldStorageReservation, error) {
+	request := f.Spec.Storage.Initialization
+	if request == nil {
 		return nil, fmt.Errorf("fleet has no initialization request")
 	}
-	s := &fleet.CelldPreviewSeed{}
-	if err := c.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: ref.Name}, s); err != nil {
+	s := &fleet.CelldStorageReservation{}
+	if err := c.Get(ctx, client.ObjectKey{Name: reservationName(f)}, s); err != nil {
 		return nil, err
 	}
-	target := s.Spec.Request.Target
+	target := request.Target
 	owner := metav1.GetControllerOf(f)
-	if string(s.UID) != ref.UID || len(s.OwnerReferences) != 0 || !s.DeletionTimestamp.IsZero() || owner == nil || owner.Kind != "CelldPreview" || owner.APIVersion != fleet.GroupVersion.String() || string(owner.UID) != target.PreviewUID || owner.Name != target.PreviewName || target.FleetName != f.Name || target.StorageURL != f.Spec.Storage.URL() || f.Spec.Storage.PoolRef == nil || target.PoolRef != *f.Spec.Storage.PoolRef {
+	if !equality.Semantic.DeepEqual(s.Spec, fleetReservationSpec(f)) || f.Annotations[seedReservationCreated] != string(s.UID) || len(s.OwnerReferences) != 0 || !s.DeletionTimestamp.IsZero() || owner == nil || owner.Kind != "CelldPreview" || owner.APIVersion != fleet.GroupVersion.String() || string(owner.UID) != target.PreviewUID || owner.Name != target.PreviewName || target.FleetName != f.Name || target.StorageURL != f.Spec.Storage.URL() || f.Spec.Storage.PreviewFleetRef == nil || target.PreviewFleetRef != *f.Spec.Storage.PreviewFleetRef {
 		return nil, fmt.Errorf("seed request does not bind this preview, fleet and storage identity")
 	}
 	return s, nil
 }
 
-func completedSeedReceipt(s *fleet.CelldPreviewSeed, f *fleet.CelldFleet) (string, error) {
-	if s.Spec.Canceled || s.Status.Phase != "Succeeded" || s.Status.TargetFleetUID != string(f.UID) || s.Status.ExecutorID == "" || s.Status.Manifest == nil {
+func completedSeedReceipt(s *fleet.CelldStorageReservation, f *fleet.CelldFleet) (string, error) {
+	if s.Spec.Initialization == nil || s.Status.Canceled || s.Status.Phase != "Succeeded" || s.Status.TargetFleetUID != string(f.UID) || s.Status.ExecutorID == "" || s.Status.Manifest == nil {
 		return "", fmt.Errorf("seed has no successful completion for this fleet UID")
 	}
-	if err := s.Spec.Request.Selection.Validate(); err != nil {
+	if err := s.Spec.Initialization.Selection.Validate(); err != nil {
 		return "", err
 	}
 	expected := map[fleet.PreviewObjectReference]bool{}
-	for _, o := range s.Spec.Request.Selection.Objects {
+	for _, o := range s.Spec.Initialization.Selection.Objects {
 		expected[o] = true
 	}
 	for _, o := range s.Status.Manifest.Objects {
@@ -223,7 +240,7 @@ func completedSeedReceipt(s *fleet.CelldPreviewSeed, f *fleet.CelldFleet) (strin
 	if err != nil {
 		return "", err
 	}
-	return "ready:" + string(s.UID) + ":" + digest(b), nil
+	return "ready:" + s.Spec.Initialization.Target.PreviewUID + ":" + digest(b), nil
 }
 
 func seedReceiptReady(f *fleet.CelldFleet, res *fleet.CelldStorageReservation) bool {
@@ -234,10 +251,10 @@ func seedReceiptReady(f *fleet.CelldFleet, res *fleet.CelldStorageReservation) b
 	if res.Spec.InitialReplicas > 0 {
 		original.Spec.Replicas = res.Spec.InitialReplicas
 	}
-	if len(res.OwnerReferences) != 0 || !res.DeletionTimestamp.IsZero() || res.Spec != fleetReservationSpec(original) {
+	if res.UID == "" || f.Annotations[seedReservationCreated] != string(res.UID) || len(res.OwnerReferences) != 0 || !res.DeletionTimestamp.IsZero() || !equality.Semantic.DeepEqual(res.Spec, fleetReservationSpec(original)) {
 		return false
 	}
-	prefix := "ready:" + f.Spec.Storage.Initialization.UID + ":"
+	prefix := "ready:" + f.Spec.Storage.Initialization.Target.PreviewUID + ":"
 	v := res.Annotations[seedGate]
 	return strings.HasPrefix(v, prefix) && regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(strings.TrimPrefix(v, prefix))
 }
@@ -260,7 +277,7 @@ func (r *Reconciler) gateSeed(ctx context.Context, f *fleet.CelldFleet, res *fle
 		return false, err
 	}
 	// Deadline gates initial startup, not an already-running preview's lifecycle.
-	if !time.Now().Before(s.Spec.Request.Deadline.Time) {
+	if !time.Now().Before(s.Spec.Initialization.Deadline.Time) {
 		return false, fmt.Errorf("seed deadline elapsed before startup")
 	}
 	if res.Annotations == nil {
@@ -279,8 +296,11 @@ func (r *Reconciler) deleteUninitializedFleet(ctx context.Context, f *fleet.Cell
 	if f.Spec.Storage.Initialization == nil {
 		return false, nil
 	}
-	s, err := getFleetSeed(ctx, r.Client, f)
+	s, err := ensureSeedReservation(ctx, r.Client, f)
 	if err != nil {
+		return true, err
+	}
+	if _, err := getFleetSeed(ctx, r.Client, f); err != nil {
 		return true, err
 	}
 	stopped, err := cancelSeed(ctx, r.Client, s)
@@ -290,17 +310,9 @@ func (r *Reconciler) deleteUninitializedFleet(ctx context.Context, f *fleet.Cell
 	if !stopped {
 		return true, fmt.Errorf("waiting for seed executor to stop all writes")
 	}
-	res := &fleet.CelldStorageReservation{Name: reservationName(f), Spec: fleetReservationSpec(f)}
-	if err := r.Create(ctx, res); err != nil {
-		if !apierrors.IsAlreadyExists(err) {
-			return true, err
-		}
-		if err := r.Get(ctx, client.ObjectKeyFromObject(res), res); err != nil {
-			return true, err
-		}
-	}
-	// Existing initialized fleets must remain deletable even if the seed request
-	// is later lost; deleteFleet checks the durable receipt before calling us.
+	res := s
+	// A startup winner must use ordinary fleet shutdown; its retained receipt
+	// cannot authorize the never-started deletion shortcut.
 	if seedReceiptReady(f, res) {
 		return false, nil
 	}

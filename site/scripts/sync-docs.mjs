@@ -62,13 +62,11 @@ const routeBySource = new Map(pages.map((page) => [page.source, routeOf(page)]))
 routeBySource.set('docs/README.md', 'start/overview/');
 routeBySource.set('README.md', 'start/overview/');
 routeBySource.set('config/samples', 'api/samples/');
-for (const file of ['bucket', 'bucket-ordered', 'capacity-shadow', 'capacity-external', 'maintenance-paused', 'persistent', 'tuned', 'preview', 'preview-pool', 'preview-store', 'preview-seeded']) {
+for (const file of ['bucket', 'bucket-ordered', 'capacity-shadow', 'capacity-external', 'maintenance-paused', 'persistent', 'tuned', 'preview', 'fleet-previews', 'preview-store', 'preview-seeded']) {
 	routeBySource.set(`config/samples/${file}.yaml`, `api/samples/#${file}`);
 }
 routeBySource.set('charts/celld-operator/values.yaml', 'api/helm-values/');
 routeBySource.set('config/crd/celld.eric.dev_celldpreviews.yaml', 'api/celldpreview/');
-routeBySource.set('config/crd/celld.eric.dev_celldpreviewpools.yaml', 'api/celldpreviewpool/');
-routeBySource.set('config/crd/celld.eric.dev_celldpreviewseeds.yaml', 'api/celldpreviewseed/');
 routeBySource.set('config/crd/celld.eric.dev_celldfleets.yaml', 'api/celldfleet/');
 routeBySource.set('config/crd/celld.eric.dev_celldstoragereservations.yaml', 'api/celldstoragereservation/');
 
@@ -385,7 +383,7 @@ const sampleNotes = {
 	'maintenance-paused.yaml': 'PersistentFleet with maintenance paused and a commented restart token, showing the request fields.',
 	'preview-seeded.yaml': 'A preview seeded from several Durable Objects; requires pool source authorization and a separately installed snapshot/import executor.',
 	'preview.yaml': 'A developer preview referencing a shared pool, with a unique URL and 24-hour lifetime.',
-	'preview-pool.yaml': 'Platform-owned shared storage and routing configuration with small independent preview runtimes.',
+	'fleet-previews.yaml': 'Platform-owned shared storage and routing configuration with small independent preview runtimes.',
 	'preview-store.yaml': 'Optional disposable shared MinIO store; replacing its Pod loses all preview data.',
 	'capacity-external.yaml': 'Ordered Bucket with an HPA targeting the CelldFleet /scale subresource; exact scale-in uses the strict executor.',
 	'tuned.yaml': 'Immutable execution sizing and lifecycle budgets selected before creation.',
@@ -469,17 +467,11 @@ for (const page of pages) {
 }
 
 const generated = [
-	crdPage('config/crd/celld.eric.dev_celldpreviewseeds.yaml', 'celldpreviewseed', [
-		'A retained initialization request for a trusted external executor. See [preview state seeding](../../contracts/preview-seeding/) for the claim, snapshot and completion protocol.',
-	]),
-	crdPage('config/crd/celld.eric.dev_celldpreviewpools.yaml', 'celldpreviewpool', [
-		'A `CelldPreviewPool` configures shared object storage, small runtime defaults and routing for previews in one namespace. See [application previews](../../contracts/previews/) for setup and lifecycle rules.',
-	]),
 	crdPage('config/crd/celld.eric.dev_celldpreviews.yaml', 'celldpreview', [
 		'A `CelldPreview` owns an isolated fleet and unique URL with a bounded lifetime. See [application previews](../../contracts/previews/) for DNS, TLS, deployment and cleanup requirements.',
 	]),
 	crdPage('config/crd/celld.eric.dev_celldfleets.yaml', 'celldfleet', [
-		'A `CelldFleet` describes one celld fleet in a namespace: its profile, replica target, storage bucket, placement, optional capacity policy and maintenance requests. Only `replicas`, `capacity`, `runtimeImage`, `maintenance` and `routing` are mutable after creation. See the [fleet API contract](../../contracts/fleet-api/) for semantics and the [conditions reference](../../reference/conditions/) for what status reports.',
+		'A `CelldFleet` describes one celld fleet in a namespace: its profile, replica target, storage bucket, placement, optional capacity policy and maintenance requests. `previews` can be enabled once; its configuration is immutable thereafter. `replicas`, `capacity`, `runtimeImage`, `maintenance` and `routing` remain mutable. See the [fleet API contract](../../contracts/fleet-api/) for semantics and the [conditions reference](../../reference/conditions/) for what status reports.',
 	]),
 	crdPage('config/crd/celld.eric.dev_celldstoragereservations.yaml', 'celldstoragereservation', [
 		'A `CelldStorageReservation` is the cluster-scoped, never garbage-collected tombstone that binds a bucket to exactly one fleet identity and carries bounded current-operation authority. The operator creates it; administrators read it. Never delete one to reuse a bucket or a retained disk. See [current operations](../../concepts/current-operation/) and [the exact disk contract](../../contracts/disposable-disks/).',

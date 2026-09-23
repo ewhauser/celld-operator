@@ -55,8 +55,9 @@ spec:
             type: object
           spec:
             properties:
-              poolRef:
-                description: Shared platform configuration in this namespace; immutable.
+              fleetRef:
+                description: Parent fleet with spec.previews configured in this namespace;
+                  immutable.
                 properties:
                   name:
                     description: Pool in the same namespace as the preview.
@@ -68,7 +69,7 @@ spec:
                 - name
                 type: object
                 x-kubernetes-validations:
-                - message: preview pool reference is immutable
+                - message: preview fleet reference is immutable
                   rule: self == oldSelf
               revision:
                 description: Optional informational revision supplied by CI, not deployment
@@ -143,7 +144,7 @@ spec:
                 - message: ttlSeconds is immutable
                   rule: self == oldSelf
             required:
-            - poolRef
+            - fleetRef
             - source
             type: object
             x-kubernetes-validations:
@@ -223,6 +224,10 @@ spec:
               observedGeneration:
                 format: int64
                 type: integer
+              parentFleetName:
+                type: string
+              parentFleetUID:
+                type: string
               phase:
                 enum:
                 - Pending
@@ -232,14 +237,6 @@ spec:
                 - Deleting
                 - Expired
                 type: string
-              poolName:
-                type: string
-              poolUID:
-                type: string
-              seedName:
-                description: Initialization request, retained separately from the
-                  preview.
-                type: string
               seedPhase:
                 enum:
                 - Pending
@@ -247,6 +244,10 @@ spec:
                 - Succeeded
                 - Failed
                 - Canceled
+                type: string
+              seedReservation:
+                description: Destination reservation retaining initialization state
+                  after preview deletion.
                 type: string
               storageURL:
                 description: Target for celld deploy; contains no credentials.

@@ -24,28 +24,32 @@ import (
 func previewFixture() *fleet.CelldPreview {
 	return &fleet.CelldPreview{
 		Name: "pr-42", Namespace: "fleets", UID: "d43be4c2-a643-4fe6-bcad-ad249dc55493", Generation: 1, CreationTimestamp: metav1.NewTime(time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)),
-		Spec: fleet.CelldPreviewSpec{Source: "feature/login", TTLSeconds: 3600, PoolRef: fleet.PreviewPoolReference{Name: "shared-previews"}},
+		Spec: fleet.CelldPreviewSpec{Source: "feature/login", TTLSeconds: 3600, FleetRef: fleet.PreviewFleetReference{Name: "shared-previews"}},
 	}
 }
 
-func previewPoolFixture(p *fleet.CelldPreview) *fleet.CelldPreviewPool {
-	return &fleet.CelldPreviewPool{Name: p.Spec.PoolRef.Name, Namespace: p.Namespace, UID: "pool-uid", Spec: fleet.CelldPreviewPoolSpec{
-		RuntimeImage: fixture("unused", "unused", "Bucket").Spec.RuntimeImage, ServiceAccountName: "preview-runtime",
-		Storage: fleet.PreviewPoolStorage{Bucket: "preview-only-bucket", Region: "us-east-1"}, Zone: "us-east-1a",
+func previewPoolFixture(p *fleet.CelldPreview) *fleet.CelldFleet {
+	parent := fixture(p.Spec.FleetRef.Name, "parent-bucket", "Bucket")
+	parent.Namespace = p.Namespace
+	parent.UID = "pool-uid"
+	parent.Spec.Previews = &fleet.FleetPreviewsSpec{
+		RuntimeImage: parent.Spec.RuntimeImage, ServiceAccountName: "preview-runtime",
+		Storage: fleet.PreviewStorage{Bucket: "preview-only-bucket", Region: "us-east-1"}, Zone: "us-east-1a",
 		Routing: fleet.PreviewRouting{BaseDomain: "previews.example.com", Scheme: "https", Source: fleet.RoutingSource{Namespace: "edge", PodLabels: map[string]string{"app": "gateway"}}, Ingress: &fleet.IngressRouting{ClassName: "nginx", TLSSecretName: "preview-wildcard"}},
-	}}
+	}
+	return parent
 }
 
-func createEnvtestPool(t *testing.T, c client.Client, p *fleet.CelldPreview) *fleet.CelldPreviewPool {
+func createEnvtestPool(t *testing.T, c client.Client, p *fleet.CelldPreview) *fleet.CelldFleet {
 	t.Helper()
 	pool := previewPoolFixture(p)
 	pool.UID = ""
-	pool.Spec.Storage.Bucket = p.Namespace + "-previews"
-	pool.Spec.Routing.Scheme = ""
+	pool.Spec.Previews.Storage.Bucket = p.Namespace + "-previews"
+	pool.Spec.Previews.Routing.Scheme = ""
 	if err := c.Create(t.Context(), pool); err != nil {
 		t.Fatal(err)
 	}
-	if pool.Spec.Routing.Scheme != "https" {
+	if pool.Spec.Previews.Routing.Scheme != "https" {
 		t.Fatal("pool routing default missing")
 	}
 	return pool
@@ -80,8 +84,8 @@ func TestPreviewIsolationAndURLs(t *testing.T) {
 	pool := previewPoolFixture(p)
 	for _, gateway := range []bool{false, true} {
 		if gateway {
-			pool.Spec.Routing.Ingress = nil
-			pool.Spec.Routing.Gateway = &fleet.GatewayRouting{Name: "edge", Namespace: "edge"}
+			pool.Spec.Previews.Routing.Ingress = nil
+			pool.Spec.Previews.Routing.Gateway = &fleet.GatewayRouting{Name: "edge", Namespace: "edge"}
 		}
 		a, b := previewFleet(p, pool), previewFleet(q, pool)
 		if a.Name == b.Name || a.Spec.Storage.Prefix == b.Spec.Storage.Prefix || a.Spec.Storage.Bucket != b.Spec.Storage.Bucket || a.Spec.Routing.Hostnames[0] == b.Spec.Routing.Hostnames[0] {
@@ -263,7 +267,7 @@ func TestEnvtestPreviewAdmissionAndReconcile(t *testing.T) {
 	}
 	for _, mutate := range []func(*fleet.CelldPreview){
 		func(p *fleet.CelldPreview) { p.Spec.TTLSeconds++ },
-		func(p *fleet.CelldPreview) { p.Spec.PoolRef.Name = "another-pool" },
+		func(p *fleet.CelldPreview) { p.Spec.FleetRef.Name = "another-pool" },
 	} {
 		changed := got.DeepCopy()
 		mutate(changed)
@@ -272,7 +276,7 @@ func TestEnvtestPreviewAdmissionAndReconcile(t *testing.T) {
 		}
 	}
 	changedPool := pool.DeepCopy()
-	changedPool.Spec.Routing.BaseDomain = "changed.example.com"
+	changedPool.Spec.Previews.Routing.BaseDomain = "changed.example.com"
 	if err := c.Update(t.Context(), changedPool); !apierrors.IsInvalid(err) {
 		t.Fatalf("pool configuration mutated: %v", err)
 	}
@@ -352,7 +356,7 @@ func TestEnvtestPreviewRoutesAndRejectedConfigurations(t *testing.T) {
 	}
 	createEnvtestPool(t, c, newPreview("one"))
 	for i, mutate := range []func(*fleet.CelldPreview){
-		func(p *fleet.CelldPreview) { p.Spec.PoolRef.Name = "Bad_Name" },
+		func(p *fleet.CelldPreview) { p.Spec.FleetRef.Name = "Bad_Name" },
 		func(p *fleet.CelldPreview) { p.Spec.TTLSeconds = 1 },
 	} {
 		p := newPreview("invalid")
@@ -361,11 +365,11 @@ func TestEnvtestPreviewRoutesAndRejectedConfigurations(t *testing.T) {
 			t.Fatalf("invalid case %d admitted: %v", i, err)
 		}
 	}
-	for i, mutate := range []func(*fleet.CelldPreviewPool){
-		func(p *fleet.CelldPreviewPool) { p.Spec.Routing.BaseDomain = "*.example.com" },
-		func(p *fleet.CelldPreviewPool) { p.Spec.Routing.Ingress = nil },
-		func(p *fleet.CelldPreviewPool) { p.Spec.Routing.Gateway = &fleet.GatewayRouting{Name: "edge"} },
-		func(p *fleet.CelldPreviewPool) { p.Spec.Routing.Ingress.TLSSecretName = "" },
+	for i, mutate := range []func(*fleet.CelldFleet){
+		func(p *fleet.CelldFleet) { p.Spec.Previews.Routing.BaseDomain = "*.example.com" },
+		func(p *fleet.CelldFleet) { p.Spec.Previews.Routing.Ingress = nil },
+		func(p *fleet.CelldFleet) { p.Spec.Previews.Routing.Gateway = &fleet.GatewayRouting{Name: "edge"} },
+		func(p *fleet.CelldFleet) { p.Spec.Previews.Routing.Ingress.TLSSecretName = "" },
 	} {
 		p := previewPoolFixture(newPreview("unused"))
 		p.Name = "invalid"
@@ -421,5 +425,33 @@ func TestEnvtestPreviewRoutesAndRejectedConfigurations(t *testing.T) {
 		if err := c.Get(t.Context(), client.ObjectKeyFromObject(route), route); !apierrors.IsNotFound(err) {
 			t.Fatalf("expired route remains: %v", err)
 		}
+	}
+}
+
+func TestPreviewRequiresEnabledSeparateParentStorage(t *testing.T) {
+	for _, disabled := range []bool{false, true} {
+		t.Run(map[bool]string{false: "shared-parent-bucket", true: "disabled"}[disabled], func(t *testing.T) {
+			p := previewFixture()
+			r := previewSetup(t, p)
+			parent := &fleet.CelldFleet{}
+			if err := r.Get(t.Context(), client.ObjectKey{Namespace: p.Namespace, Name: p.Spec.FleetRef.Name}, parent); err != nil {
+				t.Fatal(err)
+			}
+			if disabled {
+				parent.Spec.Previews = nil
+			} else {
+				parent.Spec.Previews.Storage.Bucket = parent.Spec.Storage.Bucket
+			}
+			if err := r.Update(t.Context(), parent); err != nil {
+				t.Fatal(err)
+			}
+			got := previewReconcile(t, r, p)
+			if got.Status.Phase != "Blocked" {
+				t.Fatal("invalid parent admitted preview")
+			}
+			if err := r.Get(t.Context(), client.ObjectKey{Namespace: p.Namespace, Name: previewName(p)}, &fleet.CelldFleet{}); !apierrors.IsNotFound(err) {
+				t.Fatal("child created")
+			}
+		})
 	}
 }

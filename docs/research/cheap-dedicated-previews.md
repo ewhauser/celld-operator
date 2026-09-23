@@ -44,7 +44,7 @@ limits. Configuration changes alone do not eliminate this floor.
 
 ## Implementation status after investigation
 
-The operator now exposes `CelldPreviewPool` plus `CelldPreview.spec.poolRef`.
+The operator now exposes `CelldFleet.spec.previews` plus `CelldPreview.spec.fleetRef`.
 It implements shared bucket prefixes with permanent pool/prefix reservations,
 custom object-store endpoints with Secret references, small execution defaults,
 and separate scratch requests/limits. See [application previews](../previews.md)

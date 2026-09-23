@@ -65,11 +65,149 @@ spec:
                 maximum: 100
                 minimum: 1
                 type: integer
+              initialization:
+                description: Immutable seed request for this exclusive preview destination.
+                properties:
+                  deadline:
+                    description: Executor must stop before this time and must never
+                      begin after it.
+                    format: date-time
+                    type: string
+                  executor:
+                    maxLength: 63
+                    minLength: 1
+                    type: string
+                  selection:
+                    description: |-
+                      PreviewSeedSpec selects persisted objects, copied once before runtime startup.
+                      Snapshots are consistent per object, not globally across the selection.
+                    properties:
+                      alarms:
+                        default: Clear
+                        description: Clear disables copied alarms. Preserve explicitly
+                          opts into scheduled work.
+                        enum:
+                        - Clear
+                        - Preserve
+                        type: string
+                      objects:
+                        items:
+                          properties:
+                            class:
+                              description: Exported Durable Object class, with the
+                                same mapping in the target application.
+                              maxLength: 128
+                              minLength: 1
+                              pattern: ^[A-Za-z0-9_$.-]+$
+                              type: string
+                            id:
+                              description: Canonical object ID, not an idFromName
+                                input or a storage path.
+                              maxLength: 256
+                              minLength: 1
+                              pattern: ^[A-Za-z0-9_$.-]+$
+                              type: string
+                          required:
+                          - class
+                          - id
+                          type: object
+                        maxItems: 100
+                        minItems: 1
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - class
+                        - id
+                        x-kubernetes-list-type: map
+                      source:
+                        description: Administrator-approved alias from the pool's
+                          seeding.sources.
+                        maxLength: 63
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                        type: string
+                    required:
+                    - objects
+                    - source
+                    type: object
+                  sourceFleet:
+                    properties:
+                      name:
+                        maxLength: 40
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                        type: string
+                      namespace:
+                        maxLength: 63
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                        type: string
+                      uid:
+                        description: Exact authorized fleet identity; recreating a
+                          name never transfers access.
+                        maxLength: 64
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    - namespace
+                    - uid
+                    type: object
+                  target:
+                    properties:
+                      fleetName:
+                        maxLength: 40
+                        minLength: 1
+                        type: string
+                      previewFleetRef:
+                        properties:
+                          name:
+                            description: Pool in the same namespace as the fleet.
+                            maxLength: 253
+                            minLength: 1
+                            pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                            type: string
+                          uid:
+                            description: Exact pool UID; names alone cannot transfer
+                              a reservation.
+                            maxLength: 64
+                            minLength: 1
+                            type: string
+                        required:
+                        - name
+                        - uid
+                        type: object
+                      previewName:
+                        maxLength: 253
+                        minLength: 1
+                        type: string
+                      previewUID:
+                        maxLength: 64
+                        minLength: 1
+                        type: string
+                      storageURL:
+                        description: Exact isolated S3 destination; no credentials.
+                        maxLength: 133
+                        pattern: ^s3://[a-z0-9-]+/[a-z0-9-]+$
+                        type: string
+                    required:
+                    - fleetName
+                    - previewFleetRef
+                    - previewName
+                    - previewUID
+                    - storageURL
+                    type: object
+                required:
+                - deadline
+                - executor
+                - selection
+                - sourceFleet
+                - target
+                type: object
               ownerKind:
                 description: Empty means CelldFleet for existing reservations. Pool
                   reservations own the whole bucket.
                 enum:
-                - CelldPreviewPool
+                - FleetPreviews
                 type: string
               prefix:
                 description: Empty reserves the whole bucket. Nonempty reserves exactly
@@ -89,8 +227,147 @@ spec:
             x-kubernetes-validations:
             - message: storage reservations cannot be transferred or changed
               rule: self == oldSelf
+          status:
+            properties:
+              canceled:
+                description: Cancellation is monotonic and participates in the executor
+                  claim CAS.
+                type: boolean
+                x-kubernetes-validations:
+                - message: seed cancellation cannot be reversed
+                  rule: '!oldSelf || self'
+              executorID:
+                description: Stable execution identity. Other workers cannot take
+                  over a Running request.
+                maxLength: 128
+                minLength: 1
+                type: string
+              manifest:
+                description: |-
+                  Publish all snapshot identities atomically before importing any objects.
+                  The manifest is immutable and retained for repeatable retries and audit.
+                properties:
+                  objects:
+                    items:
+                      properties:
+                        class:
+                          description: Exported Durable Object class, with the same
+                            mapping in the target application.
+                          maxLength: 128
+                          minLength: 1
+                          pattern: ^[A-Za-z0-9_$.-]+$
+                          type: string
+                        digest:
+                          description: SHA-256 of the exported snapshot payload.
+                          maxLength: 64
+                          pattern: ^[a-f0-9]{64}$
+                          type: string
+                        id:
+                          description: Canonical object ID, not an idFromName input
+                            or a storage path.
+                          maxLength: 256
+                          minLength: 1
+                          pattern: ^[A-Za-z0-9_$.-]+$
+                          type: string
+                        snapshotID:
+                          description: Opaque immutable snapshot handle understood
+                            by the executor, never a live source pointer.
+                          maxLength: 256
+                          minLength: 1
+                          type: string
+                        sourceVersion:
+                          description: Committed source version captured for this
+                            object.
+                          maxLength: 256
+                          minLength: 1
+                          type: string
+                      required:
+                      - class
+                      - digest
+                      - id
+                      - snapshotID
+                      - sourceVersion
+                      type: object
+                    maxItems: 100
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - class
+                    - id
+                    x-kubernetes-list-type: map
+                required:
+                - objects
+                type: object
+              message:
+                description: Bounded, non-sensitive progress or failure summary; never
+                  secret values.
+                maxLength: 1024
+                type: string
+              phase:
+                description: |-
+                  Running is an exclusive claim, published with resourceVersion before any I/O.
+                  Terminal phases certify there are no active or retryable writes left.
+                enum:
+                - Pending
+                - Running
+                - Succeeded
+                - Failed
+                - Canceled
+                type: string
+              targetFleetUID:
+                description: Exact destination fleet UID whose prefix reservation
+                  was verified by the executor.
+                maxLength: 64
+                minLength: 1
+                type: string
+            type: object
         required:
         - spec
         type: object
+        x-kubernetes-validations:
+        - message: terminal seed results cannot change
+          rule: '!has(oldSelf.status) || !has(oldSelf.status.phase) || !(oldSelf.status.phase
+            in [''Succeeded'', ''Failed'', ''Canceled'']) || (has(self.status) &&
+            self.status == oldSelf.status)'
+        - message: captured snapshot manifest cannot change or be removed
+          rule: '!has(oldSelf.status) || !has(oldSelf.status.manifest) || (has(self.status)
+            && has(self.status.manifest) && self.status.manifest == oldSelf.status.manifest)'
+        - message: executor target identity cannot change
+          rule: '!has(oldSelf.status) || !has(oldSelf.status.targetFleetUID) || (has(self.status)
+            && has(self.status.targetFleetUID) && self.status.targetFleetUID == oldSelf.status.targetFleetUID)'
+        - message: canceled seed requests cannot be claimed
+          rule: '!has(self.status) || !has(self.status.phase) || self.status.phase
+            != ''Running'' || ((!has(self.status.canceled) || !self.status.canceled)
+            && (!has(oldSelf.status) || !has(oldSelf.status.phase) || oldSelf.status.phase
+            in [''Pending'', ''Running''])) || (has(oldSelf.status) && has(oldSelf.status.phase)
+            && oldSelf.status.phase == ''Running'')'
+        - message: success requires an uncanceled request, target identity and manifest
+          rule: '!has(self.status) || !has(self.status.phase) || self.status.phase
+            != ''Succeeded'' || ((!has(self.status.canceled) || !self.status.canceled)
+            && has(self.status.manifest) && has(self.status.targetFleetUID))'
+        - message: executor claim requires execution and target identities
+          rule: '!has(self.status) || !has(self.status.phase) || !(self.status.phase
+            in [''Running'', ''Succeeded'']) || (has(self.status.executorID) && has(self.status.targetFleetUID))'
+        - message: executor identity cannot change
+          rule: '!has(oldSelf.status) || !has(oldSelf.status.executorID) || (has(self.status)
+            && has(self.status.executorID) && self.status.executorID == oldSelf.status.executorID)'
+        - message: success requires a previously claimed execution
+          rule: '!has(self.status) || !has(self.status.phase) || self.status.phase
+            != ''Succeeded'' || (has(oldSelf.status) && has(oldSelf.status.phase)
+            && oldSelf.status.phase in [''Running'', ''Succeeded''])'
+        - message: claimed requests cannot return to pending
+          rule: '!has(oldSelf.status) || !has(oldSelf.status.phase) || oldSelf.status.phase
+            != ''Running'' || (has(self.status) && has(self.status.phase) && self.status.phase
+            != ''Pending'')'
+        - message: seed cancellation cannot be removed or reversed
+          rule: '!has(oldSelf.status) || !has(oldSelf.status.canceled) || !oldSelf.status.canceled
+            || (has(self.status) && has(self.status.canceled) && self.status.canceled)'
+        - message: executor must claim this reservation's fleet UID
+          rule: '!has(self.status) || !has(self.status.targetFleetUID) || self.status.targetFleetUID
+            == self.spec.fleetUID'
+        - message: seed status requires an initialization request
+          rule: '!has(self.status) || !has(self.status.phase) || has(self.spec.initialization)'
     served: true
     storage: true
+    subresources:
+      status: {}

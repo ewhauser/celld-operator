@@ -1,8 +1,8 @@
 # Application previews
 
-Developers create a `CelldPreview` referencing a platform-owned
-`CelldPreviewPool`. The pool shares nodes, routing configuration and one object
-store; each preview gets a small independent runtime, an isolated storage
+Developers create a `CelldPreview` referencing an existing `CelldFleet` with
+`spec.previews` configured by the platform team. This configuration shares nodes,
+routing and one preview object store; each preview gets a small independent runtime, an isolated storage
 prefix and its own stable URL. There is no per-preview bucket, PVC, object-store
 process or external load balancer. The operator still creates an internal
 `CelldFleet` so runtime startup, reservations and shutdown use the existing
@@ -10,7 +10,7 @@ lifecycle controls.
 
 ## Developer workflow
 
-Once the platform team has installed a pool, the developer manifest is:
+Once the platform team has enabled previews on a fleet, the developer manifest is:
 
 ```yaml
 apiVersion: celld.eric.dev/v1alpha1
@@ -19,8 +19,8 @@ metadata:
   name: pr-42
   namespace: previews
 spec:
-  poolRef:
-    name: shared-previews
+  fleetRef:
+    name: development
   source: feature/login
   revision: replace-with-commit-sha
   ttlSeconds: 86400
@@ -46,14 +46,14 @@ kubectl --context YOUR_CONTEXT -n previews get celldpreview pr-42 \
 For a custom store, CI also needs `S3_ENDPOINT`, `AWS_ACCESS_KEY_ID`,
 `AWS_SECRET_ACCESS_KEY`, and `AWS_ALLOW_HTTP=true` when using HTTP. The CLI must
 reach that endpoint; an in-cluster Service address requires an in-cluster runner
-or a suitable tunnel. Use the same store as the pool. Supply credentials through
+or a suitable tunnel. Use the store configured under the parent's `spec.previews.storage`. Supply credentials through
 CI's secret mechanism, not the preview YAML.
 
 Example status:
 
 ```yaml
 status:
-  poolName: shared-previews
+  parentFleetName: development
   fleetName: p-d43be4c2a6434fe6bcadad249dc55493
   storageURL: s3://shared-previews/p-d43be4c2a6434fe6bcadad249dc55493
   url: https://p-d43be4c2a6434fe6bcadad249dc55493.previews.example.com
@@ -69,7 +69,7 @@ DNS and TLS with an HTTP request to `status.url` after deploying.
 
 ## Clone selected Durable Objects
 
-An optional immutable `spec.seed` selects multiple objects from a pool-approved
+An optional immutable `spec.seed` selects multiple objects from an administrator-approved
 source. The operator reserves the destination and waits for a trusted external
 executor to initialize all objects before starting the runtime or enabling routing.
 See [preview state seeding](preview-seeding.md) for YAML, executor requirements and
@@ -78,16 +78,17 @@ previews remain `Initializing` until one completes the request.
 
 ## Platform setup
 
-Install all five CRDs in `config/crd` and upgrade the operator and its RBAC.
+Install all three CRDs in `config/crd` and upgrade the operator and its RBAC.
 Helm includes CRDs for fresh installations; apply CRD updates explicitly when
 upgrading. Apply `config/rbac/fleet-namespace.yaml` in each preview namespace, or
 configure Helm's `fleetNamespaces`, so the controller can create/delete child
-fleets. Give developers access to previews; reserve pool and fleet configuration
+fleets. Give developers access to previews; reserve parent and child fleet configuration
 and reservation management for platform administrators.
 
-Adapt [the pool sample](../config/samples/preview-pool.yaml). Create the namespace,
-ServiceAccount and bucket first. Each pool lives in the same namespace as its
-previews and requires one fresh bucket reserved exclusively to that pool. Choose:
+Adapt [the fleet sample](../config/samples/fleet-previews.yaml). Create the namespace,
+ServiceAccount and bucket first. The parent fleet lives in the same namespace as its
+previews. Its `spec.previews.storage` requires a fresh bucket separate from the
+parent runtime bucket. Choose:
 
 - **Disposable local store:** set `storage.endpoint` to a shared S3-compatible
   service and reference a same-namespace Secret with `accessKeyId` and
@@ -98,12 +99,12 @@ previews and requires one fresh bucket reserved exclusively to that pool. Choose
   ServiceAccount for the shared bucket. The runtime continues making coordination
   requests while idle; smaller resource requests do not eliminate that bill.
 
-The bucket is created outside the operator. Pools are configuration resources;
-creating one does not provision a store or reserve compute. The bucket reservation
-is acquired atomically when the first preview uses it. Neither production data
-nor credentials are copied. Prefixes isolate runtime state but shared bucket
+The bucket is created outside the operator. The parent is an ordinary running fleet; enabling previews does not create
+an additional parent runtime or provision an object store. The bucket reservation
+is acquired atomically when the first preview uses it. Empty previews copy neither production data nor credentials; optional seeding
+copies only the explicitly selected persisted object state. Prefixes isolate runtime state but shared bucket
 credentials are **not** an IAM boundary between mutually untrusted tenants. Use
-separate pools/buckets and identities for separate trust boundaries.
+separate parent fleets, preview buckets and identities for separate trust boundaries.
 
 Configure `*.previews.example.com` DNS to the existing edge. For Ingress, provide
 a wildcard certificate in the preview namespace and set
@@ -113,8 +114,10 @@ wildcard domain, its `allowedRoutes`, and `routing.gateway.sectionName`.
 labels. Reserve this domain for operator previews. The operator does not install
 an edge controller, issue certificates, modify DNS, or supply authentication.
 
-Pool configuration is immutable. Create another pool with another bucket to
-change infrastructure settings. A preview's pool reference and TTL are immutable;
+A fleet can enable `spec.previews` once; the configuration cannot then change
+or be removed. This addition does not change the parent runtime reservation
+hash or restart its workload. Use another parent and preview bucket to change
+preview infrastructure. A preview's fleet reference and TTL are immutable;
 source and revision metadata can be updated. Do not edit generated fleets.
 
 ### Optional disposable store sample
@@ -143,8 +146,8 @@ retained or externally managed store.
 
 Each running preview requests 25m CPU, 64Mi memory and 64Mi ephemeral storage,
 with a 256Mi memory limit and 512Mi disk-backed scratch limit. There is one replica,
-relaxed placement within the pool's zone, eight resident cells, and 30-second
-cell eviction. Pools can override `execution` and `scratch`.
+relaxed placement within the configured preview zone, eight resident cells, and 30-second
+cell eviction. The parent's `spec.previews` can set `execution` and `scratch`.
 
 The runtime also limits stateless isolates to one, global in-flight requests to
 eight, cell requests to four, request bodies to 1MiB, and preserved cache to
@@ -176,13 +179,13 @@ and request normal fleet shutdown; neither force-removes workloads or bypasses
 acknowledged-write checks. An unavailable operator or blocked shutdown can delay
 cleanup. Inspect `status.fleetName` and the preview condition message.
 
-Bucket data, the pool reservation and each prefix reservation are retained.
+Bucket data, the preview bucket reservation and each prefix reservation are retained.
 Single-segment prefixes cannot overlap, and permanent reservations cannot transfer
-to new Kubernetes UIDs. A normal dedicated fleet cannot claim a pool's bucket.
+to new Kubernetes UIDs. A normal dedicated fleet cannot claim a reserved preview bucket.
 Bucket names are reserved cluster-wide even across different custom endpoints,
-preventing aliases from weakening exclusivity. Deleting pool configuration neither
-cascades to previews nor prevents their expiry/deletion; it blocks new provisioning.
-Recreating a pool name cannot adopt its former previews or bucket.
+preventing aliases from weakening exclusivity. Deleting the parent fleet does not cascade to previews. It blocks new provisioning,
+but existing previews can still expire or be deleted through their own lifecycle.
+Recreating the parent name cannot adopt its former preview bucket or previews.
 
 Dispose of retained prefix data separately under your retention policy after
 safe shutdown. No automatic object-store garbage collection is implemented.

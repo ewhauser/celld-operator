@@ -7,27 +7,11 @@ import (
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
-// CelldPreviewPool is administrator-owned configuration shared by previews in
-// one namespace. Each preview has its own runtime and single-segment S3 prefix.
-// The bucket is permanently reserved to this pool UID on first use.
-// +kubebuilder:object:root=true
-// +kubebuilder:resource:shortName=cpp
-// +kubebuilder:printcolumn:name="Bucket",type=string,JSONPath=`.spec.storage.bucket`
-// +kubebuilder:printcolumn:name="Domain",type=string,JSONPath=`.spec.routing.baseDomain`
-type CelldPreviewPool struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-	// Create a new pool for configuration changes; existing preview identities never move.
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="preview pool configuration is immutable"
-	Spec CelldPreviewPoolSpec `json:"spec"`
-}
-
 // +kubebuilder:validation:XValidation:rule="self.zone.startsWith(self.storage.region) && size(self.zone) == size(self.storage.region) + 1 && self.zone.matches('.*[a-z]$')",message="zone must belong to the storage region"
-type CelldPreviewPoolSpec struct {
+type FleetPreviewsSpec struct {
 	// Opt-in source authorization and trusted executor for state seeding.
 	// +optional
 	Seeding *PreviewSeedingSpec `json:"seeding,omitempty"`
@@ -38,8 +22,8 @@ type CelldPreviewPoolSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
-	ServiceAccountName string             `json:"serviceAccountName"`
-	Storage            PreviewPoolStorage `json:"storage"`
+	ServiceAccountName string         `json:"serviceAccountName"`
+	Storage            PreviewStorage `json:"storage"`
 	// One allowed zone. Previews use a single replica and relaxed host placement.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=33
@@ -54,7 +38,7 @@ type CelldPreviewPoolSpec struct {
 	Scratch *ScratchSpec `json:"scratch,omitempty"`
 }
 
-type PreviewPoolStorage struct {
+type PreviewStorage struct {
 	// Existing bucket dedicated to this pool; the operator does not create or delete it.
 	// +kubebuilder:validation:MinLength=3
 	// +kubebuilder:validation:MaxLength=63
@@ -94,7 +78,7 @@ type ScratchSpec struct {
 	Limit string `json:"limit"`
 }
 
-type PreviewPoolReference struct {
+type PreviewFleetReference struct {
 	// Pool in the same namespace as the preview.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
@@ -102,7 +86,7 @@ type PreviewPoolReference struct {
 	Name string `json:"name"`
 }
 
-type StoragePoolReference struct {
+type StorageFleetReference struct {
 	// Pool in the same namespace as the fleet.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
@@ -114,19 +98,12 @@ type StoragePoolReference struct {
 	UID string `json:"uid"`
 }
 
-// +kubebuilder:object:root=true
-type CelldPreviewPoolList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []CelldPreviewPool `json:"items"`
-}
-
 // FleetSpec supplies the small independent runtime behind one preview. The
 // prefix is a single path segment so different reservations cannot overlap.
-func (p *CelldPreviewPool) FleetSpec(prefix string) CelldFleetSpec {
+func (p *CelldFleet) PreviewFleetSpec(prefix string) CelldFleetSpec {
 	e := ExecutionSpec{}
-	if p.Spec.Execution != nil {
-		e = *p.Spec.Execution
+	if p.Spec.Previews.Execution != nil {
+		e = *p.Spec.Previews.Execution
 	}
 	if e.CPURequest == "" {
 		e.CPURequest = "25m"
@@ -144,8 +121,8 @@ func (p *CelldPreviewPool) FleetSpec(prefix string) CelldFleetSpec {
 		e.IdleEvictSeconds = 30
 	}
 	scratch := &ScratchSpec{Request: "64Mi", Limit: "512Mi"}
-	if p.Spec.Scratch != nil {
-		scratch = p.Spec.Scratch.DeepCopy()
+	if p.Spec.Previews.Scratch != nil {
+		scratch = p.Spec.Previews.Scratch.DeepCopy()
 	}
 	// Keep preserved cache within a quarter of scratch; leave the rest for live
 	// SQLite files, journals and launch metadata. Invalid quantities are rejected
@@ -159,28 +136,33 @@ func (p *CelldPreviewPool) FleetSpec(prefix string) CelldFleetSpec {
 	for _, pair := range values {
 		env = append(env, FleetEnvVar{Name: pair[0], Value: new(pair[1])})
 	}
-	return CelldFleetSpec{RuntimeImage: p.Spec.RuntimeImage, Profile: "Bucket", BucketWorkload: "Ordered", Replicas: 1,
-		ServiceAccountName: p.Spec.ServiceAccountName,
-		Storage: StorageSpec{Bucket: p.Spec.Storage.Bucket, Region: p.Spec.Storage.Region, SizeGiB: 10,
-			Prefix: prefix, PoolRef: &StoragePoolReference{Name: p.Name, UID: string(p.UID)}, Endpoint: p.Spec.Storage.Endpoint.DeepCopy(), Scratch: scratch},
-		Execution: &e, Env: env, Placement: PlacementSpec{AZCount: 1, Zones: []string{p.Spec.Zone}, Mode: "Relaxed"}}
+	return CelldFleetSpec{RuntimeImage: p.Spec.Previews.RuntimeImage, Profile: "Bucket", BucketWorkload: "Ordered", Replicas: 1,
+		ServiceAccountName: p.Spec.Previews.ServiceAccountName,
+		Storage: StorageSpec{Bucket: p.Spec.Previews.Storage.Bucket, Region: p.Spec.Previews.Storage.Region, SizeGiB: 10,
+			Prefix: prefix, PreviewFleetRef: &StorageFleetReference{Name: p.Name, UID: string(p.UID)}, Endpoint: p.Spec.Previews.Storage.Endpoint.DeepCopy(), Scratch: scratch},
+		Execution: &e, Env: env, Placement: PlacementSpec{AZCount: 1, Zones: []string{p.Spec.Previews.Zone}, Mode: "Relaxed"}}
 }
 
 func validateStorageOptions(s StorageSpec, profile string) error {
-	if (s.Prefix == "") != (s.PoolRef == nil) {
-		return fmt.Errorf("storage prefix and poolRef must be supplied together")
+	if (s.Prefix == "") != (s.PreviewFleetRef == nil) {
+		return fmt.Errorf("storage prefix and previewFleetRef must be supplied together")
 	}
 	if s.Prefix != "" && (profile != "Bucket" || len(validation.IsDNS1123Label(s.Prefix)) != 0 || len(s.Prefix) > 63) {
 		return fmt.Errorf("shared storage requires Bucket profile and one DNS-label prefix")
 	}
-	if s.PoolRef != nil && (len(validation.IsDNS1123Subdomain(s.PoolRef.Name)) != 0 || s.PoolRef.UID == "" || len(s.PoolRef.UID) > 64) {
+	if s.PreviewFleetRef != nil && (len(validation.IsDNS1123Subdomain(s.PreviewFleetRef.Name)) != 0 || s.PreviewFleetRef.UID == "" || len(s.PreviewFleetRef.UID) > 64) {
 		return fmt.Errorf("invalid storage pool identity")
 	}
-	if s.Initialization != nil && (s.PoolRef == nil || len(validation.IsDNS1123Label(s.Initialization.Name)) != 0 || s.Initialization.UID == "" || len(s.Initialization.UID) > 64) {
-		return fmt.Errorf("initialization requires a shared pool and exact seed request identity")
+	if s.Initialization != nil {
+		if s.PreviewFleetRef == nil || s.Initialization.Target.PreviewFleetRef != *s.PreviewFleetRef || s.Initialization.Target.StorageURL != s.URL() {
+			return fmt.Errorf("initialization must match the preview storage authority")
+		}
+		if err := s.Initialization.Selection.Validate(); err != nil {
+			return err
+		}
 	}
 	if s.Endpoint != nil {
-		if s.PoolRef == nil {
+		if s.PreviewFleetRef == nil {
 			return fmt.Errorf("custom storage endpoints require a shared pool reservation")
 		}
 		u, err := url.Parse(s.Endpoint.URL)

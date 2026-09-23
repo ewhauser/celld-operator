@@ -8,12 +8,6 @@ metadata:
   name: {{ include "celld-operator.name" $ }}-fleet
 rules:
   - apiGroups: [celld.eric.dev]
-    resources: [celldpreviewseeds]
-    verbs: [create, patch]
-  - apiGroups: [celld.eric.dev]
-    resources: [celldpreviewseeds/status]
-    verbs: [get, patch]
-  - apiGroups: [celld.eric.dev]
     resources: [celldfleets]
     verbs: [create, delete]
   - apiGroups: ['']

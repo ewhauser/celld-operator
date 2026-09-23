@@ -21,15 +21,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
-func seededPreviewFixture() (*fleet.CelldPreview, *fleet.CelldPreviewPool, *fleet.CelldFleet, *fleet.CelldStorageReservation) {
+func seededPreviewFixture() (*fleet.CelldPreview, *fleet.CelldFleet, *fleet.CelldFleet, *fleet.CelldStorageReservation) {
 	p := previewFixture()
 	p.CreationTimestamp = metav1.NewTime(time.Now().UTC().Truncate(time.Second))
 	p.Spec.Seed = &fleet.PreviewSeedSpec{Source: "production", Objects: []fleet.PreviewObjectReference{{Class: "Cart", ID: "cart-123"}, {Class: "Customer", ID: "customer-456"}}}
 	pool := previewPoolFixture(p)
-	pool.Spec.ServiceAccountName = "runtime"
+	pool.Spec.Previews.ServiceAccountName = "runtime"
 	source := fixture("source", "production-source", "Bucket")
 	source.Namespace = "production"
-	pool.Spec.Seeding = &fleet.PreviewSeedingSpec{Executor: "celld-snapshot-v1", Sources: []fleet.PreviewSeedSource{{Name: "production", FleetRef: fleet.SeedFleetReference{Namespace: source.Namespace, Name: source.Name, UID: string(source.UID)}}}}
+	pool.Spec.Previews.Seeding = &fleet.PreviewSeedingSpec{Executor: "celld-snapshot-v1", Sources: []fleet.PreviewSeedSource{{Name: "production", FleetRef: fleet.SeedFleetReference{Namespace: source.Namespace, Name: source.Name, UID: string(source.UID)}}}}
 	res := &fleet.CelldStorageReservation{Name: reservationName(source), Spec: fleetReservationSpec(source)}
 	return p, pool, source, res
 }
@@ -37,7 +37,7 @@ func seededPreviewFixture() (*fleet.CelldPreview, *fleet.CelldPreviewPool, *flee
 func seededSetup(t *testing.T) (*PreviewReconciler, *Reconciler, *fleet.CelldPreview) {
 	t.Helper()
 	p, pool, source, res := seededPreviewFixture()
-	c := fake.NewClientBuilder().WithScheme(envtestScheme(t)).WithStatusSubresource(&fleet.CelldPreview{}, &fleet.CelldFleet{}, &fleet.CelldPreviewSeed{}).
+	c := fake.NewClientBuilder().WithScheme(envtestScheme(t)).WithStatusSubresource(&fleet.CelldPreview{}, &fleet.CelldFleet{}, &fleet.CelldStorageReservation{}).
 		WithObjects(p, pool, source, res, &corev1.ServiceAccount{Name: "runtime", Namespace: p.Namespace}).WithInterceptorFuncs(interceptor.Funcs{Create: func(ctx context.Context, c client.WithWatch, o client.Object, opts ...client.CreateOption) error {
 		if o.GetUID() == "" {
 			o.SetUID(types.UID("created-" + o.GetName()))
@@ -47,20 +47,20 @@ func seededSetup(t *testing.T) (*PreviewReconciler, *Reconciler, *fleet.CelldPre
 	return &PreviewReconciler{Client: c}, &Reconciler{Client: c, NetworkPolicyEnforced: true, Options: Options{OperatorNamespace: "celld-system", LauncherImage: fixtureLauncher}}, p
 }
 
-func getSeedAndFleet(t *testing.T, c client.Client, p *fleet.CelldPreview) (*fleet.CelldPreviewSeed, *fleet.CelldFleet) {
+func getSeedAndFleet(t *testing.T, c client.Client, p *fleet.CelldPreview) (*fleet.CelldStorageReservation, *fleet.CelldFleet) {
 	t.Helper()
-	s := &fleet.CelldPreviewSeed{}
 	f := &fleet.CelldFleet{}
-	if err := c.Get(t.Context(), client.ObjectKey{Namespace: p.Namespace, Name: seedName(p)}, s); err != nil {
+	if err := c.Get(t.Context(), client.ObjectKey{Namespace: p.Namespace, Name: previewName(p)}, f); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Get(t.Context(), client.ObjectKey{Namespace: p.Namespace, Name: previewName(p)}, f); err != nil {
+	s, err := ensureSeedReservation(t.Context(), c, f)
+	if err != nil {
 		t.Fatal(err)
 	}
 	return s, f
 }
 
-func completeSeed(t *testing.T, c client.Client, s *fleet.CelldPreviewSeed, f *fleet.CelldFleet) {
+func completeSeed(t *testing.T, c client.Client, s *fleet.CelldStorageReservation, f *fleet.CelldFleet) {
 	t.Helper()
 	s.Status.Phase = "Running"
 	s.Status.ExecutorID = "execution-one"
@@ -69,7 +69,7 @@ func completeSeed(t *testing.T, c client.Client, s *fleet.CelldPreviewSeed, f *f
 		t.Fatal(err)
 	}
 	s.Status.Manifest = &fleet.PreviewSnapshotManifest{}
-	for _, o := range s.Spec.Request.Selection.Objects {
+	for _, o := range s.Spec.Initialization.Selection.Objects {
 		s.Status.Manifest.Objects = append(s.Status.Manifest.Objects, fleet.PreviewObjectSnapshot{PreviewObjectReference: o, SnapshotID: "snapshot-" + o.ID, SourceVersion: "tx-42", Digest: strings.Repeat("a", 64)})
 	}
 	if err := c.Status().Update(t.Context(), s); err != nil {
@@ -109,21 +109,21 @@ func assertSeedGated(t *testing.T, r *Reconciler, f *fleet.CelldFleet) {
 func TestPreviewSeedGatesAllObjectsAndRetainsReceipt(t *testing.T) {
 	pr, fr, p := seededSetup(t)
 	got := previewReconcile(t, pr, p)
-	if got.Status.Phase != "Initializing" || got.Status.SeedName == "" || got.Status.URL == "" {
+	if got.Status.Phase != "Initializing" || got.Status.SeedReservation == "" || got.Status.URL == "" {
 		t.Fatalf("missing initialization status: %+v", got.Status)
 	}
 	s, f := getSeedAndFleet(t, pr.Client, p)
-	if len(s.OwnerReferences) != 0 || s.Spec.Request.Selection.Alarms != "Clear" || len(s.Spec.Request.Selection.Objects) != 2 || f.Spec.Storage.Initialization.UID != string(s.UID) {
+	if len(s.OwnerReferences) != 0 || s.Spec.Initialization.Selection.Alarms != "Clear" || len(s.Spec.Initialization.Selection.Objects) != 2 || f.Annotations[seedReservationCreated] != string(s.UID) {
 		t.Fatal("seed request not retained/bound")
 	}
 	assertSeedGated(t, fr, f)
 	completeSeed(t, pr.Client, s, f)
 	// Corrupt completions bypassing admission must also fail closed at runtime.
-	for _, mutate := range []func(*fleet.CelldPreviewSeed){
-		func(s *fleet.CelldPreviewSeed) { s.Status.Manifest.Objects = s.Status.Manifest.Objects[:1] },
-		func(s *fleet.CelldPreviewSeed) { s.Status.Manifest.Objects[1] = s.Status.Manifest.Objects[0] },
-		func(s *fleet.CelldPreviewSeed) { s.Status.TargetFleetUID = "other" },
-		func(s *fleet.CelldPreviewSeed) { s.Status.Manifest.Objects[0].Digest = "bad" },
+	for _, mutate := range []func(*fleet.CelldStorageReservation){
+		func(s *fleet.CelldStorageReservation) { s.Status.Manifest.Objects = s.Status.Manifest.Objects[:1] },
+		func(s *fleet.CelldStorageReservation) { s.Status.Manifest.Objects[1] = s.Status.Manifest.Objects[0] },
+		func(s *fleet.CelldStorageReservation) { s.Status.TargetFleetUID = "other" },
+		func(s *fleet.CelldStorageReservation) { s.Status.Manifest.Objects[0].Digest = "bad" },
 	} {
 		broken := s.DeepCopy()
 		mutate(broken)
@@ -146,7 +146,6 @@ func TestPreviewSeedGatesAllObjectsAndRetainsReceipt(t *testing.T) {
 	if !seedReceiptReady(f, res) {
 		t.Fatal("completion receipt not persisted")
 	}
-	workloadUID := workload.UID
 	// Lost projection does not reinitialize; a code revision keeps the same seed.
 	got = previewReconcile(t, pr, p)
 	got.Spec.Revision = "another-commit"
@@ -164,15 +163,13 @@ func TestPreviewSeedGatesAllObjectsAndRetainsReceipt(t *testing.T) {
 	if err := fr.Delete(t.Context(), s); err != nil {
 		t.Fatal(err)
 	}
-	// Fleet lifecycle keeps the durable completion even if the retained request is lost.
-	reconcile(t, fr, f)
-	if err := fr.Get(t.Context(), client.ObjectKeyFromObject(f), workload); err != nil || workload.UID != workloadUID {
-		t.Fatal("completed fleet recreated after seed loss")
+	// Loss of the durable reservation must never recreate its initialization.
+	blocked := reconcile(t, fr, f)
+	reason(t, blocked, "SeedReservationBlocked")
+	if err := fr.Get(t.Context(), client.ObjectKeyFromObject(s), &fleet.CelldStorageReservation{}); !apierrors.IsNotFound(err) {
+		t.Fatal("lost reservation recreated")
 	}
-	got = previewReconcile(t, pr, p)
-	if got.Status.Conditions[0].Reason != "SeedBlocked" {
-		t.Fatal("lost request silently recreated")
-	}
+
 }
 
 func TestPreviewSeedAuthorizationAndReplacement(t *testing.T) {
@@ -210,18 +207,20 @@ func TestPreviewSeedAuthorizationAndReplacement(t *testing.T) {
 			if got.Status.Phase != "Blocked" {
 				t.Fatal("unauthorized/invalid clone admitted")
 			}
-			seeds := &fleet.CelldPreviewSeedList{}
+			seeds := &fleet.CelldStorageReservationList{}
 			if err := pr.List(t.Context(), seeds); err != nil {
 				t.Fatal(err)
 			}
-			if len(seeds.Items) != 0 {
-				t.Fatal("unauthorized seed created")
+			for _, res := range seeds.Items {
+				if res.Spec.Initialization != nil {
+					t.Fatal("unauthorized seed created")
+				}
 			}
 		})
 	}
-	pr, _, p := seededSetup(t)
+	pr, fr, p := seededSetup(t)
 	previewReconcile(t, pr, p)
-	s, _ := getSeedAndFleet(t, pr.Client, p)
+	s, f := getSeedAndFleet(t, pr.Client, p)
 	if err := pr.Delete(t.Context(), s); err != nil {
 		t.Fatal(err)
 	}
@@ -230,10 +229,8 @@ func TestPreviewSeedAuthorizationAndReplacement(t *testing.T) {
 	if err := pr.Create(t.Context(), s); err != nil {
 		t.Fatal(err)
 	}
-	got := previewReconcile(t, pr, p)
-	if got.Status.Phase != "Blocked" {
-		t.Fatal("replacement seed adopted")
-	}
+	got := reconcile(t, fr, f)
+	reason(t, got, "SeedReservationBlocked")
 }
 
 func TestPreviewSeedCancellation(t *testing.T) {
@@ -244,7 +241,7 @@ func TestPreviewSeedCancellation(t *testing.T) {
 			s, f := getSeedAndFleet(t, pr.Client, p)
 			assertSeedGated(t, fr, f)
 			if running {
-				s.Status = fleet.CelldPreviewSeedStatus{Phase: "Running", ExecutorID: "execution-one", TargetFleetUID: string(f.UID)}
+				s.Status = fleet.PreviewSeedStatus{Phase: "Running", ExecutorID: "execution-one", TargetFleetUID: string(f.UID)}
 				if err := pr.Status().Update(t.Context(), s); err != nil {
 					t.Fatal(err)
 				}
@@ -254,7 +251,7 @@ func TestPreviewSeedCancellation(t *testing.T) {
 			if err := pr.Get(t.Context(), client.ObjectKeyFromObject(s), s); err != nil {
 				t.Fatal(err)
 			}
-			if !s.Spec.Canceled {
+			if !s.Status.Canceled {
 				t.Fatal("cancellation not persisted")
 			}
 			if running {
@@ -291,24 +288,7 @@ func TestPreviewSeedCancellation(t *testing.T) {
 	}
 }
 
-func TestPreviewSeedLostCreationResponse(t *testing.T) {
-	pr, _, p := seededSetup(t)
-	base := pr.Client
-	pr.Client = interceptor.NewClient(base.(client.WithWatch), interceptor.Funcs{Create: func(ctx context.Context, c client.WithWatch, o client.Object, opts ...client.CreateOption) error {
-		if _, ok := o.(*fleet.CelldPreviewSeed); ok {
-			return errors.New("unknown create outcome")
-		}
-		return c.Create(ctx, o, opts...)
-	}})
-	previewReconcile(t, pr, p)
-	pr.Client = base
-	got := previewReconcile(t, pr, p)
-	if got.Status.Phase != "Blocked" || !strings.Contains(got.Status.Conditions[0].Message, "creation intent") {
-		t.Fatal("ambiguous seed creation retried")
-	}
-}
-
-func envSeededPreview(t *testing.T) (client.Client, *fleet.CelldPreview, *fleet.CelldPreviewSeed, *fleet.CelldFleet) {
+func envSeededPreview(t *testing.T) (client.Client, *fleet.CelldPreview, *fleet.CelldStorageReservation, *fleet.CelldFleet) {
 	t.Helper()
 	c := envtestClient(t)
 	ns := &corev1.Namespace{GenerateName: "seed-preview-"}
@@ -329,8 +309,8 @@ func envSeededPreview(t *testing.T) (client.Client, *fleet.CelldPreview, *fleet.
 	// Each envtest run needs a distinct source bucket as well as target bucket.
 	pool.Namespace = ns.Name
 	pool.UID = ""
-	pool.Spec.Storage.Bucket = ns.Name + "-target"
-	pool.Spec.Seeding.Sources[0].FleetRef = fleet.SeedFleetReference{Namespace: source.Namespace, Name: source.Name, UID: string(source.UID)}
+	pool.Spec.Previews.Storage.Bucket = ns.Name + "-target"
+	pool.Spec.Previews.Seeding.Sources[0].FleetRef = fleet.SeedFleetReference{Namespace: source.Namespace, Name: source.Name, UID: string(source.UID)}
 	if err := c.Create(t.Context(), pool); err != nil {
 		t.Fatal(err)
 	}
@@ -392,10 +372,10 @@ func TestEnvtestPreviewSeedAdmissionAndCompletion(t *testing.T) {
 	fr := &Reconciler{Client: c, NetworkPolicyEnforced: true, Options: Options{OperatorNamespace: "celld-system", LauncherImage: fixtureLauncher}}
 	assertSeedGated(t, fr, f)
 	completeSeed(t, c, s, f)
-	for _, mutate := range []func(*fleet.CelldPreviewSeed){
-		func(s *fleet.CelldPreviewSeed) { s.Status.Manifest.Objects[0].SnapshotID = "new-snapshot" },
-		func(s *fleet.CelldPreviewSeed) { s.Status.Phase = "Running" },
-		func(s *fleet.CelldPreviewSeed) { s.Status = fleet.CelldPreviewSeedStatus{} },
+	for _, mutate := range []func(*fleet.CelldStorageReservation){
+		func(s *fleet.CelldStorageReservation) { s.Status.Manifest.Objects[0].SnapshotID = "new-snapshot" },
+		func(s *fleet.CelldStorageReservation) { s.Status.Phase = "Running" },
+		func(s *fleet.CelldStorageReservation) { s.Status = fleet.PreviewSeedStatus{} },
 	} {
 		changed := s.DeepCopy()
 		mutate(changed)
@@ -404,7 +384,7 @@ func TestEnvtestPreviewSeedAdmissionAndCompletion(t *testing.T) {
 		}
 	}
 	changed := s.DeepCopy()
-	changed.Spec.Request.Selection.Objects = changed.Spec.Request.Selection.Objects[:1]
+	changed.Spec.Initialization.Selection.Objects = changed.Spec.Initialization.Selection.Objects[:1]
 	if err := c.Update(t.Context(), changed); !apierrors.IsInvalid(err) {
 		t.Fatalf("seed request changed: %v", err)
 	}
@@ -422,7 +402,7 @@ func TestEnvtestPreviewSeedClaimCancellationCAS(t *testing.T) {
 	if err != nil || !stopped {
 		t.Fatalf("pending cancellation: %v", err)
 	}
-	stale.Status = fleet.CelldPreviewSeedStatus{Phase: "Running", TargetFleetUID: string(f.UID), ExecutorID: "late-worker"}
+	stale.Status = fleet.PreviewSeedStatus{Phase: "Running", TargetFleetUID: string(f.UID), ExecutorID: "late-worker"}
 	if err := c.Status().Update(t.Context(), stale); !apierrors.IsConflict(err) {
 		t.Fatalf("stale worker acquired canceled request: %v", err)
 	}
@@ -436,28 +416,28 @@ func TestEnvtestPreviewSeedClaimCancellationCAS(t *testing.T) {
 		t.Fatalf("canceled request resurrected: %v", err)
 	}
 	changed := s.DeepCopy()
-	changed.Spec.Canceled = false
-	if err := c.Update(t.Context(), changed); !apierrors.IsInvalid(err) {
+	changed.Status.Canceled = false
+	if err := c.Status().Update(t.Context(), changed); !apierrors.IsInvalid(err) {
 		t.Fatalf("cancellation reversed: %v", err)
 	}
 }
 
 func TestEnvtestPreviewSeedPinnedManifestAndRunningCancellation(t *testing.T) {
 	c, _, s, f := envSeededPreview(t)
-	s.Status = fleet.CelldPreviewSeedStatus{Phase: "Running", TargetFleetUID: string(f.UID), ExecutorID: "worker-one"}
+	s.Status = fleet.PreviewSeedStatus{Phase: "Running", TargetFleetUID: string(f.UID), ExecutorID: "worker-one"}
 	if err := c.Status().Update(t.Context(), s); err != nil {
 		t.Fatal(err)
 	}
-	s.Status.Manifest = &fleet.PreviewSnapshotManifest{Objects: []fleet.PreviewObjectSnapshot{{PreviewObjectReference: s.Spec.Request.Selection.Objects[0], SnapshotID: "snapshot", SourceVersion: "version", Digest: strings.Repeat("a", 64)}}}
+	s.Status.Manifest = &fleet.PreviewSnapshotManifest{Objects: []fleet.PreviewObjectSnapshot{{PreviewObjectReference: s.Spec.Initialization.Selection.Objects[0], SnapshotID: "snapshot", SourceVersion: "version", Digest: strings.Repeat("a", 64)}}}
 	if err := c.Status().Update(t.Context(), s); err != nil {
 		t.Fatal(err)
 	}
-	for _, mutate := range []func(*fleet.CelldPreviewSeed){
-		func(s *fleet.CelldPreviewSeed) { s.Status.Manifest = nil },
-		func(s *fleet.CelldPreviewSeed) { s.Status.Manifest.Objects[0].SnapshotID = "other" },
-		func(s *fleet.CelldPreviewSeed) { s.Status.TargetFleetUID = "other" },
-		func(s *fleet.CelldPreviewSeed) { s.Status.ExecutorID = "other" },
-		func(s *fleet.CelldPreviewSeed) { s.Status.Phase = "Pending" },
+	for _, mutate := range []func(*fleet.CelldStorageReservation){
+		func(s *fleet.CelldStorageReservation) { s.Status.Manifest = nil },
+		func(s *fleet.CelldStorageReservation) { s.Status.Manifest.Objects[0].SnapshotID = "other" },
+		func(s *fleet.CelldStorageReservation) { s.Status.TargetFleetUID = "other" },
+		func(s *fleet.CelldStorageReservation) { s.Status.ExecutorID = "other" },
+		func(s *fleet.CelldStorageReservation) { s.Status.Phase = "Pending" },
 	} {
 		changed := s.DeepCopy()
 		mutate(changed)
@@ -521,7 +501,10 @@ func TestPreviewSeedSurfacesProvisioningBlock(t *testing.T) {
 func TestPreviewSeedCancellationBeforeReservation(t *testing.T) {
 	pr, fr, p := seededSetup(t)
 	previewReconcile(t, pr, p)
-	_, f := getSeedAndFleet(t, pr.Client, p)
+	f := &fleet.CelldFleet{}
+	if err := pr.Get(t.Context(), client.ObjectKey{Namespace: p.Namespace, Name: previewName(p)}, f); err != nil {
+		t.Fatal(err)
+	}
 	pr.now = func() time.Time { return p.CreationTimestamp.Add(2 * time.Hour) }
 	previewReconcile(t, pr, p)
 	if _, err := fr.Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(f)}); err != nil {
@@ -543,27 +526,36 @@ func TestPreviewSeedCancellationBeforeReservation(t *testing.T) {
 	}
 }
 
-func TestPreviewSeedCreatedWithLostResponse(t *testing.T) {
-	pr, _, p := seededSetup(t)
-	base := pr.Client
-	pr.Client = interceptor.NewClient(base.(client.WithWatch), interceptor.Funcs{Create: func(ctx context.Context, c client.WithWatch, o client.Object, opts ...client.CreateOption) error {
-		if err := c.Create(ctx, o, opts...); err != nil {
-			return err
-		}
-		if _, ok := o.(*fleet.CelldPreviewSeed); ok {
-			return errors.New("lost accepted response")
-		}
-		return nil
-	}})
-	previewReconcile(t, pr, p)
-	pr.Client = base
-	got := previewReconcile(t, pr, p)
-	if got.Status.Phase != "Initializing" {
-		t.Fatalf("accepted request was not resumed: %+v", got.Status)
-	}
-	s, f := getSeedAndFleet(t, pr.Client, p)
-	if string(s.UID) != f.Spec.Storage.Initialization.UID || got.Annotations[previewSeedCreated] != string(s.UID) {
-		t.Fatal("lost response changed operation identity")
+func TestPreviewSeedReservationCreationUncertainty(t *testing.T) {
+	for _, accepted := range []bool{false, true} {
+		t.Run(map[bool]string{false: "absent", true: "accepted"}[accepted], func(t *testing.T) {
+			pr, fr, p := seededSetup(t)
+			previewReconcile(t, pr, p)
+			f := &fleet.CelldFleet{}
+			if err := pr.Get(t.Context(), client.ObjectKey{Namespace: p.Namespace, Name: previewName(p)}, f); err != nil {
+				t.Fatal(err)
+			}
+			base := fr.Client
+			fr.Client = interceptor.NewClient(base.(client.WithWatch), interceptor.Funcs{Create: func(ctx context.Context, c client.WithWatch, o client.Object, opts ...client.CreateOption) error {
+				if res, ok := o.(*fleet.CelldStorageReservation); ok && res.Spec.Initialization != nil {
+					if accepted {
+						if err := c.Create(ctx, o, opts...); err != nil {
+							return err
+						}
+					}
+					return errors.New("unknown create outcome")
+				}
+				return c.Create(ctx, o, opts...)
+			}})
+			reconcile(t, fr, f)
+			fr.Client = base
+			got := reconcile(t, fr, f)
+			if accepted {
+				reason(t, got, "SeedInitializing")
+			} else {
+				reason(t, got, "SeedReservationBlocked")
+			}
+		})
 	}
 }
 
@@ -586,8 +578,49 @@ func TestPreviewSeedReadyGateCannotShortcutDeletion(t *testing.T) {
 	if err := pr.Get(t.Context(), client.ObjectKeyFromObject(f), f); err != nil || len(f.Finalizers) == 0 {
 		t.Fatal("ready fleet lost safety finalizer")
 	}
+	res.UID = "replacement"
+	if seedReceiptReady(f, res) {
+		t.Fatal("replacement reservation opened startup gate")
+	}
 	res.Spec.FleetUID = "foreign"
 	if seedReceiptReady(f, res) {
 		t.Fatal("foreign reservation opened startup gate")
+	}
+}
+
+func TestPreviewSeedDefiniteRejectionCanRecover(t *testing.T) {
+	for _, child := range []bool{false, true} {
+		t.Run(map[bool]string{false: "reservation", true: "child"}[child], func(t *testing.T) {
+			pr, fr, p := seededSetup(t)
+			base := pr.Client
+			reject := interceptor.NewClient(base.(client.WithWatch), interceptor.Funcs{Create: func(ctx context.Context, c client.WithWatch, o client.Object, opts ...client.CreateOption) error {
+				_, isFleet := o.(*fleet.CelldFleet)
+				res, isReservation := o.(*fleet.CelldStorageReservation)
+				if (child && isFleet) || (!child && isReservation && res.Spec.Initialization != nil) {
+					return apierrors.NewForbidden(fleet.GroupVersion.WithResource("test").GroupResource(), o.GetName(), errors.New("rejected"))
+				}
+				return c.Create(ctx, o, opts...)
+			}})
+			if child {
+				pr.Client = reject
+				previewReconcile(t, pr, p)
+				pr.Client = base
+				pr.now = func() time.Time { return p.CreationTimestamp.Add(2 * time.Hour) }
+				got := previewReconcile(t, pr, p)
+				if got.Status.Phase != "Expired" {
+					t.Fatalf("rejected child stranded: %+v", got.Status)
+				}
+			} else {
+				previewReconcile(t, pr, p)
+				f := &fleet.CelldFleet{}
+				if err := pr.Get(t.Context(), client.ObjectKey{Namespace: p.Namespace, Name: previewName(p)}, f); err != nil {
+					t.Fatal(err)
+				}
+				fr.Client = reject
+				reason(t, reconcile(t, fr, f), "SeedReservationBlocked")
+				fr.Client = base
+				reason(t, reconcile(t, fr, f), "SeedInitializing")
+			}
+		})
 	}
 }

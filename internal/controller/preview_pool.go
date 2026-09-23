@@ -21,7 +21,7 @@ func storageEndpoint(s fleet.StorageSpec) string {
 }
 
 func fleetReservationSpec(f *fleet.CelldFleet) fleet.ReservationSpec {
-	return fleet.ReservationSpec{InitialReplicas: f.Spec.Replicas, Bucket: f.Spec.Storage.Bucket,
+	return fleet.ReservationSpec{Initialization: f.Spec.Storage.Initialization.DeepCopy(), InitialReplicas: f.Spec.Replicas, Bucket: f.Spec.Storage.Bucket,
 		Prefix: f.Spec.Storage.Prefix, Endpoint: storageEndpoint(f.Spec.Storage),
 		FleetNamespace: f.Namespace, FleetName: f.Name, FleetUID: string(f.UID), SpecHash: specHash(f)}
 }
@@ -29,15 +29,15 @@ func fleetReservationSpec(f *fleet.CelldFleet) fleet.ReservationSpec {
 // reservePreviewPool atomically claims the same root name used by a dedicated
 // fleet. Independent child reservations can then claim only disjoint single
 // segments. A list-before-create overlap check would race across controllers.
-func reservePreviewPool(ctx context.Context, c client.Client, p *fleet.CelldPreviewPool) error {
-	b, err := json.Marshal(p.Spec)
+func reservePreviewPool(ctx context.Context, c client.Client, p *fleet.CelldFleet) error {
+	b, err := json.Marshal(p.Spec.Previews)
 	if err != nil {
 		return err
 	}
-	want := fleet.ReservationSpec{OwnerKind: "CelldPreviewPool", Bucket: p.Spec.Storage.Bucket,
+	want := fleet.ReservationSpec{OwnerKind: "FleetPreviews", Bucket: p.Spec.Previews.Storage.Bucket,
 		FleetNamespace: p.Namespace, FleetName: p.Name, FleetUID: string(p.UID), SpecHash: digest(b)}
-	if p.Spec.Storage.Endpoint != nil {
-		want.Endpoint = p.Spec.Storage.Endpoint.URL
+	if p.Spec.Previews.Storage.Endpoint != nil {
+		want.Endpoint = p.Spec.Previews.Storage.Endpoint.URL
 	}
 	res := &fleet.CelldStorageReservation{Name: bucketReservationName(want.Bucket), Spec: want}
 	if err := c.Create(ctx, res); err != nil {
@@ -58,7 +58,7 @@ func reservePreviewPool(ctx context.Context, c client.Client, p *fleet.CelldPrev
 // or runtime is created. It deliberately needs no live pool object so deleting
 // configuration cannot obstruct an existing fleet's safe lifecycle.
 func verifySharedStorage(ctx context.Context, c client.Client, f *fleet.CelldFleet) error {
-	ref := f.Spec.Storage.PoolRef
+	ref := f.Spec.Storage.PreviewFleetRef
 	if ref == nil {
 		return nil
 	}
@@ -67,7 +67,7 @@ func verifySharedStorage(ctx context.Context, c client.Client, f *fleet.CelldFle
 		return fmt.Errorf("shared bucket reservation: %w", err)
 	}
 	s := res.Spec
-	if s.OwnerKind != "CelldPreviewPool" || s.Prefix != "" || s.Bucket != f.Spec.Storage.Bucket || s.Endpoint != storageEndpoint(f.Spec.Storage) || s.FleetNamespace != f.Namespace || s.FleetName != ref.Name || s.FleetUID != ref.UID || len(res.OwnerReferences) != 0 || !res.DeletionTimestamp.IsZero() {
+	if s.OwnerKind != "FleetPreviews" || s.Prefix != "" || s.Bucket != f.Spec.Storage.Bucket || s.Endpoint != storageEndpoint(f.Spec.Storage) || s.FleetNamespace != f.Namespace || s.FleetName != ref.Name || s.FleetUID != ref.UID || len(res.OwnerReferences) != 0 || !res.DeletionTimestamp.IsZero() {
 		return fmt.Errorf("shared bucket is not reserved to this pool UID, namespace and endpoint")
 	}
 	return nil

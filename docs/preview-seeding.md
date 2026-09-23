@@ -1,12 +1,13 @@
 # Preview state seeding
 
 A `CelldPreview` can request a one-time copy of multiple Durable Objects before
-its runtime starts. The operator authorizes the source, creates a retained
-`CelldPreviewSeed` request, reserves the destination prefix and gates workload
-creation and routing. A separate, trusted celld executor must capture and import
-the actual snapshots. **This repository implements the operator side only. No
-snapshot/import executor or `celld preview` CLI is bundled.** With no executor,
-a seeded preview stays `Initializing` and never starts a runtime.
+its runtime starts. The operator authorizes the source and stores the initialization
+request and executor result on the preview fleet's existing, retained
+`CelldStorageReservation`. **No additional pool or seed CRD is required.**
+
+This repository implements operator orchestration only. It includes neither a
+snapshot/import executor nor a `celld preview` CLI. With no executor, a seeded
+preview stays `Initializing` and never starts a runtime.
 
 ## Developer API
 
@@ -20,8 +21,8 @@ metadata:
   name: reproduce-checkout
   namespace: previews
 spec:
-  poolRef:
-    name: shared-previews
+  fleetRef:
+    name: development
   source: feature/checkout-fix
   revision: abc123
   ttlSeconds: 86400
@@ -37,120 +38,113 @@ spec:
         id: sku-789
 ```
 
-`seed.source` is a pool-approved alias, not an arbitrary fleet or bucket address.
-Selections contain 1–100 distinct class/ID pairs. IDs must be canonical runtime
-object IDs; a future CLI may resolve human-readable names before submitting the
-request. Preserve the class/binding mapping in the preview application so lookups
-reach those identities. Seeding is immutable, including its presence/absence;
-it cannot be added to a running preview or rerun by updating `revision`.
+`seed.source` is an administrator-approved alias, not an arbitrary fleet or bucket
+address. Selections contain 1–100 distinct class/ID pairs. IDs must be canonical
+runtime object IDs; a future CLI may resolve human-readable names first. Preserve
+the class/binding mapping in the preview application. Seeding, including its
+presence/absence, is fixed at creation. Updating `revision` never reseeds.
 
-Snapshots are consistent per object, not globally across multiple objects.
-Copy persisted SQLite/KV state only. Execution starts fresh: heaps, sockets,
-in-flight requests, production credentials and external service data are not
-part of the seed. `alarms: Clear` is the default; `Preserve` explicitly requests
-restoring scheduled work. The executor must implement these semantics before it
-can claim compatibility with this protocol.
+Snapshots are consistent per object, not globally across the selection. Copy
+persisted SQLite/KV state only. Heaps, sockets, in-flight requests, production
+credentials and external service data are excluded. `alarms: Clear` is the default;
+`Preserve` explicitly requests restoring scheduled work. The executor must
+implement these semantics before claiming compatibility with this protocol.
 
 ## Platform authorization
 
-Add this block when creating the otherwise unchanged
-[preview pool](../config/samples/preview-pool.yaml):
+Configure seeding under the existing parent fleet's `spec.previews`:
 
 ```yaml
 spec:
-  # Existing runtimeImage, storage, routing, etc.
-  seeding:
-    executor: celld-snapshot-v1
-    sources:
-      - name: production
-        fleetRef:
-          namespace: production
-          name: my-app
-          uid: replace-with-the-source-fleet-kubernetes-uid
+  previews:
+    # Existing preview runtimeImage, storage, routing, etc.
+    seeding:
+      executor: celld-snapshot-v1
+      sources:
+        - name: production
+          fleetRef:
+            namespace: production
+            name: my-app
+            uid: replace-with-the-source-fleet-kubernetes-uid
 ```
 
-The source UID is mandatory. A replaced source fleet never inherits this grant.
-The operator checks the live source UID and permanent storage reservation before
-creating the seed request. Pool configuration is immutable. Anyone allowed to
-create previews against this pool can request selected objects from these
-sources; use distinct pools/namespaces to separate data-access policies.
+See [the fleet configuration sample](../config/samples/fleet-previews.yaml).
+The exact source UID is mandatory: replacing a source name never transfers this
+grant. The controller checks the live source UID and permanent storage reservation
+before creating the child. The executor rechecks authority before exporting.
+Anyone allowed to create previews against this parent can select objects from
+these sources; use separate parent configurations/namespaces for different policies.
+The preview bucket must be separate from the parent's runtime bucket.
 
-Install all five CRDs and the updated controller/namespace RBAC. The operator
-can create/patch seed requests and cancel unclaimed requests through status.
-Developers should have no seed status, child fleet, or reservation write access.
-[Executor RBAC](../config/rbac/preview-seed-executor.yaml) is an optional example,
-not installed or bound automatically. Supply source/target storage access and
-private runtime connectivity separately to the trusted executor. The controller
-never reads or copies object-store credentials, snapshots or application data.
+Install the three CRDs (`CelldFleet`, `CelldPreview`, `CelldStorageReservation`)
+and updated operator RBAC. Developers must not have child-fleet, reservation or
+reservation-status write access. [Executor RBAC](../config/rbac/preview-seed-executor.yaml)
+is an optional, unbound example for a separately installed trusted executor.
+Reservations are cluster-scoped, so its status permission is also cluster-scoped;
+restrict `resourceNames` for a fixed set where appropriate. Status access cannot
+change immutable requests or operator-owned lifecycle/startup annotations.
+Supply source/target storage access and private connectivity separately. The
+operator never reads or copies object-store credentials or snapshot bytes.
 
-## Reconciliation and startup
+## Durable initialization and startup
 
-The operator creates one retained `CelldPreviewSeed` per preview UID. Its immutable
-request contains the executor name, exact source fleet identity, object selection,
-alarm policy, target preview UID, target fleet name, pool UID, destination URL and
-creation-based expiry deadline. A creation-intent marker prevents ambiguous
-failures or lost requests from producing a replacement operation.
+The child's immutable `storage.initialization` contains the executor name, source
+fleet identity, selection, alarm policy, target preview UID/name, target fleet name,
+parent fleet UID, destination URL and creation-based deadline. The controller copies
+this request into the destination reservation's immutable `spec.initialization`,
+alongside the actual target fleet UID and configuration hash. No second operation
+resource is created. Preview status is a projection of this retained record:
+`status.seedReservation` identifies it and `status.seedPhase` reports progress.
 
-The child fleet carries an immutable `storage.initialization` reference to the
-seed request's exact name and UID. It acquires its permanent prefix reservation
-before the executor can write. It creates no runtime, Service or public route
-until the gate opens. Seeding does not use replica scaling to zero, so it does not
-bypass the normal fleet lifecycle contract.
+Before creating the reservation, the operator records intent on the child and then
+pins the reservation UID. An ambiguous creation with no surviving record blocks;
+an accepted creation whose response was lost can be resumed with the same UID.
+A lost or replaced reservation is never silently recreated. Preview creation has
+a corresponding child-creation intent. Changing code does not change either identity.
 
-Only a successful result for the exact target fleet UID, containing snapshots for
-**every** selected object and no extra/duplicate entries, can open the gate. The
-operator stores the seed UID and snapshot-manifest digest on the permanent
-reservation using resource-version concurrency control before provisioning.
-This receipt survives ordinary preview status loss and manager restarts. A new
-application revision never reseeds the destination. A missing/replaced seed
-request is reported as blocked, not recreated; an already-initialized fleet's
-own lifecycle can still use its retained receipt.
+The reservation's status contains `phase`, `canceled`, `executorID`, `targetFleetUID`,
+`manifest` and a bounded `message`. API admission pins execution identities and
+snapshot manifests, freezes terminal results, prevents cancellation reversal and
+requires a prior Running claim for success. The operator additionally checks that
+success covers every selected object exactly once and matches the child UID.
 
-`status.seedName` and `status.seedPhase` expose the operation. Preview phase stays
-`Initializing` while waiting, becomes `Blocked` on terminal seed failure, and
-continues normal provisioning after success. As for empty previews, `Ready`
-confirms infrastructure only; the CLI must also upload and verify application
-code. The CLI must not mutate the target object state while initialization runs.
+Before provisioning, the operator records the preview UID and canonical manifest
+digest in the reservation's `celld.eric.dev/seed-gate` annotation using
+resourceVersion concurrency control. No runtime, Service or route is created
+before this gate opens. The existing fleet journal governs normal startup and
+shutdown after that point. Preview status loss and application revisions do not
+reinitialize the destination.
 
 ## Executor protocol
 
-The external executor is a trusted storage writer. Status is a durable work
-record with admission-enforced immutable claims, snapshot manifests and terminal
-results; the preview's status is only a projection. A conforming executor must:
+A conforming executor must:
 
-1. Watch requests matching its configured `spec.request.executor`. Before claiming,
-   verify the request is uncanceled and unexpired, the preview exists and is not
-   deleting, and the child fleet's controller owner and initialization reference
-   match the request's preview UID and seed UID. Resolve the target namespace
-   from the seed resource's namespace. Confirm the source UID/configuration and
-   storage authority again; never trust a source name alone.
-2. Wait for the target prefix reservation to bind the actual child fleet UID,
-   immutable configuration, bucket, prefix and endpoint. Verify the pool's root
-   reservation too. Require the destination seed gate to be unset, with no
-   workload creation intent or lifecycle journal. Do not write without this
-   reservation, even though the target URL is already visible in preview status.
-3. Atomically claim `status.phase: Running`, `status.executorID` and
-   `status.targetFleetUID` using the observed resourceVersion. Exactly one worker
-   may claim Pending/unset status. A competing worker must not process a Running
-   request. The same durable execution may resume only after proving exclusion
-   of its former writer; generic overlapping Job retries are insufficient.
-4. Capture consistent, durable snapshots of all selected objects. Publish one
-   complete `status.manifest` before importing any object. Each entry includes
-   `class`, `id`, opaque immutable `snapshotID`, committed `sourceVersion` and the
-   exported payload's SHA-256 `digest`. Persist snapshot bytes independently of
-   worker lifetime. Admission forbids changing or removing the pinned manifest,
-   including before completion. Capture recovery must use the request UID as an
-   idempotency key so an uncertain capture response cannot select different data.
-5. Import using those pinned snapshots, the request UID as an idempotency key,
-   and the selected alarm policy. Validate snapshot hashes and source/target format
-   compatibility. Retries must resume partial imports into this reserved, unopened
-   destination. Do not copy source leases, node ownership, replication journals or
-   process metadata. Finish and stop **all** writers before setting `Succeeded`.
-6. Observe cancellation/deadline throughout capture/import. Stop all writes and
-   prevent delayed retries before reporting `Canceled` or terminal `Failed`.
-   Never report success after cancellation. Retain the manifest for diagnosis.
+1. Watch cluster-scoped reservations with `spec.initialization.executor` matching
+   its implementation. Resolve the destination namespace from `spec.fleetNamespace`.
+   Verify the live preview and child exist and are not deleting; check preview
+   ownership, parent storage authority, the request, pinned reservation UID,
+   fleet configuration and destination prefix. Require an unset seed gate and
+   no workload creation intent or lifecycle journal. Recheck source authority.
+2. Before any I/O, atomically claim `status.phase: Running`, `status.executorID`
+   and `status.targetFleetUID` using the observed resourceVersion. Require an
+   uncanceled, unexpired request in Pending/unset phase. A competing worker must
+   not process Running work. Resume only after proving exclusion of a former
+   writer; generic overlapping Job retries are insufficient.
+3. Capture durable, consistent snapshots of every selected object. Publish the
+   complete `status.manifest` before importing. Each entry contains `class`, `id`,
+   immutable `snapshotID`, committed `sourceVersion` and payload SHA-256 `digest`.
+   Persist snapshot bytes independently of worker lifetime. Use the reservation
+   UID as an idempotency key so an uncertain capture cannot select different data.
+4. Validate snapshot hashes and source/target format compatibility. Import only
+   those pinned snapshots using the reservation UID as the idempotency key and
+   the requested alarm policy. Resume partial imports into the unopened destination.
+   Never copy source leases, node ownership, replication journals or process metadata.
+   Finish and stop all writers before setting `Succeeded`.
+5. Observe `status.canceled` and the deadline throughout capture/import. Stop writes
+   and prevent delayed retries before acknowledging `Canceled` or terminal `Failed`.
+   Never report success after cancellation. Preserve the manifest for diagnosis.
 
-Example terminal result (abbreviated to one object for illustration):
+Example terminal reservation status (one object shown for brevity):
 
 ```yaml
 status:
@@ -166,30 +160,26 @@ status:
         digest: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 ```
 
-The operator checks identities and manifest completeness; it does not independently
-verify snapshot bytes or turn a worker's status into a storage-level proof. The
-executor's snapshot consistency, import idempotency and exclusion guarantees need
-runtime implementation and qualification before enabling real cloning.
+The operator validates identity and completeness, not snapshot bytes or storage-level
+proof. Runtime consistency, import idempotency and writer exclusion still require
+implementation and qualification. `Ready` confirms infrastructure only; callers
+must deploy and verify application code. Do not mutate destination object state
+while initialization runs.
 
-## Cancellation, failures and retention
+## Cancellation and retention
 
-TTL includes initialization time and is not renewed by deployments. Expiry or
-preview deletion requests cancellation before deleting the child. An unclaimed
-request can be atomically canceled by the operator. A Running request must be
-acknowledged by its executor; executor unavailability leaves the preview Deleting.
-An optimistic-concurrency race between claim and cancellation has one winner.
+TTL includes initialization time. Expiry or deletion cancels initialization before
+deleting the child. An unclaimed request can be atomically canceled by the operator.
+A Running request must be acknowledged by its executor; an unavailable executor
+leaves the preview Deleting. Claim and cancellation use the same resourceVersion.
 
-A never-started child can release its finalizer only after the executor is terminal,
-a permanent canceled startup gate is recorded, and no workload creation intent,
-lifecycle journal or workload exists. Startup and cancellation compete on the
-same reservation resourceVersion. Once the ready gate opens, ordinary fleet
-shutdown safety applies, including existing incomplete-provisioning recovery
-constraints. Deleting the child directly also requests seed cancellation.
+A never-started child releases its finalizer only after the executor is terminal,
+a permanent canceled gate is recorded, and no workload creation intent, lifecycle
+journal or workload exists. Startup and cancellation compete on the same retained
+reservation. If startup wins, normal fleet shutdown safety applies. Direct child
+deletion also cancels initialization.
 
-Failed, canceled and partial seed data is retained in the preview's exclusive
-prefix. Seed requests and their manifests have no owner references and are
-retained separately from the preview. Namespace deletion remains an administrator
-operation and can remove namespaced records; reservations remain cluster-scoped.
-Never delete/recreate an operation, clear intent annotations, or reset terminal
-status to retry. Create a new preview instead. No snapshot or object-data garbage
-collector is included.
+The cluster-scoped destination reservation, manifest and partial object data are
+retained after preview/child deletion. Lost records block recovery; never clear
+intent annotations or reset terminal state to retry. Create another preview.
+No snapshot or object-data garbage collector is included.

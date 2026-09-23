@@ -82,8 +82,6 @@ export default defineConfig({
                     { label: 'Supported versions', slug: 'reference/compatibility' },
                     { label: 'Conditions and reasons', slug: 'reference/conditions' },
                     { label: 'CelldPreview API', slug: 'api/celldpreview' },
-                    { label: 'CelldPreviewPool API', slug: 'api/celldpreviewpool' },
-                    { label: 'CelldPreviewSeed API', slug: 'api/celldpreviewseed' },
                     { label: 'CelldFleet API', slug: 'api/celldfleet' },
                     { label: 'Helm values', slug: 'api/helm-values' },
                     { label: 'Sample manifests', slug: 'api/samples' },

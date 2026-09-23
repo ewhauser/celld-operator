@@ -5,8 +5,8 @@ metadata:
   name: pr-42
   namespace: previews
 spec:
-  poolRef:
-    name: shared-previews
+  fleetRef:
+    name: development
   source: feature/login
   revision: replace-with-commit-sha
   ttlSeconds: 86400

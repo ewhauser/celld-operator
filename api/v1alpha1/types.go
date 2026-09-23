@@ -11,7 +11,7 @@ import (
 
 var GroupVersion = schema.GroupVersion{Group: "celld.eric.dev", Version: "v1alpha1"}
 var SchemeBuilder = runtime.NewSchemeBuilder(func(s *runtime.Scheme) error {
-	s.AddKnownTypes(GroupVersion, &CelldFleet{}, &CelldFleetList{}, &CelldPreview{}, &CelldPreviewList{}, &CelldPreviewPool{}, &CelldPreviewPoolList{}, &CelldPreviewSeed{}, &CelldPreviewSeedList{}, &CelldStorageReservation{}, &CelldStorageReservationList{})
+	s.AddKnownTypes(GroupVersion, &CelldFleet{}, &CelldFleetList{}, &CelldPreview{}, &CelldPreviewList{}, &CelldStorageReservation{}, &CelldStorageReservationList{})
 	metav1.AddToGroupVersion(s, GroupVersion)
 	return nil
 })
@@ -28,11 +28,13 @@ var AddToScheme = SchemeBuilder.AddToScheme
 type CelldFleet struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	// +kubebuilder:validation:XValidation:rule="self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement && has(self.execution) == has(oldSelf.execution) && (!has(self.execution) || self.execution == oldSelf.execution) && has(self.lifecycle) == has(oldSelf.lifecycle) && (!has(self.lifecycle) || self.lifecycle == oldSelf.lifecycle) && has(self.env) == has(oldSelf.env) && (!has(self.env) || self.env == oldSelf.env) && has(self.telemetry) == has(oldSelf.telemetry) && (!has(self.telemetry) || self.telemetry == oldSelf.telemetry) && self.bucketWorkload == oldSelf.bucketWorkload",message="only replicas, capacity, runtimeImage, maintenance and routing may change; layout, execution, lifecycle, env and telemetry are fixed at creation"
+	// +kubebuilder:validation:XValidation:rule="!has(oldSelf.previews) || (has(self.previews) && self.previews == oldSelf.previews)",message="preview configuration cannot change once enabled"
+	// +kubebuilder:validation:XValidation:rule="self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement && has(self.execution) == has(oldSelf.execution) && (!has(self.execution) || self.execution == oldSelf.execution) && has(self.lifecycle) == has(oldSelf.lifecycle) && (!has(self.lifecycle) || self.lifecycle == oldSelf.lifecycle) && has(self.env) == has(oldSelf.env) && (!has(self.env) || self.env == oldSelf.env) && has(self.telemetry) == has(oldSelf.telemetry) && (!has(self.telemetry) || self.telemetry == oldSelf.telemetry) && self.bucketWorkload == oldSelf.bucketWorkload",message="runtime storage, layout, placement, execution, lifecycle, env and telemetry are fixed at creation"
 	Spec   CelldFleetSpec   `json:"spec"`
 	Status CelldFleetStatus `json:"status,omitempty"`
 }
 
+// +kubebuilder:validation:XValidation:rule="!has(self.previews) || self.previews.storage.bucket != self.storage.bucket",message="preview storage must use a separate bucket from the parent runtime"
 // +kubebuilder:validation:XValidation:rule="self.profile == 'Bucket' || (!has(self.storage.prefix) && !has(self.storage.scratch))",message="shared prefixes and scratch overrides require Bucket profile"
 // +kubebuilder:validation:XValidation:rule="self.bucketWorkload != 'Ordered' || self.profile == 'Bucket'",message="Ordered bucketWorkload requires Bucket profile"
 // +kubebuilder:validation:XValidation:rule="self.placement.azCount == size(self.placement.zones)",message="azCount must equal the zones count"
@@ -41,6 +43,9 @@ type CelldFleet struct {
 // +kubebuilder:validation:XValidation:rule="self.placement.zones.all(z, z.startsWith(self.storage.region) && size(z) == size(self.storage.region) + 1 && z.matches('.*[a-z]$'))",message="zones must be standard AZ names in storage.region"
 // +kubebuilder:validation:XValidation:rule="!has(self.capacity) || self.capacity.minReplicas >= self.placement.azCount",message="capacity minimum must cover requested AZs"
 type CelldFleetSpec struct {
+	// Optional immutable configuration for previews referencing this fleet.
+	// +optional
+	Previews *FleetPreviewsSpec `json:"previews,omitempty"`
 	// Bucket workload layout. Defaults to Deployment; Ordered uses deterministic ordinal removal. Layout is immutable.
 	// +kubebuilder:default=Deployment
 	// +kubebuilder:validation:Enum=Deployment;Ordered
@@ -283,13 +288,13 @@ type MaintenanceSpec struct {
 
 // One entire bucket is reserved, including all runtime metadata and peer keys.
 // Shared pools reserve the bucket before fleets claim disjoint single-segment prefixes.
-// +kubebuilder:validation:XValidation:rule="has(self.prefix) == has(self.poolRef)",message="prefix and poolRef must be supplied together"
-// +kubebuilder:validation:XValidation:rule="!has(self.initialization) || has(self.poolRef)",message="initialization requires a pool reservation"
-// +kubebuilder:validation:XValidation:rule="!has(self.endpoint) || has(self.poolRef)",message="custom endpoints require a pool reservation"
+// +kubebuilder:validation:XValidation:rule="has(self.prefix) == has(self.previewFleetRef)",message="prefix and previewFleetRef must be supplied together"
+// +kubebuilder:validation:XValidation:rule="!has(self.initialization) || has(self.previewFleetRef)",message="initialization requires a pool reservation"
+// +kubebuilder:validation:XValidation:rule="!has(self.endpoint) || has(self.previewFleetRef)",message="custom endpoints require a pool reservation"
 type StorageSpec struct {
 	// One-time startup gate, bound to an operator-owned seed request.
 	// +optional
-	Initialization *SeedReference `json:"initialization,omitempty"`
+	Initialization *PreviewSeedRequest `json:"initialization,omitempty"`
 	// Single segment within a pool-owned bucket. Nested/overlapping prefixes are forbidden.
 	// +optional
 	// +kubebuilder:validation:MinLength=1
@@ -298,7 +303,7 @@ type StorageSpec struct {
 	Prefix string `json:"prefix,omitempty"`
 	// Pool identity, permanently bound by the whole-bucket reservation.
 	// +optional
-	PoolRef *StoragePoolReference `json:"poolRef,omitempty"`
+	PreviewFleetRef *StorageFleetReference `json:"previewFleetRef,omitempty"`
 	// +optional
 	Endpoint *ObjectStoreEndpoint `json:"endpoint,omitempty"`
 	// Disk-backed emptyDir request and limit; overrides sizeGiB only for Bucket.
@@ -432,6 +437,19 @@ type CelldFleetList struct {
 	Items           []CelldFleet `json:"items"`
 }
 
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.status) || !has(oldSelf.status.phase) || !(oldSelf.status.phase in ['Succeeded', 'Failed', 'Canceled']) || (has(self.status) && self.status == oldSelf.status)",message="terminal seed results cannot change"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.status) || !has(oldSelf.status.manifest) || (has(self.status) && has(self.status.manifest) && self.status.manifest == oldSelf.status.manifest)",message="captured snapshot manifest cannot change or be removed"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.status) || !has(oldSelf.status.targetFleetUID) || (has(self.status) && has(self.status.targetFleetUID) && self.status.targetFleetUID == oldSelf.status.targetFleetUID)",message="executor target identity cannot change"
+// +kubebuilder:validation:XValidation:rule="!has(self.status) || !has(self.status.phase) || self.status.phase != 'Running' || ((!has(self.status.canceled) || !self.status.canceled) && (!has(oldSelf.status) || !has(oldSelf.status.phase) || oldSelf.status.phase in ['Pending', 'Running'])) || (has(oldSelf.status) && has(oldSelf.status.phase) && oldSelf.status.phase == 'Running')",message="canceled seed requests cannot be claimed"
+// +kubebuilder:validation:XValidation:rule="!has(self.status) || !has(self.status.phase) || self.status.phase != 'Succeeded' || ((!has(self.status.canceled) || !self.status.canceled) && has(self.status.manifest) && has(self.status.targetFleetUID))",message="success requires an uncanceled request, target identity and manifest"
+// +kubebuilder:validation:XValidation:rule="!has(self.status) || !has(self.status.phase) || !(self.status.phase in ['Running', 'Succeeded']) || (has(self.status.executorID) && has(self.status.targetFleetUID))",message="executor claim requires execution and target identities"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.status) || !has(oldSelf.status.executorID) || (has(self.status) && has(self.status.executorID) && self.status.executorID == oldSelf.status.executorID)",message="executor identity cannot change"
+// +kubebuilder:validation:XValidation:rule="!has(self.status) || !has(self.status.phase) || self.status.phase != 'Succeeded' || (has(oldSelf.status) && has(oldSelf.status.phase) && oldSelf.status.phase in ['Running', 'Succeeded'])",message="success requires a previously claimed execution"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.status) || !has(oldSelf.status.phase) || oldSelf.status.phase != 'Running' || (has(self.status) && has(self.status.phase) && self.status.phase != 'Pending')",message="claimed requests cannot return to pending"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.status) || !has(oldSelf.status.canceled) || !oldSelf.status.canceled || (has(self.status) && has(self.status.canceled) && self.status.canceled)",message="seed cancellation cannot be removed or reversed"
+// +kubebuilder:validation:XValidation:rule="!has(self.status) || !has(self.status.targetFleetUID) || self.status.targetFleetUID == self.spec.fleetUID",message="executor must claim this reservation's fleet UID"
+// +kubebuilder:subresource:status
+// +kubebuilder:validation:XValidation:rule="!has(self.status) || !has(self.status.phase) || has(self.spec.initialization)",message="seed status requires an initialization request"
 // CelldStorageReservation is a durable, cluster-wide tombstone. Never garbage collected.
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Cluster
@@ -439,12 +457,16 @@ type CelldStorageReservation struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="storage reservations cannot be transferred or changed"
-	Spec ReservationSpec `json:"spec"`
+	Spec   ReservationSpec   `json:"spec"`
+	Status PreviewSeedStatus `json:"status,omitempty"`
 }
 type ReservationSpec struct {
+	// Immutable seed request for this exclusive preview destination.
+	// +optional
+	Initialization *PreviewSeedRequest `json:"initialization,omitempty"`
 	// Empty means CelldFleet for existing reservations. Pool reservations own the whole bucket.
 	// +optional
-	// +kubebuilder:validation:Enum=CelldPreviewPool
+	// +kubebuilder:validation:Enum=FleetPreviews
 	OwnerKind string `json:"ownerKind,omitempty"`
 	// Empty reserves the whole bucket. Nonempty reserves exactly one path segment.
 	// +optional

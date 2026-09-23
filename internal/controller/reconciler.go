@@ -52,6 +52,7 @@ func specHash(f *fleet.CelldFleet) string {
 	if spec.BucketWorkload == "Deployment" {
 		spec.BucketWorkload = ""
 	}
+	spec.Previews = nil
 	spec.Capacity = nil
 	spec.Routing = nil
 	spec.RuntimeImage = ""
@@ -139,7 +140,13 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 	}
 	reservation := &fleet.CelldStorageReservation{Name: reservationName(f), Spec: fleetReservationSpec(f)}
 	expected := reservation.Spec
-	if err := r.Create(ctx, reservation); err != nil {
+	if f.Spec.Storage.Initialization != nil {
+		var err error
+		reservation, err = ensureSeedReservation(ctx, r.Client, f)
+		if err != nil {
+			return r.report(ctx, f, nil, "SeedReservationBlocked", err.Error(), false)
+		}
+	} else if err := r.Create(ctx, reservation); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
 			return ctrl.Result{}, err
 		}
@@ -397,9 +404,12 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 		r.Recorder = mgr.GetEventRecorder("celld-operator")
 	}
 	return ctrl.NewControllerManagedBy(mgr).For(&fleet.CelldFleet{}).
-		Watches(&fleet.CelldPreviewSeed{}, handler.EnqueueRequestsFromMapFunc(func(_ context.Context, o client.Object) []ctrl.Request {
-			seed := o.(*fleet.CelldPreviewSeed)
-			return []ctrl.Request{{Namespace: seed.Namespace, Name: seed.Spec.Request.Target.FleetName}}
+		Watches(&fleet.CelldStorageReservation{}, handler.EnqueueRequestsFromMapFunc(func(_ context.Context, o client.Object) []ctrl.Request {
+			seed := o.(*fleet.CelldStorageReservation)
+			if seed.Spec.Initialization == nil {
+				return nil
+			}
+			return []ctrl.Request{{Namespace: seed.Spec.FleetNamespace, Name: seed.Spec.Initialization.Target.FleetName}}
 		})).WithOptions(fleetControllerOptions()).Complete(r)
 }
 

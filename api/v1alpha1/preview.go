@@ -23,9 +23,9 @@ type CelldPreviewSpec struct {
 	// Optional one-time multi-object initialization; omission starts empty.
 	// +optional
 	Seed *PreviewSeedSpec `json:"seed,omitempty"`
-	// Shared platform configuration in this namespace; immutable.
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="preview pool reference is immutable"
-	PoolRef PreviewPoolReference `json:"poolRef"`
+	// Parent fleet with spec.previews configured in this namespace; immutable.
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="preview fleet reference is immutable"
+	FleetRef PreviewFleetReference `json:"fleetRef"`
 	// Human-readable branch or pull request identifier. Never used as a resource name.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=256
@@ -42,14 +42,14 @@ type CelldPreviewSpec struct {
 }
 
 type CelldPreviewStatus struct {
-	// Initialization request, retained separately from the preview.
-	SeedName string `json:"seedName,omitempty"`
+	// Destination reservation retaining initialization state after preview deletion.
+	SeedReservation string `json:"seedReservation,omitempty"`
 	// +kubebuilder:validation:Enum=Pending;Running;Succeeded;Failed;Canceled
 	SeedPhase          string `json:"seedPhase,omitempty"`
 	ObservedGeneration int64  `json:"observedGeneration,omitempty"`
 	FleetName          string `json:"fleetName,omitempty"`
-	PoolName           string `json:"poolName,omitempty"`
-	PoolUID            string `json:"poolUID,omitempty"`
+	ParentFleetName    string `json:"parentFleetName,omitempty"`
+	ParentFleetUID     string `json:"parentFleetUID,omitempty"`
 	// Target for celld deploy; contains no credentials.
 	StorageURL string `json:"storageURL,omitempty"`
 	// Internal HTTP endpoint; Ready confirms infrastructure, not application deployment.

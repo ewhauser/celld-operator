@@ -63,11 +63,17 @@ Gateway listeners, TLS, DNS and ingress controllers remain platform-owned.
 
 ## Shared preview pools
 
-Platform administrators own preview pools, child fleet configuration and storage
-reservations; developers can create previews that reference a permitted pool.
+Platform administrators configure `CelldFleet.spec.previews` and own child fleet
+configuration and storage reservations. Developers create previews referencing a
+permitted parent fleet.
 Each preview has a separate runtime, prefix and route. Shared bucket credentials
 do not enforce an IAM boundary between previews: pools are for one trust domain.
 Use separate pools, buckets and identities for mutually untrusted tenants. Custom
 store credentials are same-namespace Secret references injected by kubelet, not
 read into controller status. See [application previews](../../contracts/previews/)
 for disposable-store failure and retention behavior.
+
+Seed executors write only the reservation status subresource; they cannot change
+immutable requests or lifecycle annotations. This permission is cluster-scoped
+because reservations are cluster-scoped. Scope fixed grants by resource name where
+possible. See [preview seeding](../../contracts/preview-seeding/) for the protocol.

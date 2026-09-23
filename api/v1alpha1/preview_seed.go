@@ -78,50 +78,6 @@ type SeedFleetReference struct {
 	UID string `json:"uid"`
 }
 
-// SeedReference permanently binds a fleet to its initialization request.
-type SeedReference struct {
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=63
-	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
-	Name string `json:"name"`
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=64
-	UID string `json:"uid"`
-}
-
-// CelldPreviewSeed is a retained initialization request for a trusted external
-// celld executor. It is never garbage-collected with the preview. Terminal status
-// attests that all executor writes have stopped. No executor is bundled here.
-// +kubebuilder:object:root=true
-// +kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=cps
-// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
-// +kubebuilder:printcolumn:name="Executor",type=string,JSONPath=`.spec.request.executor`
-// +kubebuilder:validation:XValidation:rule="!has(oldSelf.status) || !has(oldSelf.status.phase) || !(oldSelf.status.phase in ['Succeeded', 'Failed', 'Canceled']) || (has(self.status) && self.status == oldSelf.status)",message="terminal seed results cannot change"
-// +kubebuilder:validation:XValidation:rule="!has(oldSelf.status) || !has(oldSelf.status.manifest) || (has(self.status) && has(self.status.manifest) && self.status.manifest == oldSelf.status.manifest)",message="captured snapshot manifest cannot change or be removed"
-// +kubebuilder:validation:XValidation:rule="!has(oldSelf.status) || !has(oldSelf.status.targetFleetUID) || (has(self.status) && has(self.status.targetFleetUID) && self.status.targetFleetUID == oldSelf.status.targetFleetUID)",message="executor target identity cannot change"
-// +kubebuilder:validation:XValidation:rule="!has(self.status) || !has(self.status.phase) || self.status.phase != 'Running' || ((!has(self.spec.canceled) || !self.spec.canceled) && (!has(oldSelf.status) || !has(oldSelf.status.phase) || oldSelf.status.phase in ['Pending', 'Running'])) || (has(oldSelf.status) && has(oldSelf.status.phase) && oldSelf.status.phase == 'Running')",message="canceled seed requests cannot be claimed"
-// +kubebuilder:validation:XValidation:rule="!has(self.status) || !has(self.status.phase) || self.status.phase != 'Succeeded' || ((!has(self.spec.canceled) || !self.spec.canceled) && has(self.status.manifest) && has(self.status.targetFleetUID))",message="success requires an uncanceled request, target identity and manifest"
-// +kubebuilder:validation:XValidation:rule="!has(self.status) || !has(self.status.phase) || !(self.status.phase in ['Running', 'Succeeded']) || (has(self.status.executorID) && has(self.status.targetFleetUID))",message="executor claim requires execution and target identities"
-// +kubebuilder:validation:XValidation:rule="!has(oldSelf.status) || !has(oldSelf.status.executorID) || (has(self.status) && has(self.status.executorID) && self.status.executorID == oldSelf.status.executorID)",message="executor identity cannot change"
-// +kubebuilder:validation:XValidation:rule="!has(self.status) || !has(self.status.phase) || self.status.phase != 'Succeeded' || (has(oldSelf.status) && has(oldSelf.status.phase) && oldSelf.status.phase in ['Running', 'Succeeded'])",message="success requires a previously claimed execution"
-// +kubebuilder:validation:XValidation:rule="!has(oldSelf.status) || !has(oldSelf.status.phase) || oldSelf.status.phase != 'Running' || (has(self.status) && has(self.status.phase) && self.status.phase != 'Pending')",message="claimed requests cannot return to pending"
-type CelldPreviewSeed struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-	Spec              CelldPreviewSeedSpec   `json:"spec"`
-	Status            CelldPreviewSeedStatus `json:"status,omitempty"`
-}
-
-type CelldPreviewSeedSpec struct {
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="seed request is immutable"
-	Request PreviewSeedRequest `json:"request"`
-	// Cancellation is monotonic. Running executors must stop writes before acknowledging it.
-	// +kubebuilder:default=false
-	// +kubebuilder:validation:XValidation:rule="!oldSelf || self",message="seed cancellation cannot be reversed"
-	Canceled bool `json:"canceled,omitempty"`
-}
-
 type PreviewSeedRequest struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
@@ -142,15 +98,18 @@ type PreviewSeedTarget struct {
 	PreviewUID string `json:"previewUID"`
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=40
-	FleetName string               `json:"fleetName"`
-	PoolRef   StoragePoolReference `json:"poolRef"`
+	FleetName       string                `json:"fleetName"`
+	PreviewFleetRef StorageFleetReference `json:"previewFleetRef"`
 	// Exact isolated S3 destination; no credentials.
 	// +kubebuilder:validation:MaxLength=133
 	// +kubebuilder:validation:Pattern=`^s3://[a-z0-9-]+/[a-z0-9-]+$`
 	StorageURL string `json:"storageURL"`
 }
 
-type CelldPreviewSeedStatus struct {
+type PreviewSeedStatus struct {
+	// Cancellation is monotonic and participates in the executor claim CAS.
+	// +kubebuilder:validation:XValidation:rule="!oldSelf || self",message="seed cancellation cannot be reversed"
+	Canceled bool `json:"canceled,omitempty"`
 	// Stable execution identity. Other workers cannot take over a Running request.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=128
@@ -194,13 +153,6 @@ type PreviewObjectSnapshot struct {
 	// +kubebuilder:validation:MaxLength=64
 	// +kubebuilder:validation:Pattern=`^[a-f0-9]{64}$`
 	Digest string `json:"digest"`
-}
-
-// +kubebuilder:object:root=true
-type CelldPreviewSeedList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []CelldPreviewSeed `json:"items"`
 }
 
 func (s *PreviewSeedSpec) Validate() error {

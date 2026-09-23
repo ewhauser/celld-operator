@@ -20,7 +20,8 @@ import (
 
 const previewFinalizer = "celld.eric.dev/preview"
 const previewCreated = "celld.eric.dev/preview-fleet-created"
-const previewPoolUID = "celld.eric.dev/preview-pool-uid"
+const previewParentFleetUID = "celld.eric.dev/preview-parent-fleet-uid"
+const previewSeedReservation = "celld.eric.dev/preview-seed-reservation"
 const previewURL = "celld.eric.dev/preview-url"
 
 // PreviewReconciler delegates all runtime and storage authority to CelldFleet.
@@ -33,12 +34,12 @@ func previewName(p *fleet.CelldPreview) string {
 	return "p-" + strings.ReplaceAll(string(p.UID), "-", "")
 }
 
-func previewFleet(p *fleet.CelldPreview, pool *fleet.CelldPreviewPool) *fleet.CelldFleet {
+func previewFleet(p *fleet.CelldPreview, pool *fleet.CelldFleet) *fleet.CelldFleet {
 	// Preserve the entire Kubernetes UID: names and URLs cannot collide across
 	// namespaces or when a deleted preview name is reused.
 	name := previewName(p)
-	f := &fleet.CelldFleet{Name: name, Namespace: p.Namespace, Spec: pool.FleetSpec(name)}
-	r := pool.Spec.Routing.DeepCopy()
+	f := &fleet.CelldFleet{Name: name, Namespace: p.Namespace, Spec: pool.PreviewFleetSpec(name)}
+	r := pool.Spec.Previews.Routing.DeepCopy()
 	f.Spec.Routing = &fleet.RoutingSpec{Hostnames: []fleet.RouteHostname{fleet.RouteHostname(name + "." + r.BaseDomain)}, Source: r.Source, Gateway: r.Gateway, Ingress: r.Ingress}
 	owner := metav1.NewControllerRef(p, fleet.GroupVersion.WithKind("CelldPreview"))
 	owner.BlockOwnerDeletion = new(false)
@@ -83,7 +84,7 @@ func (r *PreviewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		desired = actual.DeepCopy()
 	}
 	if deleting || expired {
-		stopped, seedErr := r.cancelPreviewSeed(ctx, p)
+		stopped, seedErr := r.cancelPreviewSeed(ctx, p, actual, missing)
 		if seedErr != nil {
 			return r.report(ctx, p, desired, expires, "Deleting", "SeedCancellationBlocked", seedErr.Error(), false)
 		}
@@ -109,14 +110,14 @@ func (r *PreviewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 		return r.report(ctx, p, desired, expires, "Expired", "LifetimeExceeded", "Preview expired; preview prefix data and reservations are retained", false)
 	}
-	if ttl < 60 || ttl > 604800 || p.UID == "" || p.CreationTimestamp.IsZero() || p.Spec.Source == "" || len(p.Spec.Source) > 256 || len(p.Spec.Revision) > 256 || len(validation.IsDNS1123Subdomain(p.Spec.PoolRef.Name)) != 0 {
+	if ttl < 60 || ttl > 604800 || p.UID == "" || p.CreationTimestamp.IsZero() || p.Spec.Source == "" || len(p.Spec.Source) > 256 || len(p.Spec.Revision) > 256 || len(validation.IsDNS1123Subdomain(p.Spec.FleetRef.Name)) != 0 {
 		return r.report(ctx, p, desired, expires, "Blocked", "InvalidConfiguration", "Invalid preview source, identity, lifetime or pool reference", false)
 	}
 	if err := p.Spec.Seed.Validate(); err != nil {
 		return r.report(ctx, p, desired, expires, "Blocked", "InvalidSeed", err.Error(), false)
 	}
-	pool := &fleet.CelldPreviewPool{}
-	if err := r.Get(ctx, client.ObjectKey{Namespace: p.Namespace, Name: p.Spec.PoolRef.Name}, pool); err != nil {
+	pool := &fleet.CelldFleet{}
+	if err := r.Get(ctx, client.ObjectKey{Namespace: p.Namespace, Name: p.Spec.FleetRef.Name}, pool); err != nil {
 		if !apierrors.IsNotFound(err) {
 			return ctrl.Result{}, err
 		}
@@ -125,16 +126,22 @@ func (r *PreviewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if !pool.DeletionTimestamp.IsZero() || pool.UID == "" {
 		return r.report(ctx, p, desired, expires, "Blocked", "PoolUnavailable", "Preview pool is deleting or has no identity", false)
 	}
-	if uid := p.Annotations[previewPoolUID]; uid != "" && uid != string(pool.UID) {
+	if uid := p.Annotations[previewParentFleetUID]; uid != "" && uid != string(pool.UID) {
 		return r.report(ctx, p, desired, expires, "Blocked", "PoolIdentityChanged", "A recreated pool cannot adopt an existing preview", false)
 	}
+	if pool.Spec.Previews == nil {
+		return r.report(ctx, p, desired, expires, "Blocked", "PreviewsDisabled", "Referenced fleet has no preview configuration", false)
+	}
+	if pool.Spec.Previews.Storage.Bucket == pool.Spec.Storage.Bucket {
+		return r.report(ctx, p, desired, expires, "Blocked", "StoragePoolConflict", "Preview storage must use a separate bucket from the parent runtime", false)
+	}
 	desired = previewFleet(p, pool)
-	routing := pool.Spec.Routing
+	routing := pool.Spec.Previews.Routing
 	scheme := routing.Scheme
 	if scheme == "" {
 		scheme = "https"
 	}
-	if !fleet.ValidRuntimeImage(pool.Spec.RuntimeImage) || len(validation.IsDNS1123Subdomain(routing.BaseDomain)) != 0 || len(routing.BaseDomain) > 218 || (scheme != "http" && scheme != "https") || scheme == "https" && routing.Ingress != nil && routing.Ingress.TLSSecretName == "" {
+	if !fleet.ValidRuntimeImage(pool.Spec.Previews.RuntimeImage) || len(validation.IsDNS1123Subdomain(routing.BaseDomain)) != 0 || len(routing.BaseDomain) > 218 || (scheme != "http" && scheme != "https") || scheme == "https" && routing.Ingress != nil && routing.Ingress.TLSSecretName == "" {
 		return r.report(ctx, p, desired, expires, "Blocked", "InvalidConfiguration", "Pool requires a runtime digest, valid domain and routing scheme; HTTPS ingress requires a TLS secret", false)
 	}
 	if err := desired.Validate(); err != nil {
@@ -150,18 +157,14 @@ func (r *PreviewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, err
 		}
 	}
-	var seed *fleet.CelldPreviewSeed
 	if p.Spec.Seed != nil {
-		var seedErr error
-		seed, seedErr = r.ensurePreviewSeed(ctx, p, pool, desired, expires)
-		if seedErr != nil {
-			return r.report(ctx, p, desired, expires, "Blocked", "SeedBlocked", seedErr.Error(), false)
+		request, err := r.previewSeedRequest(ctx, p, pool, desired, expires)
+		if err != nil {
+			return r.report(ctx, p, desired, expires, "Blocked", "SeedBlocked", err.Error(), false)
 		}
-		desired.Spec.Storage.Initialization = &fleet.SeedReference{Name: seed.Name, UID: string(seed.UID)}
-		if seed.Spec.Canceled || seed.Status.Phase == "Failed" || seed.Status.Phase == "Canceled" {
-			return r.report(ctx, p, desired, expires, "Blocked", "SeedFailed", "Seed initialization stopped: "+seed.Status.Message, false)
-		}
+		desired.Spec.Storage.Initialization = request
 	}
+
 	if missing {
 		// Persist intent before creation. Never silently reuse a bucket after loss
 		// of a child object, even if status has been cleared or the manager restarted.
@@ -173,7 +176,10 @@ func (r *PreviewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			p.Annotations = map[string]string{}
 		}
 		p.Annotations[previewCreated] = "true"
-		p.Annotations[previewPoolUID] = string(pool.UID)
+		if p.Spec.Seed != nil {
+			p.Annotations[previewSeedReservation] = reservationName(desired)
+		}
+		p.Annotations[previewParentFleetUID] = string(pool.UID)
 		p.Annotations[previewURL] = scheme + "://" + desired.Name + "." + routing.BaseDomain
 		if err := r.Patch(ctx, p, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); err != nil {
 			return ctrl.Result{}, err
@@ -184,6 +190,7 @@ func (r *PreviewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 				// fixing namespace RBAC/quota; ambiguous transport failures keep intent.
 				before := p.DeepCopy()
 				delete(p.Annotations, previewCreated)
+				delete(p.Annotations, previewSeedReservation)
 				if patchErr := r.Patch(ctx, p, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); patchErr != nil {
 					return ctrl.Result{}, patchErr
 				}
@@ -191,7 +198,7 @@ func (r *PreviewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			}
 			return ctrl.Result{}, err
 		}
-		if seed != nil {
+		if p.Spec.Seed != nil {
 			return r.report(ctx, p, desired, expires, "Initializing", "SeedPending", "Waiting for executor snapshots and all object imports", false)
 		}
 		return r.report(ctx, p, desired, expires, "Pending", "FleetCreated", "Waiting for fleet provisioning and route acceptance", false)
@@ -207,9 +214,20 @@ func (r *PreviewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if c := meta.FindStatusCondition(actual.Status.Conditions, "Blocked"); c != nil && c.ObservedGeneration == actual.Generation && c.Status == metav1.ConditionTrue && c.Reason != "SeedInitializing" {
 		return r.report(ctx, p, desired, expires, "Blocked", c.Reason, c.Message, false)
 	}
-	if seed != nil && seed.Status.Phase != "Succeeded" {
-		return r.report(ctx, p, desired, expires, "Initializing", "SeedPending", "Waiting for executor snapshots and all object imports", false)
+	if p.Spec.Seed != nil {
+		seed := &fleet.CelldStorageReservation{}
+		err := r.Get(ctx, client.ObjectKey{Name: reservationName(actual)}, seed)
+		if err != nil && !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, err
+		}
+		if seed.Status.Canceled || seed.Status.Phase == "Failed" || seed.Status.Phase == "Canceled" {
+			return r.report(ctx, p, desired, expires, "Blocked", "SeedFailed", "Seed initialization stopped: "+seed.Status.Message, false)
+		}
+		if seed.Status.Phase != "Succeeded" {
+			return r.report(ctx, p, desired, expires, "Initializing", "SeedPending", "Waiting for executor snapshots and all object imports", false)
+		}
 	}
+
 	if c := meta.FindStatusCondition(actual.Status.Conditions, "Blocked"); c != nil && c.ObservedGeneration == actual.Generation && c.Status == metav1.ConditionTrue {
 		return r.report(ctx, p, desired, expires, "Blocked", c.Reason, c.Message, false)
 	}
@@ -227,20 +245,19 @@ func (r *PreviewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 func (r *PreviewReconciler) report(ctx context.Context, p *fleet.CelldPreview, f *fleet.CelldFleet, expires time.Time, phase, reason, message string, ready bool) (ctrl.Result, error) {
 	before := p.DeepCopy()
-	if p.Spec.Seed != nil {
-		p.Status.SeedName = seedName(p)
-		seed := &fleet.CelldPreviewSeed{}
-		if err := r.Get(ctx, client.ObjectKey{Namespace: p.Namespace, Name: p.Status.SeedName}, seed); err == nil && seed.Spec.Request.Target.PreviewUID == string(p.UID) {
+	if p.Spec.Seed != nil && f.Spec.Storage.Initialization != nil {
+		p.Status.SeedReservation = reservationName(f)
+		p.Status.SeedPhase = "Pending"
+		seed := &fleet.CelldStorageReservation{}
+		if err := r.Get(ctx, client.ObjectKey{Name: p.Status.SeedReservation}, seed); err == nil && seed.Spec.Initialization != nil && seed.Spec.Initialization.Target.PreviewUID == string(p.UID) && seed.Status.Phase != "" {
 			p.Status.SeedPhase = seed.Status.Phase
-			if p.Status.SeedPhase == "" {
-				p.Status.SeedPhase = "Pending"
-			}
 		}
 	}
+
 	p.Status.ObservedGeneration = p.Generation
 	p.Status.FleetName = f.Name
-	p.Status.PoolName = p.Spec.PoolRef.Name
-	p.Status.PoolUID = p.Annotations[previewPoolUID]
+	p.Status.ParentFleetName = p.Spec.FleetRef.Name
+	p.Status.ParentFleetUID = p.Annotations[previewParentFleetUID]
 	p.Status.Endpoint = fmt.Sprintf("http://%s.%s.svc:8080", f.Name, f.Namespace)
 	if u := p.Annotations[previewURL]; u != "" {
 		p.Status.URL = u
@@ -276,11 +293,17 @@ func (r *PreviewReconciler) report(ctx context.Context, p *fleet.CelldPreview, f
 
 func (r *PreviewReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).For(&fleet.CelldPreview{}).Owns(&fleet.CelldFleet{}).
-		Watches(&fleet.CelldPreviewSeed{}, handler.EnqueueRequestsFromMapFunc(func(_ context.Context, o client.Object) []ctrl.Request {
-			seed := o.(*fleet.CelldPreviewSeed)
-			return []ctrl.Request{{Namespace: seed.Namespace, Name: seed.Spec.Request.Target.PreviewName}}
+		Watches(&fleet.CelldStorageReservation{}, handler.EnqueueRequestsFromMapFunc(func(_ context.Context, o client.Object) []ctrl.Request {
+			seed := o.(*fleet.CelldStorageReservation)
+			if seed.Spec.Initialization == nil {
+				return nil
+			}
+			return []ctrl.Request{{Namespace: seed.Spec.FleetNamespace, Name: seed.Spec.Initialization.Target.PreviewName}}
 		})).
-		Watches(&fleet.CelldPreviewPool{}, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, object client.Object) []ctrl.Request {
+		Watches(&fleet.CelldFleet{}, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, object client.Object) []ctrl.Request {
+			if object.(*fleet.CelldFleet).Spec.Previews == nil {
+				return nil
+			}
 			var previews fleet.CelldPreviewList
 			if err := r.List(ctx, &previews, client.InNamespace(object.GetNamespace())); err != nil {
 				ctrl.LoggerFrom(ctx).Error(err, "list previews for pool change")
@@ -288,7 +311,7 @@ func (r *PreviewReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			}
 			var requests []ctrl.Request
 			for _, p := range previews.Items {
-				if p.Spec.PoolRef.Name == object.GetName() {
+				if p.Spec.FleetRef.Name == object.GetName() {
 					requests = append(requests, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&p)})
 				}
 			}
