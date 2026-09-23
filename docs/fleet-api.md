@@ -89,3 +89,45 @@ The operator polls routing status on normal reconciliation; it does not watch or
 provision Gateway, IngressClass, certificate or DNS resources. See the
 [networking guide](../site/src/content/docs/configure/networking.md) and the
 [routing samples](../config/samples/routing-gateway.yaml).
+
+## Application deployment observations
+
+`status.application` and the `ApplicationConverged` condition describe application
+code loaded by the runtime. They are independent of the container image digest,
+Kubernetes object generation and fleet lifecycle readiness. Observation never
+publishes code, calls `/reload`, changes replicas or authorizes runtime removal.
+
+The operator polls the private, read-only `GET /state?view=application` endpoint
+at most once every 15 seconds per fleet, with eight concurrent requests and a
+10-second collection deadline. Both the snapshot and the runtime's last successful
+deployment-pointer observation must be at most 90 seconds old. The runtime image
+must support application observation schema 1; earlier images report Unknown
+with `Unsupported` node details and continue normal lifecycle operations. No
+image pin is automatically changed by installing this operator version.
+
+Status contains a collection timestamp, expected and freshly observed node
+counts, unavailable coverage, observed versions grouped by version and artifact
+prefix, pending/swapping cell totals and at most 100 Pod diagnostics. Runtime
+incarnation and Pod identity fence observations; a changed membership inventory
+invalidates convergence. Counts omit unavailable samples and are not complete
+fleet totals when coverage is incomplete. `target` is present only with complete
+fresh coverage and agreement on the observed pointer's version and prefix.
+
+| ApplicationConverged | Meaning |
+| --- | --- |
+| True / Converged | Every current Pod is ready and freshly observed, all agree on the target and have adopted it, and no resident cells remain pending or swapping. |
+| False / Converging | Coverage and target agreement are complete, but a node or its resident cells is still transitioning. |
+| False / AdoptionFailed | A runtime reports failure to adopt the agreed target; previous code may still be serving. |
+| Unknown | Observations are stale, unsupported, incomplete, interrupted by membership changes, or disagree about the target. |
+
+Convergence is relative to the **last observed target**, not a promise that no
+newer deployment has since been published. A pipeline waiting for a particular
+release must also compare `status.application.target.version` with the version
+it deployed and require a fresh `observedAt`. A common old version alone does not
+establish convergence. Numeric application generations are process-local and are
+never compared across nodes; rolling back to an older version is supported.
+
+This condition covers node adoption and resident-cell transition. It does not
+prove application health or that all long-lived requests from earlier generations
+have ended. It does not gate `Ready`, scaling, maintenance or deletion. If the
+operator stops, its persisted observations age; clients must check timestamps.

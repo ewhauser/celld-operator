@@ -12,6 +12,7 @@
 | Maintenance | Coordinated whole-fleet restart/upgrade with explicit downtime permission; strict shutdown before workload effects. |
 | Deletion | Strictly stop the current working set before removing compute. The bucket reservation is permanent. See the storage contract below for disk cleanup. |
 | Public routing | Optional mutable HTTPRoute or Ingress to port 8080, explicit data-plane ingress policy, ownership-safe updates and cleanup. |
+| Application visibility | Read-only observed versions, coverage and resident-cell convergence; unsupported or stale runtime observations remain Unknown. |
 | Capacity | Manual targets, Shadow, ScaleOut, Automatic and External ownership all share the same executor and safety checks. |
 | Failure handling | Ambiguous or failed proof remains blocked. Status edits, timeouts and missing Pods cannot authorize removal. |
 

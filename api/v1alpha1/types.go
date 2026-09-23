@@ -362,6 +362,9 @@ type LifecycleStatus struct {
 }
 
 type CelldFleetStatus struct {
+	// Read-only application deployment observations, independent of lifecycle readiness.
+	// +optional
+	Application *ApplicationStatus `json:"application,omitempty"`
 	// Replicas and LabelSelector serve the /scale subresource: non-terminal pods
 	// of this fleet, including terminating ones, and the selector that matches
 	// exactly them. They never express permission to scale.

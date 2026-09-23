@@ -137,3 +137,22 @@ This validates the implemented wire serializer against the Go client, not real
 celld shutdown, S3 recovery or EBS removal. The opt-in real-binary tests described in [qualification](qualification/README.md)
 exercise the launcher/controller handshake separately. See the native and Kind
 records for replicated recovery; verify CSI/EBS deletion in your deployment.
+
+## Application observation schema 1
+
+The optional `GET /state?view=application` view returns a compact deployment
+snapshot, omitting the ordinary `/state` per-cell map. The typed client's
+`ApplicationReader` is a separate read-only interface. It checks required fields,
+explicit zero counts, enums, bounded version/prefix strings, runtime incarnation,
+and both snapshot and target freshness. Missing and unknown schemas are
+unsupported; neither old `/state` output nor `/reload` is used as a fallback.
+
+This view requires the runtime deployment-observation change. The currently
+pinned `.3` runtime does not provide this versioned view. Until a compatible image
+containing that change is built and explicitly selected, application status is
+Unknown. Existing strict-shutdown and capacity contracts are unchanged.
+
+See [application deployment observations](fleet-api.md#application-deployment-observations)
+for aggregation and convergence semantics. Deterministic tests cover malformed
+responses, missing capabilities, failed/stale observations, rollback, mixed
+versions, delayed cells and membership changes; envtest verifies status admission.
