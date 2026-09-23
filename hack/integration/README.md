@@ -66,3 +66,7 @@ MinIO data is not durable across replacement of its Pod; these scenarios do not
 replace the store. They do not qualify AWS EBS deletion, EC2 node loss, prolonged S3 partitions or
 managed service behavior. Unknown or lost strict completion deliberately blocks
 removal; the harness does not repair that ambiguity by deleting disks.
+
+For the single-node operator-backed preview CLI suite, including multi-object
+state cloning, see [local preview integration](../../docs/preview-integration.md)
+and run `make integration-previews` with a preview-capable celld image.

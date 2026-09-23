@@ -50,7 +50,8 @@ See [docs/](docs/README.md) for implementation details, [design decisions](docs/
 and [recorded test evidence](docs/qualification/README.md).
 
 Test layers: `make test` (unit, fake client), `make test-envtest` (real API server),
-`make integration` and its variants (disposable kind cluster).
+`make integration` and its variants (disposable kind cluster). For the operator-backed
+preview CLI and multi-object cloning, see [`make integration-previews`](docs/preview-integration.md).
 
 ## License
 

@@ -198,3 +198,6 @@ endpoint/Secret rendering, resource limits, unique routes, immutable configurati
 readiness, ownership and expiry. Those checks do not qualify a target Kubernetes
 store, its availability, wildcard DNS/TLS, or an ingress data plane. Validate these
 and application requests in the deployment cluster.
+
+Run the real local operator/CLI lifecycle suite with `make integration-previews`;
+see [setup and coverage](preview-integration.md).
