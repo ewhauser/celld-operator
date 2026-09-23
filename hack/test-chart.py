@@ -18,7 +18,7 @@ assert pod['containers'][0]['image'] == 'ghcr.io/ewhauser/celld-operator:dev'
 assert '--operator-namespace=operator-test' in pod['containers'][0]['args']
 assert not any(doc['kind'] in ('ServiceMonitor', 'PrometheusRule') for doc in base)
 assert not any(arg.startswith('--ec2-fencing-') for arg in pod['containers'][0]['args'])
-assert len([doc for doc in base if doc['kind'] == 'CustomResourceDefinition']) == 2
+assert {doc['spec']['names']['kind'] for doc in base if doc['kind'] == 'CustomResourceDefinition'} == {'CelldFleet', 'CelldPreview', 'CelldStorageReservation'}
 role = next(doc for doc in base if doc['kind'] == 'ClusterRole')
 canonical = list(yaml.safe_load_all((ROOT / 'config/manager/operator.yaml').read_text()))
 assert role['rules'] == next(doc['rules'] for doc in canonical if doc['kind'] == 'ClusterRole')

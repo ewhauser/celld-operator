@@ -55,6 +55,22 @@ func (r *Reconciler) pauseFleet(ctx context.Context, f *fleet.CelldFleet) (ctrl.
 	return r.maintenanceFleet(ctx, f)
 }
 func (r *Reconciler) deleteFleet(ctx context.Context, f *fleet.CelldFleet) (ctrl.Result, error) {
+	if f.Spec.Storage.Initialization != nil {
+		res := &fleet.CelldStorageReservation{}
+		err := r.Get(ctx, client.ObjectKey{Name: reservationName(f)}, res)
+		if err != nil && !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, err
+		}
+		if !seedReceiptReady(f, res) {
+			handled, err := r.deleteUninitializedFleet(ctx, f)
+			if err != nil {
+				return r.report(ctx, f, nil, "SeedCancellationBlocked", err.Error(), false)
+			}
+			if handled {
+				return ctrl.Result{}, nil
+			}
+		}
+	}
 	return r.maintenanceFleet(ctx, f)
 }
 func (r *Reconciler) maintenanceFleet(ctx context.Context, f *fleet.CelldFleet) (ctrl.Result, error) {
@@ -66,7 +82,7 @@ func (r *Reconciler) maintenanceFleet(ctx context.Context, f *fleet.CelldFleet) 
 		return r.report(ctx, f, nil, "MaintenanceBlocked", "No reservation authority; workload absence is not removal proof", false)
 	}
 	h := r.hydrate(ctx, res)
-	want := fleet.ReservationSpec{InitialReplicas: f.Spec.Replicas, Bucket: f.Spec.Storage.Bucket, FleetNamespace: f.Namespace, FleetName: f.Name, FleetUID: string(f.UID), SpecHash: specHash(f)}
+	want := fleetReservationSpec(f)
 	if !r.reservationMatches(ctx, f, h, want) || len(res.OwnerReferences) != 0 || !res.DeletionTimestamp.IsZero() {
 		return r.report(ctx, f, h, "StorageScopeConflict", "Reservation ownership changed", false)
 	}

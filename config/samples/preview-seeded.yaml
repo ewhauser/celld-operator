@@ -1,0 +1,23 @@
+# Developer-owned selection for a pool with seeding configured.
+# Requires a compatible external celld snapshot/import executor; none is bundled.
+apiVersion: celld.eric.dev/v1alpha1
+kind: CelldPreview
+metadata:
+  name: reproduce-checkout
+  namespace: previews
+spec:
+  fleetRef:
+    name: development
+  source: feature/checkout-fix
+  revision: replace-with-commit-sha
+  ttlSeconds: 86400
+  seed:
+    source: production
+    alarms: Clear
+    objects:
+      - class: Cart
+        id: cart-123
+      - class: Customer
+        id: customer-456
+      - class: Inventory
+        id: sku-789

@@ -47,7 +47,17 @@ with coordinated maintenance so new Pods read it.
 
 A bucket reservation permanently binds the bucket to the fleet UID. Recreating
 a fleet with the same name does not transfer ownership. Its current-operation
-annotation is controller authority; status is a reconstructible projection.
+annotation is controller authority; fleet status is a reconstructible projection.
+[Preview configuration](previews.md) lives on an existing fleet under `spec.previews`.
+It reserves a separate preview bucket to that parent fleet UID, then binds each
+child fleet to a disjoint `storage.prefix` and `previewFleetRef`.
+A generated preview fleet may set a Secret-backed custom `storage.endpoint` and
+separate `storage.scratch.request`/`limit` for its disk-backed emptyDir. These
+fields are immutable and do not change ordinary dedicated fleet defaults.
+`spec.previews` may be added once; it is immutable thereafter and excluded from
+the parent runtime reservation hash. Initialization requests and executor status
+use the existing `CelldStorageReservation`; its lifecycle annotation remains
+operator-owned, while its status subresource holds the retained seed result.
 See [current operations](current-operation.md) before changing lifecycle code.
 
 The `/scale` subresource maps desired replicas to `spec.replicas` and observed

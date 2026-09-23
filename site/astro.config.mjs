@@ -60,6 +60,8 @@ export default defineConfig({
                     { label: 'Availability zones', slug: 'configure/placement' },
                 ] },
                 { label: 'Operate', collapsed: true, items: [
+                    { label: 'Application previews', slug: 'contracts/previews' },
+                    { label: 'Preview state seeding', slug: 'contracts/preview-seeding' },
                     { label: 'Scale a fleet', slug: 'operate/scaling' },
                     { label: 'Enable capacity policy', slug: 'operate/capacity' },
                     { label: 'Restart a fleet', slug: 'operate/restart' },
@@ -79,6 +81,7 @@ export default defineConfig({
                     { label: 'Capabilities and limitations', slug: 'reference/limitations' },
                     { label: 'Supported versions', slug: 'reference/compatibility' },
                     { label: 'Conditions and reasons', slug: 'reference/conditions' },
+                    { label: 'CelldPreview API', slug: 'api/celldpreview' },
                     { label: 'CelldFleet API', slug: 'api/celldfleet' },
                     { label: 'Helm values', slug: 'api/helm-values' },
                     { label: 'Sample manifests', slug: 'api/samples' },

@@ -54,6 +54,9 @@ func (f *CelldFleet) ValidateRuntime() error {
 			return fmt.Errorf("capacity minimum must cover requested AZs")
 		}
 	}
+	if err := validateStorageOptions(s.Storage, s.Profile); err != nil {
+		return err
+	}
 	if err := validateTuning(&s); err != nil {
 		return err
 	}

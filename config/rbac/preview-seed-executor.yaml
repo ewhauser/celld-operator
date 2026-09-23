@@ -1,0 +1,37 @@
+# Optional trusted executor permissions. Not installed or bound automatically.
+# Status writes cannot change the operator-owned reservation spec or annotations.
+# Add resourceNames for fixed reservation sets where possible.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: celld-preview-seed-executor
+rules:
+  - apiGroups: [celld.eric.dev]
+    resources: [celldstoragereservations]
+    verbs: [get, list, watch]
+  - apiGroups: [celld.eric.dev]
+    resources: [celldstoragereservations/status]
+    verbs: [get, patch]
+---
+# Bind in each authorized preview namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: celld-preview-seed-target
+  namespace: previews
+rules:
+  - apiGroups: [celld.eric.dev]
+    resources: [celldpreviews, celldfleets]
+    verbs: [get]
+---
+# Bind in each explicitly authorized source namespace; adapt resourceNames.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: celld-preview-seed-source
+  namespace: production
+rules:
+  - apiGroups: [celld.eric.dev]
+    resources: [celldfleets]
+    resourceNames: [my-app]
+    verbs: [get]

@@ -9,6 +9,9 @@ kind: Role
 metadata:
   name: celld-fleet-operator
 rules:
+  - apiGroups: [celld.eric.dev]
+    resources: [celldfleets]
+    verbs: [create, delete]
   - apiGroups: ['']
     resources: [serviceaccounts]
     verbs: [get]

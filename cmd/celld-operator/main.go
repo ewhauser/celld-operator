@@ -86,6 +86,9 @@ func run() error {
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		return err
 	}
+	if err := (&controller.PreviewReconciler{Client: direct}).SetupWithManager(mgr); err != nil {
+		return err
+	}
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		return err
 	}

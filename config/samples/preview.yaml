@@ -1,0 +1,12 @@
+# Developer-owned: all infrastructure settings come from the existing pool.
+apiVersion: celld.eric.dev/v1alpha1
+kind: CelldPreview
+metadata:
+  name: pr-42
+  namespace: previews
+spec:
+  fleetRef:
+    name: development
+  source: feature/login
+  revision: replace-with-commit-sha
+  ttlSeconds: 86400

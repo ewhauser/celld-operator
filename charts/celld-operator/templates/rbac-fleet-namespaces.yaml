@@ -7,6 +7,9 @@ metadata:
   namespace: {{ . | quote }}
   name: {{ include "celld-operator.name" $ }}-fleet
 rules:
+  - apiGroups: [celld.eric.dev]
+    resources: [celldfleets]
+    verbs: [create, delete]
   - apiGroups: ['']
     resources: [serviceaccounts]
     verbs: [get]
