@@ -137,3 +137,42 @@ This validates the implemented wire serializer against the Go client, not real
 celld shutdown, S3 recovery or EBS removal. The opt-in real-binary tests described in [qualification](qualification/README.md)
 exercise the launcher/controller handshake separately. See the native and Kind
 records for replicated recovery; verify CSI/EBS deletion in your deployment.
+
+## Application deployment observations
+
+The typed client's separate read-only `ApplicationReader` uses the existing
+`GET /state` response's `deployment` object: `version`, `prefix`, `generation`,
+`cells` and `swapping`. It requires explicit counts and cell maps, bounds strings,
+and rejects malformed data. A missing deployment object is unsupported. The
+existing `shutdown.runtime_generation`, when present, supplies diagnostic process
+identity; application observations do not require a new lifecycle schema.
+
+Resident-cell generations are compared only against that node's current local
+generation. Unknown cell generation zero remains pending; a cell generation newer
+than the sampled node generation invalidates the observation. The actor census
+and current generation are not sampled atomically. Response freshness is measured
+locally by the operator and says nothing about the age of the S3 deployment pointer.
+
+This works with the currently pinned runtime without another runtime patch or
+image release. Existing strict-shutdown, image requirements and capacity contracts
+are unchanged. The observer never calls `/reload` or reads S3 credentials.
+
+See [application deployment observations](fleet-api.md#application-deployment-observations)
+for aggregation and the limits of convergence. Tests cover malformed responses,
+missing fields, stale observations, rollback, mixed versions, delayed cells and
+membership changes; envtest verifies status admission. The opt-in
+`hack/test-application-state.py` harness exercises native celld with disposable
+MinIO, including deployment, a resident-cell transition, rollback and the limit
+that a missing deployment pointer cannot be detected from serving-version state:
+
+```sh
+CELLD_TEST_BINARY=/absolute/path/to/celld \
+CELLD_ESBUILD=/absolute/path/to/esbuild \
+python3 hack/test-application-state.py
+```
+
+It needs Docker and the AWS CLI, uses only explicit loopback S3 endpoints and
+fixture credentials, and cleans up its own runtime and container. Set
+`CELLD_STATE_FIXTURE` to capture responses for decoder regression tests. The
+checked-in fixture was captured from celld revision `c91ca54`, without the proposed
+application-observation patch. This is native runtime coverage, not EKS validation.

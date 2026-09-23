@@ -1,0 +1,673 @@
+{
+  "initial": {
+    "activating": 0,
+    "activation_waiting": 0,
+    "adopting": 0,
+    "allocator": {
+      "active_bytes": 8617984,
+      "allocated_bytes": 7363112,
+      "mapped_bytes": 10715136,
+      "resident_bytes": 9977856,
+      "retained_bytes": 0
+    },
+    "capacity_waiting": 0,
+    "cgroup_current_bytes": null,
+    "cgroup_working_set_bytes": null,
+    "deployment": {
+      "cells": {},
+      "draining": [],
+      "generation": 1,
+      "isolates": {
+        "cells": {
+          "observation-test": {
+            "cells": 0,
+            "external_bytes": 0,
+            "freed": 0,
+            "heap_bytes": 0,
+            "live": 0,
+            "live_empty": 0,
+            "requests": 0,
+            "retiring": 0,
+            "turns": 0
+          }
+        },
+        "services": {
+          "observation-test": {
+            "cells": 0,
+            "external_bytes": 666828,
+            "freed": 0,
+            "heap_bytes": 1900544,
+            "live": 1,
+            "live_empty": 1,
+            "requests": 0,
+            "retiring": 0,
+            "turns": 0
+          }
+        },
+        "stateless": {
+          "cells": 0,
+          "external_bytes": 666828,
+          "freed": 0,
+          "heap_bytes": 1900544,
+          "live": 1,
+          "live_empty": 1,
+          "requests": 0,
+          "retiring": 0,
+          "turns": 0
+        }
+      },
+      "prefix": "deploy/observation-test/854305e196452678",
+      "swapping": 0,
+      "version": "854305e196452678"
+    },
+    "evicting": 0,
+    "handed_off": 0,
+    "handoff_failed": 0,
+    "in_use_bytes": 68065832,
+    "libc_malloc": null,
+    "node_load": {
+      "bucket_format": 2,
+      "cgroup_current_bytes": null,
+      "cgroup_working_set_bytes": null,
+      "cpu_percent_x100": 0,
+      "draining": false,
+      "fd_limit": 9223372036854775807,
+      "host_websockets": 0,
+      "in_use_bytes": 68033064,
+      "memory_headroom": true,
+      "open_fds": 0,
+      "owned_cells": 0,
+      "placement_weight": 16,
+      "pressured": false,
+      "rebalance_paused": false,
+      "resident_cells": 0,
+      "restoring": 0,
+      "rss_bytes": 70647808,
+      "sampled_ms": 1790131570150,
+      "shed_cells": 0
+    },
+    "occupied": 0,
+    "owned_cells": 0,
+    "ownership": "s3",
+    "phases": {},
+    "published": [],
+    "publishes": 0,
+    "quiescing": 0,
+    "rebalance_failed": 0,
+    "rebalanced": 0,
+    "releasing": 0,
+    "remote_route_refreshes": 0,
+    "residents": [],
+    "restoring": 0,
+    "rss_bytes": 70680576,
+    "shedding": null,
+    "shutdown": {
+      "capabilities": {
+        "strict_disk_removal": true
+      },
+      "control_only": false,
+      "operation": null,
+      "runtime_generation": "c4ae0dc5c9b73f70b49f9248757d5bf94abd2121e64028aa72c72217903abe5a",
+      "schema_version": 1
+    },
+    "stops": 0
+  },
+  "transition": {
+    "activating": 0,
+    "activation_waiting": 0,
+    "adopting": 0,
+    "allocator": {
+      "active_bytes": 9732096,
+      "allocated_bytes": 8534536,
+      "mapped_bytes": 11829248,
+      "resident_bytes": 11091968,
+      "retained_bytes": 0
+    },
+    "capacity_waiting": 0,
+    "cgroup_current_bytes": null,
+    "cgroup_working_set_bytes": null,
+    "deployment": {
+      "cells": {
+        "Cell:e50f86c69204a5a8ae6ee7006d89a4b3cf969c83a1f92b122187499b2abaa733": 1
+      },
+      "draining": [
+        {
+          "generation": 1,
+          "isolates": {
+            "cells": {
+              "observation-test": {
+                "cells": 1,
+                "external_bytes": 666958,
+                "freed": 0,
+                "heap_bytes": 2179072,
+                "live": 0,
+                "live_empty": 0,
+                "requests": 1,
+                "retiring": 1,
+                "turns": 0
+              }
+            },
+            "services": {
+              "observation-test": {
+                "cells": 0,
+                "external_bytes": 666856,
+                "freed": 0,
+                "heap_bytes": 2162688,
+                "live": 0,
+                "live_empty": 0,
+                "requests": 1,
+                "retiring": 1,
+                "turns": 0
+              }
+            },
+            "stateless": {
+              "cells": 0,
+              "external_bytes": 666856,
+              "freed": 0,
+              "heap_bytes": 2162688,
+              "live": 0,
+              "live_empty": 0,
+              "requests": 1,
+              "retiring": 1,
+              "turns": 0
+            }
+          },
+          "version": "854305e196452678"
+        }
+      ],
+      "generation": 2,
+      "isolates": {
+        "cells": {
+          "observation-test": {
+            "cells": 0,
+            "external_bytes": 0,
+            "freed": 0,
+            "heap_bytes": 0,
+            "live": 0,
+            "live_empty": 0,
+            "requests": 0,
+            "retiring": 0,
+            "turns": 0
+          }
+        },
+        "services": {
+          "observation-test": {
+            "cells": 0,
+            "external_bytes": 666821,
+            "freed": 0,
+            "heap_bytes": 1916928,
+            "live": 1,
+            "live_empty": 1,
+            "requests": 0,
+            "retiring": 0,
+            "turns": 0
+          }
+        },
+        "stateless": {
+          "cells": 0,
+          "external_bytes": 666821,
+          "freed": 0,
+          "heap_bytes": 1916928,
+          "live": 1,
+          "live_empty": 1,
+          "requests": 0,
+          "retiring": 0,
+          "turns": 0
+        }
+      },
+      "prefix": "deploy/observation-test/0e1738ed65659e75",
+      "swapping": 1,
+      "version": "0e1738ed65659e75"
+    },
+    "drainPins": [
+      {
+        "ackPoint": "not_acknowledged",
+        "activeRequestCount": 1,
+        "ageMs": 1074,
+        "cancellationState": "not_cancelled",
+        "cell": "Cell:e50f86c69204a5a8ae6ee7006d89a4b3cf969c83a1f92b122187499b2abaa733",
+        "coreRequestId": 2,
+        "durableTxid": null,
+        "origin": "local",
+        "outboundWebsocketCount": 0,
+        "outputGateCount": 0,
+        "outputGateResult": "not_applicable",
+        "phase": "handler",
+        "regularWebsocketCount": 0,
+        "requestId": "907e8fa71fb247440000000000000004",
+        "responseBodyActive": false,
+        "responseHeadersSent": false
+      }
+    ],
+    "evicting": 0,
+    "handed_off": 0,
+    "handoff_failed": 0,
+    "in_use_bytes": 79116808,
+    "libc_malloc": null,
+    "node_load": {
+      "bucket_format": 2,
+      "cgroup_current_bytes": null,
+      "cgroup_working_set_bytes": null,
+      "cpu_percent_x100": 0,
+      "draining": false,
+      "fd_limit": 9223372036854775807,
+      "host_websockets": 0,
+      "in_use_bytes": 79116808,
+      "memory_headroom": true,
+      "open_fds": 0,
+      "owned_cells": 1,
+      "placement_weight": 16,
+      "pressured": false,
+      "rebalance_paused": false,
+      "resident_cells": 1,
+      "restoring": 0,
+      "rss_bytes": 81674240,
+      "sampled_ms": 1790131571272,
+      "shed_cells": 0
+    },
+    "occupied": 1,
+    "owned_cells": 1,
+    "ownership": "s3",
+    "phases": {
+      "resident": 1
+    },
+    "published": [
+      "Cell:e50f86c69204a5a8ae6ee7006d89a4b3cf969c83a1f92b122187499b2abaa733"
+    ],
+    "publishes": 1,
+    "quiescing": 1,
+    "rebalance_failed": 0,
+    "rebalanced": 0,
+    "releasing": 0,
+    "remote_route_refreshes": 0,
+    "residents": [
+      "Cell:e50f86c69204a5a8ae6ee7006d89a4b3cf969c83a1f92b122187499b2abaa733"
+    ],
+    "restoring": 0,
+    "rss_bytes": 81674240,
+    "shedding": null,
+    "shutdown": {
+      "capabilities": {
+        "strict_disk_removal": true
+      },
+      "control_only": false,
+      "operation": null,
+      "runtime_generation": "c4ae0dc5c9b73f70b49f9248757d5bf94abd2121e64028aa72c72217903abe5a",
+      "schema_version": 1
+    },
+    "stops": 0
+  },
+  "adopted": {
+    "activating": 0,
+    "activation_waiting": 0,
+    "adopting": 0,
+    "allocator": {
+      "active_bytes": 10371072,
+      "allocated_bytes": 9198344,
+      "mapped_bytes": 12697600,
+      "resident_bytes": 11976704,
+      "retained_bytes": 0
+    },
+    "capacity_waiting": 0,
+    "cgroup_current_bytes": null,
+    "cgroup_working_set_bytes": null,
+    "deployment": {
+      "cells": {
+        "Cell:e50f86c69204a5a8ae6ee7006d89a4b3cf969c83a1f92b122187499b2abaa733": 2
+      },
+      "draining": [
+        {
+          "generation": 1,
+          "isolates": {
+            "cells": {
+              "observation-test": {
+                "cells": 0,
+                "external_bytes": 666975,
+                "freed": 0,
+                "heap_bytes": 2179072,
+                "live": 0,
+                "live_empty": 0,
+                "requests": 0,
+                "retiring": 1,
+                "turns": 0
+              }
+            },
+            "services": {
+              "observation-test": {
+                "cells": 0,
+                "external_bytes": 666866,
+                "freed": 0,
+                "heap_bytes": 2179072,
+                "live": 0,
+                "live_empty": 0,
+                "requests": 0,
+                "retiring": 1,
+                "turns": 0
+              }
+            },
+            "stateless": {
+              "cells": 0,
+              "external_bytes": 666866,
+              "freed": 0,
+              "heap_bytes": 2179072,
+              "live": 0,
+              "live_empty": 0,
+              "requests": 0,
+              "retiring": 1,
+              "turns": 0
+            }
+          },
+          "version": "854305e196452678"
+        }
+      ],
+      "generation": 2,
+      "isolates": {
+        "cells": {
+          "observation-test": {
+            "cells": 1,
+            "external_bytes": 666834,
+            "freed": 0,
+            "heap_bytes": 2179072,
+            "live": 1,
+            "live_empty": 0,
+            "requests": 0,
+            "retiring": 0,
+            "turns": 0
+          }
+        },
+        "services": {
+          "observation-test": {
+            "cells": 0,
+            "external_bytes": 666821,
+            "freed": 0,
+            "heap_bytes": 1916928,
+            "live": 1,
+            "live_empty": 1,
+            "requests": 0,
+            "retiring": 0,
+            "turns": 0
+          }
+        },
+        "stateless": {
+          "cells": 0,
+          "external_bytes": 666821,
+          "freed": 0,
+          "heap_bytes": 1916928,
+          "live": 1,
+          "live_empty": 1,
+          "requests": 0,
+          "retiring": 0,
+          "turns": 0
+        }
+      },
+      "prefix": "deploy/observation-test/0e1738ed65659e75",
+      "swapping": 0,
+      "version": "0e1738ed65659e75"
+    },
+    "evicting": 0,
+    "handed_off": 0,
+    "handoff_failed": 0,
+    "in_use_bytes": 82696968,
+    "libc_malloc": null,
+    "node_load": {
+      "bucket_format": 2,
+      "cgroup_current_bytes": null,
+      "cgroup_working_set_bytes": null,
+      "cpu_percent_x100": 0,
+      "draining": false,
+      "fd_limit": 9223372036854775807,
+      "host_websockets": 0,
+      "in_use_bytes": 82696968,
+      "memory_headroom": true,
+      "open_fds": 0,
+      "owned_cells": 1,
+      "placement_weight": 16,
+      "pressured": false,
+      "rebalance_paused": false,
+      "resident_cells": 1,
+      "restoring": 0,
+      "rss_bytes": 85475328,
+      "sampled_ms": 1790131580336,
+      "shed_cells": 0
+    },
+    "occupied": 1,
+    "owned_cells": 1,
+    "ownership": "s3",
+    "phases": {
+      "resident": 1
+    },
+    "published": [
+      "Cell:e50f86c69204a5a8ae6ee7006d89a4b3cf969c83a1f92b122187499b2abaa733"
+    ],
+    "publishes": 2,
+    "quiescing": 0,
+    "rebalance_failed": 0,
+    "rebalanced": 0,
+    "releasing": 0,
+    "remote_route_refreshes": 0,
+    "residents": [
+      "Cell:e50f86c69204a5a8ae6ee7006d89a4b3cf969c83a1f92b122187499b2abaa733"
+    ],
+    "restoring": 0,
+    "rss_bytes": 85475328,
+    "shedding": null,
+    "shutdown": {
+      "capabilities": {
+        "strict_disk_removal": true
+      },
+      "control_only": false,
+      "operation": null,
+      "runtime_generation": "c4ae0dc5c9b73f70b49f9248757d5bf94abd2121e64028aa72c72217903abe5a",
+      "schema_version": 1
+    },
+    "stops": 1
+  },
+  "rollback": {
+    "activating": 0,
+    "activation_waiting": 0,
+    "adopting": 0,
+    "allocator": {
+      "active_bytes": 10600448,
+      "allocated_bytes": 9396680,
+      "mapped_bytes": 12812288,
+      "resident_bytes": 12091392,
+      "retained_bytes": 0
+    },
+    "capacity_waiting": 0,
+    "cgroup_current_bytes": null,
+    "cgroup_working_set_bytes": null,
+    "deployment": {
+      "cells": {
+        "Cell:e50f86c69204a5a8ae6ee7006d89a4b3cf969c83a1f92b122187499b2abaa733": 3
+      },
+      "draining": [
+        {
+          "generation": 1,
+          "isolates": {
+            "cells": {
+              "observation-test": {
+                "cells": 0,
+                "external_bytes": 666975,
+                "freed": 0,
+                "heap_bytes": 2179072,
+                "live": 0,
+                "live_empty": 0,
+                "requests": 0,
+                "retiring": 1,
+                "turns": 0
+              }
+            },
+            "services": {
+              "observation-test": {
+                "cells": 0,
+                "external_bytes": 666866,
+                "freed": 0,
+                "heap_bytes": 2179072,
+                "live": 0,
+                "live_empty": 0,
+                "requests": 0,
+                "retiring": 1,
+                "turns": 0
+              }
+            },
+            "stateless": {
+              "cells": 0,
+              "external_bytes": 666866,
+              "freed": 0,
+              "heap_bytes": 2179072,
+              "live": 0,
+              "live_empty": 0,
+              "requests": 0,
+              "retiring": 1,
+              "turns": 0
+            }
+          },
+          "version": "854305e196452678"
+        },
+        {
+          "generation": 2,
+          "isolates": {
+            "cells": {
+              "observation-test": {
+                "cells": 0,
+                "external_bytes": 666911,
+                "freed": 0,
+                "heap_bytes": 2179072,
+                "live": 0,
+                "live_empty": 0,
+                "requests": 0,
+                "retiring": 1,
+                "turns": 0
+              }
+            },
+            "services": {
+              "observation-test": {
+                "cells": 0,
+                "external_bytes": 0,
+                "freed": 1,
+                "heap_bytes": 0,
+                "live": 0,
+                "live_empty": 0,
+                "requests": 0,
+                "retiring": 0,
+                "turns": 0
+              }
+            },
+            "stateless": {
+              "cells": 0,
+              "external_bytes": 0,
+              "freed": 1,
+              "heap_bytes": 0,
+              "live": 0,
+              "live_empty": 0,
+              "requests": 0,
+              "retiring": 0,
+              "turns": 0
+            }
+          },
+          "version": "0e1738ed65659e75"
+        }
+      ],
+      "generation": 3,
+      "isolates": {
+        "cells": {
+          "observation-test": {
+            "cells": 1,
+            "external_bytes": 666834,
+            "freed": 0,
+            "heap_bytes": 2179072,
+            "live": 1,
+            "live_empty": 0,
+            "requests": 0,
+            "retiring": 0,
+            "turns": 0
+          }
+        },
+        "services": {
+          "observation-test": {
+            "cells": 0,
+            "external_bytes": 666821,
+            "freed": 0,
+            "heap_bytes": 1916928,
+            "live": 1,
+            "live_empty": 1,
+            "requests": 0,
+            "retiring": 0,
+            "turns": 0
+          }
+        },
+        "stateless": {
+          "cells": 0,
+          "external_bytes": 666821,
+          "freed": 0,
+          "heap_bytes": 1916928,
+          "live": 1,
+          "live_empty": 1,
+          "requests": 0,
+          "retiring": 0,
+          "turns": 0
+        }
+      },
+      "prefix": "deploy/observation-test/854305e196452678",
+      "swapping": 0,
+      "version": "854305e196452678"
+    },
+    "evicting": 0,
+    "handed_off": 0,
+    "handoff_failed": 0,
+    "in_use_bytes": 86122952,
+    "libc_malloc": null,
+    "node_load": {
+      "bucket_format": 2,
+      "cgroup_current_bytes": null,
+      "cgroup_working_set_bytes": null,
+      "cpu_percent_x100": 0,
+      "draining": false,
+      "fd_limit": 9223372036854775807,
+      "host_websockets": 0,
+      "in_use_bytes": 86122952,
+      "memory_headroom": true,
+      "open_fds": 0,
+      "owned_cells": 1,
+      "placement_weight": 16,
+      "pressured": false,
+      "rebalance_paused": false,
+      "resident_cells": 1,
+      "restoring": 0,
+      "rss_bytes": 88817664,
+      "sampled_ms": 1790131581186,
+      "shed_cells": 0
+    },
+    "occupied": 1,
+    "owned_cells": 1,
+    "ownership": "s3",
+    "phases": {
+      "resident": 1
+    },
+    "published": [
+      "Cell:e50f86c69204a5a8ae6ee7006d89a4b3cf969c83a1f92b122187499b2abaa733"
+    ],
+    "publishes": 3,
+    "quiescing": 0,
+    "rebalance_failed": 0,
+    "rebalanced": 0,
+    "releasing": 0,
+    "remote_route_refreshes": 0,
+    "residents": [
+      "Cell:e50f86c69204a5a8ae6ee7006d89a4b3cf969c83a1f92b122187499b2abaa733"
+    ],
+    "restoring": 0,
+    "rss_bytes": 88817664,
+    "shedding": null,
+    "shutdown": {
+      "capabilities": {
+        "strict_disk_removal": true
+      },
+      "control_only": false,
+      "operation": null,
+      "runtime_generation": "c4ae0dc5c9b73f70b49f9248757d5bf94abd2121e64028aa72c72217903abe5a",
+      "schema_version": 1
+    },
+    "stops": 2
+  }
+}

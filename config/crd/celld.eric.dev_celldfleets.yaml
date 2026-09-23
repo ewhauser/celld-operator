@@ -684,6 +684,99 @@ spec:
               rule: '!has(self.capacity) || self.capacity.minReplicas >= self.placement.azCount'
           status:
             properties:
+              application:
+                description: Read-only application deployment observations, independent
+                  of lifecycle readiness.
+                properties:
+                  expectedNodes:
+                    format: int32
+                    type: integer
+                  nodes:
+                    items:
+                      properties:
+                        name:
+                          maxLength: 253
+                          type: string
+                        reason:
+                          maxLength: 64
+                          type: string
+                        runtimeGeneration:
+                          maxLength: 128
+                          type: string
+                        uid:
+                          maxLength: 128
+                          type: string
+                        version:
+                          maxLength: 256
+                          type: string
+                      required:
+                      - name
+                      - reason
+                      - uid
+                      type: object
+                    maxItems: 100
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                  observedAt:
+                    format: date-time
+                    type: string
+                  observedNodes:
+                    format: int32
+                    type: integer
+                  observedVersion:
+                    description: Common loaded version; omitted when versions disagree
+                      or coverage is incomplete.
+                    properties:
+                      prefix:
+                        maxLength: 1024
+                        type: string
+                      version:
+                        maxLength: 256
+                        type: string
+                    required:
+                    - prefix
+                    - version
+                    type: object
+                  pendingCells:
+                    description: Counts from valid fresh observations only; incomplete
+                      coverage is Unknown.
+                    format: int64
+                    type: integer
+                  swappingCells:
+                    format: int64
+                    type: integer
+                  unavailableNodes:
+                    format: int32
+                    type: integer
+                  versions:
+                    items:
+                      properties:
+                        nodes:
+                          format: int32
+                          type: integer
+                        prefix:
+                          maxLength: 1024
+                          type: string
+                        version:
+                          maxLength: 256
+                          type: string
+                      required:
+                      - nodes
+                      - prefix
+                      - version
+                      type: object
+                    maxItems: 100
+                    type: array
+                required:
+                - expectedNodes
+                - observedAt
+                - observedNodes
+                - pendingCells
+                - swappingCells
+                - unavailableNodes
+                type: object
               appliedReplicas:
                 description: Replica target currently applied to the owned Kubernetes
                   workload.

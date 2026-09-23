@@ -12,6 +12,7 @@ import (
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	"github.com/ewhauser/celld-operator/internal/controller"
+	"github.com/ewhauser/celld-operator/internal/runtime/controlplane"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -81,7 +82,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	reconciler := &controller.Reconciler{Collector: collector, Client: direct, Options: controller.Options{OperatorNamespace: *namespace, LocalTest: *localTest, LauncherImage: *launcherImage, FaultPoint: *faultPoint, LocalRWOP: *localRWOP}, NetworkPolicyEnforced: *enforced}
+	reconciler := &controller.Reconciler{ApplicationRuntime: controlplane.New(nil), Collector: collector, Client: direct, Options: controller.Options{OperatorNamespace: *namespace, LocalTest: *localTest, LauncherImage: *launcherImage, FaultPoint: *faultPoint, LocalRWOP: *localRWOP}, NetworkPolicyEnforced: *enforced}
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		return err
 	}

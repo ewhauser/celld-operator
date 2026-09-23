@@ -11,6 +11,7 @@ import (
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	"github.com/ewhauser/celld-operator/internal/launcher"
+	"github.com/ewhauser/celld-operator/internal/runtime/controlplane"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -39,6 +40,7 @@ type Reconciler struct {
 	Recorder              events.EventRecorder
 	launcherCall          func(context.Context, *fleet.CelldFleet, *corev1.Pod, string, string) (launcher.State, error)
 	Collector             capacityCollector
+	ApplicationRuntime    controlplane.ApplicationReader
 	now                   func() time.Time
 }
 
@@ -81,6 +83,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		if result.RequeueAfter == 0 {
 			result.RequeueAfter = reconcileDelay(f)
 		}
+	}
+	if err == nil && r.ApplicationRuntime != nil {
+		err = r.reportApplication(ctx, req.NamespacedName)
 	}
 	return result, err
 }
