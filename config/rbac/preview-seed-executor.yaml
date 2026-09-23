@@ -1,0 +1,39 @@
+# Example permissions for a separately installed, trusted seed executor.
+# Bind these roles to its own ServiceAccount; do not grant them to developers.
+# It cannot create/edit requests, fleets, or storage reservations.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: celld-preview-seed-executor
+  namespace: previews
+rules:
+  - apiGroups: [celld.eric.dev]
+    resources: [celldpreviewseeds]
+    verbs: [get, list, watch]
+  - apiGroups: [celld.eric.dev]
+    resources: [celldpreviewseeds/status]
+    verbs: [get, patch]
+  - apiGroups: [celld.eric.dev]
+    resources: [celldpreviews, celldpreviewpools, celldfleets]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: celld-preview-seed-reservations
+rules:
+  - apiGroups: [celld.eric.dev]
+    resources: [celldstoragereservations]
+    verbs: [get]
+---
+# Repeat in each explicitly authorized source namespace; adapt resourceNames.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: celld-preview-seed-source
+  namespace: production
+rules:
+  - apiGroups: [celld.eric.dev]
+    resources: [celldfleets]
+    resourceNames: [my-app]
+    verbs: [get]

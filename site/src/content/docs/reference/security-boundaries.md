@@ -60,3 +60,14 @@ admits only TCP 8080. Labels identify selected workloads, not untrusted tenants.
 The platform must verify the actual packet source; host-networked proxies and
 external load balancers may require separately administered network rules.
 Gateway listeners, TLS, DNS and ingress controllers remain platform-owned.
+
+## Shared preview pools
+
+Platform administrators own preview pools, child fleet configuration and storage
+reservations; developers can create previews that reference a permitted pool.
+Each preview has a separate runtime, prefix and route. Shared bucket credentials
+do not enforce an IAM boundary between previews: pools are for one trust domain.
+Use separate pools, buckets and identities for mutually untrusted tenants. Custom
+store credentials are same-namespace Secret references injected by kubelet, not
+read into controller status. See [application previews](../../contracts/previews/)
+for disposable-store failure and retention behavior.

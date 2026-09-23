@@ -27,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	controlleroptions "sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 )
 
 const attemptAnnotation = "celld.eric.dev/workload-creation-attempted"
@@ -59,7 +60,10 @@ func specHash(f *fleet.CelldFleet) string {
 	return digest(b)
 }
 func reservationName(f *fleet.CelldFleet) string {
-	return "s3-" + digest([]byte(f.Spec.Storage.Bucket))[:56]
+	if f.Spec.Storage.Prefix != "" {
+		return "s3-scope-" + digest([]byte(f.Spec.Storage.Bucket + "\x00" + f.Spec.Storage.Prefix))[:54]
+	}
+	return bucketReservationName(f.Spec.Storage.Bucket)
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -130,7 +134,10 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 			return r.report(ctx, f, nil, "InvalidStorageClass", "Requires EBS CSI, Delete reclaim policy and WaitForFirstConsumer binding (local test permits the hostpath CSI driver)", false)
 		}
 	}
-	reservation := &fleet.CelldStorageReservation{Name: reservationName(f), Spec: fleet.ReservationSpec{InitialReplicas: f.Spec.Replicas, Bucket: f.Spec.Storage.Bucket, FleetNamespace: f.Namespace, FleetName: f.Name, FleetUID: string(f.UID), SpecHash: specHash(f)}}
+	if err := verifySharedStorage(ctx, r.Client, f); err != nil {
+		return r.report(ctx, f, nil, "StorageScopeConflict", err.Error(), false)
+	}
+	reservation := &fleet.CelldStorageReservation{Name: reservationName(f), Spec: fleetReservationSpec(f)}
 	expected := reservation.Spec
 	if err := r.Create(ctx, reservation); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
@@ -149,6 +156,13 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 		return r.report(ctx, f, h, "StorageScopeConflict", "Bucket is permanently reserved to another fleet UID or immutable configuration; no resources adopted", false)
 	}
 
+	if ready, err := r.gateSeed(ctx, f, reservation); !ready || err != nil {
+		message := "Waiting for all seed objects to be imported"
+		if err != nil {
+			message = err.Error()
+		}
+		return r.report(ctx, f, h, "SeedInitializing", message, false)
+	}
 	for _, obj := range prerequisites(f, r.Options) {
 		if err := r.ensure(ctx, obj); err != nil {
 			return r.report(ctx, f, h, "InfrastructureBlocked", err.Error(), false)
@@ -382,7 +396,11 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.Recorder == nil {
 		r.Recorder = mgr.GetEventRecorder("celld-operator")
 	}
-	return ctrl.NewControllerManagedBy(mgr).For(&fleet.CelldFleet{}).WithOptions(fleetControllerOptions()).Complete(r)
+	return ctrl.NewControllerManagedBy(mgr).For(&fleet.CelldFleet{}).
+		Watches(&fleet.CelldPreviewSeed{}, handler.EnqueueRequestsFromMapFunc(func(_ context.Context, o client.Object) []ctrl.Request {
+			seed := o.(*fleet.CelldPreviewSeed)
+			return []ctrl.Request{{Namespace: seed.Namespace, Name: seed.Spec.Request.Target.FleetName}}
+		})).WithOptions(fleetControllerOptions()).Complete(r)
 }
 
 func fleetControllerOptions() controlleroptions.Options {

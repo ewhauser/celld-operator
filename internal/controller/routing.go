@@ -190,6 +190,15 @@ func (r *Reconciler) reconcileRouting(ctx context.Context, f *fleet.CelldFleet) 
 		}
 	}
 	enabled := f.Spec.Routing != nil && f.DeletionTimestamp.IsZero()
+	initializing := false
+	if enabled && f.Spec.Storage.Initialization != nil {
+		res := &fleet.CelldStorageReservation{}
+		if err := r.Get(ctx, client.ObjectKey{Name: reservationName(f)}, res); err != nil && !apierrors.IsNotFound(err) {
+			return routingFailure(err)
+		}
+		initializing = !seedReceiptReady(f, res)
+		enabled = !initializing
+	}
 	keep := schema.GroupVersionKind{}
 	if enabled {
 		keep = ingressGVK
@@ -247,6 +256,9 @@ func (r *Reconciler) reconcileRouting(ctx context.Context, f *fleet.CelldFleet) 
 		}
 		if !absent {
 			return metav1.ConditionFalse, "RemovingRoute", "Waiting for routing NetworkPolicy deletion"
+		}
+		if initializing {
+			return metav1.ConditionFalse, "SeedInitializing", "Routing waits for all seed objects to be imported"
 		}
 		return metav1.ConditionTrue, "Disabled", "Optional routing is disabled"
 	}

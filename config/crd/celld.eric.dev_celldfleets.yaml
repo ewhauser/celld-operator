@@ -279,7 +279,7 @@ spec:
                     type: string
                   cpuRequest:
                     description: CPU request for the celld container (Kubernetes quantity).
-                      Default 250m.
+                      Default 250m for fleets, 25m for preview pools.
                     pattern: ^[0-9]+(\.[0-9]+)?m?$
                     type: string
                   idleEvictSeconds:
@@ -299,11 +299,13 @@ spec:
                     minimum: 1
                     type: integer
                   memoryLimit:
-                    description: Memory limit for the celld container. Default 1Gi.
+                    description: Memory limit for the celld container. Default 1Gi
+                      for fleets, 256Mi for preview pools.
                     pattern: ^[0-9]+(\.[0-9]+)?(Ki|Mi|Gi|Ti|K|M|G|T)?$
                     type: string
                   memoryRequest:
-                    description: Memory request for the celld container. Default 512Mi.
+                    description: Memory request for the celld container. Default 512Mi
+                      for fleets, 64Mi for preview pools.
                     pattern: ^[0-9]+(\.[0-9]+)?(Ki|Mi|Gi|Ti|K|M|G|T)?$
                     type: string
                 type: object
@@ -537,15 +539,102 @@ spec:
                 pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
                 type: string
               storage:
-                description: Dedicated bucket and local disk settings. Immutable after
-                  creation.
+                description: Reserved object-store scope and local disk settings.
+                  Immutable after creation.
                 properties:
                   bucket:
-                    description: Name of the dedicated S3 bucket. The operator permanently
-                      reserves it for this fleet identity.
+                    description: S3 bucket permanently reserved to this fleet, or
+                      to the referenced preview pool.
                     maxLength: 63
                     minLength: 3
                     pattern: ^[a-z0-9][a-z0-9-]*[a-z0-9]$
+                    type: string
+                  endpoint:
+                    properties:
+                      credentialsSecretName:
+                        description: |-
+                          Same-namespace Secret with accessKeyId and secretAccessKey keys.
+                          Values are injected by kubelet, never read into controller status.
+                        maxLength: 253
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                        type: string
+                      egress:
+                        description: Narrow object-store destination, independent
+                          of fleet peer ingress.
+                        properties:
+                          cidr:
+                            description: Single collector address, /32 for IPv4 or
+                              /128 for IPv6.
+                            type: string
+                          namespace:
+                            description: Collector namespace; only valid with podLabels.
+                            type: string
+                          podLabels:
+                            additionalProperties:
+                              type: string
+                            description: Labels on collector pods. A namespace is
+                              optional for same-namespace pods.
+                            minProperties: 1
+                            type: object
+                        type: object
+                        x-kubernetes-validations:
+                        - message: exactly one of cidr or podLabels is required
+                          rule: has(self.cidr) != has(self.podLabels)
+                      url:
+                        description: HTTP(S) origin only. HTTP explicitly opts into
+                          plaintext transport.
+                        maxLength: 512
+                        pattern: ^https?://[^/?#@]+/?$
+                        type: string
+                    required:
+                    - credentialsSecretName
+                    - egress
+                    - url
+                    type: object
+                  initialization:
+                    description: One-time startup gate, bound to an operator-owned
+                      seed request.
+                    properties:
+                      name:
+                        maxLength: 63
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                        type: string
+                      uid:
+                        maxLength: 64
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    - uid
+                    type: object
+                  poolRef:
+                    description: Pool identity, permanently bound by the whole-bucket
+                      reservation.
+                    properties:
+                      name:
+                        description: Pool in the same namespace as the fleet.
+                        maxLength: 253
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                        type: string
+                      uid:
+                        description: Exact pool UID; names alone cannot transfer a
+                          reservation.
+                        maxLength: 64
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    - uid
+                    type: object
+                  prefix:
+                    description: Single segment within a pool-owned bucket. Nested/overlapping
+                      prefixes are forbidden.
+                    maxLength: 63
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                     type: string
                   region:
                     description: AWS region containing the bucket and the configured
@@ -553,6 +642,28 @@ spec:
                     maxLength: 32
                     pattern: ^[a-z]{2}(-[a-z]+)+-[0-9]+$
                     type: string
+                  scratch:
+                    description: Disk-backed emptyDir request and limit; overrides
+                      sizeGiB only for Bucket.
+                    properties:
+                      limit:
+                        maxLength: 32
+                        pattern: ^[0-9]+(\.[0-9]+)?(Ki|Mi|Gi|Ti|K|M|G|T)?$
+                        type: string
+                      request:
+                        maxLength: 32
+                        pattern: ^[0-9]+(\.[0-9]+)?(Ki|Mi|Gi|Ti|K|M|G|T)?$
+                        type: string
+                    required:
+                    - limit
+                    - request
+                    type: object
+                    x-kubernetes-validations:
+                    - message: scratch limit must cover request
+                      rule: quantity(self.limit).compareTo(quantity(self.request))
+                        >= 0
+                    - message: scratch request must be positive
+                      rule: quantity(self.request).compareTo(quantity('0')) > 0
                   sizeGiB:
                     default: 10
                     description: 'Disk space in GiB: PVC size for PersistentFleet,
@@ -574,6 +685,13 @@ spec:
                 - bucket
                 - region
                 type: object
+                x-kubernetes-validations:
+                - message: prefix and poolRef must be supplied together
+                  rule: has(self.prefix) == has(self.poolRef)
+                - message: initialization requires a pool reservation
+                  rule: '!has(self.initialization) || has(self.poolRef)'
+                - message: custom endpoints require a pool reservation
+                  rule: '!has(self.endpoint) || has(self.poolRef)'
               telemetry:
                 description: |-
                   Optional OTLP collector; omission leaves telemetry disabled. Immutable
@@ -668,6 +786,8 @@ spec:
                 && (!has(self.env) || self.env == oldSelf.env) && has(self.telemetry)
                 == has(oldSelf.telemetry) && (!has(self.telemetry) || self.telemetry
                 == oldSelf.telemetry) && self.bucketWorkload == oldSelf.bucketWorkload
+            - message: shared prefixes and scratch overrides require Bucket profile
+              rule: self.profile == 'Bucket' || (!has(self.storage.prefix) && !has(self.storage.scratch))
             - message: Ordered bucketWorkload requires Bucket profile
               rule: self.bucketWorkload != 'Ordered' || self.profile == 'Bucket'
             - message: azCount must equal the zones count

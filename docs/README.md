@@ -12,6 +12,8 @@ The implementation has three authority boundaries:
 
 Additional contributor references:
 
+- [Preview state seeding](preview-seeding.md): multi-object seed requests and the executor contract.
+- [Application previews](previews.md): shared pools, small isolated runtimes, unique URLs and expiry.
 - [Fleet API](fleet-api.md), [operations](operations.md) and [capacity policy](capacity-policy.md).
 - [Ordered Bucket layout](ordered-bucket.md) and [runtime requirements](runtime-versions.md).
 - [Architecture decision](decisions/README.md) and [qualification](qualification/README.md).

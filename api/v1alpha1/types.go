@@ -11,7 +11,7 @@ import (
 
 var GroupVersion = schema.GroupVersion{Group: "celld.eric.dev", Version: "v1alpha1"}
 var SchemeBuilder = runtime.NewSchemeBuilder(func(s *runtime.Scheme) error {
-	s.AddKnownTypes(GroupVersion, &CelldFleet{}, &CelldFleetList{}, &CelldStorageReservation{}, &CelldStorageReservationList{})
+	s.AddKnownTypes(GroupVersion, &CelldFleet{}, &CelldFleetList{}, &CelldPreview{}, &CelldPreviewList{}, &CelldPreviewPool{}, &CelldPreviewPoolList{}, &CelldPreviewSeed{}, &CelldPreviewSeedList{}, &CelldStorageReservation{}, &CelldStorageReservationList{})
 	metav1.AddToGroupVersion(s, GroupVersion)
 	return nil
 })
@@ -33,6 +33,7 @@ type CelldFleet struct {
 	Status CelldFleetStatus `json:"status,omitempty"`
 }
 
+// +kubebuilder:validation:XValidation:rule="self.profile == 'Bucket' || (!has(self.storage.prefix) && !has(self.storage.scratch))",message="shared prefixes and scratch overrides require Bucket profile"
 // +kubebuilder:validation:XValidation:rule="self.bucketWorkload != 'Ordered' || self.profile == 'Bucket'",message="Ordered bucketWorkload requires Bucket profile"
 // +kubebuilder:validation:XValidation:rule="self.placement.azCount == size(self.placement.zones)",message="azCount must equal the zones count"
 // +kubebuilder:validation:XValidation:rule="self.replicas >= self.placement.azCount",message="replicas must be at least azCount"
@@ -67,7 +68,7 @@ type CelldFleetSpec struct {
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
 	ServiceAccountName string `json:"serviceAccountName"`
-	// Dedicated bucket and local disk settings. Immutable after creation.
+	// Reserved object-store scope and local disk settings. Immutable after creation.
 	Storage StorageSpec `json:"storage"`
 	// Allowed availability zones and scheduling strictness. Immutable after creation.
 	Placement PlacementSpec `json:"placement"`
@@ -174,7 +175,7 @@ type TelemetrySecretKeyRef struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.cpuLimit) || !has(self.cpuRequest) || quantity(self.cpuLimit).isGreaterThan(quantity(self.cpuRequest)) || quantity(self.cpuLimit).compareTo(quantity(self.cpuRequest)) == 0",message="cpuLimit must be at least cpuRequest"
 // +kubebuilder:validation:XValidation:rule="!has(self.memoryLimit) || !has(self.memoryRequest) || quantity(self.memoryLimit).isGreaterThan(quantity(self.memoryRequest)) || quantity(self.memoryLimit).compareTo(quantity(self.memoryRequest)) == 0",message="memoryLimit must be at least memoryRequest"
 type ExecutionSpec struct {
-	// CPU request for the celld container (Kubernetes quantity). Default 250m.
+	// CPU request for the celld container (Kubernetes quantity). Default 250m for fleets, 25m for preview pools.
 	// +optional
 	// +kubebuilder:validation:Pattern=`^[0-9]+(\.[0-9]+)?m?$`
 	CPURequest string `json:"cpuRequest,omitempty"`
@@ -182,11 +183,11 @@ type ExecutionSpec struct {
 	// +optional
 	// +kubebuilder:validation:Pattern=`^[0-9]+(\.[0-9]+)?m?$`
 	CPULimit string `json:"cpuLimit,omitempty"`
-	// Memory request for the celld container. Default 512Mi.
+	// Memory request for the celld container. Default 512Mi for fleets, 64Mi for preview pools.
 	// +optional
 	// +kubebuilder:validation:Pattern=`^[0-9]+(\.[0-9]+)?(Ki|Mi|Gi|Ti|K|M|G|T)?$`
 	MemoryRequest string `json:"memoryRequest,omitempty"`
-	// Memory limit for the celld container. Default 1Gi.
+	// Memory limit for the celld container. Default 1Gi for fleets, 256Mi for preview pools.
 	// +optional
 	// +kubebuilder:validation:Pattern=`^[0-9]+(\.[0-9]+)?(Ki|Mi|Gi|Ti|K|M|G|T)?$`
 	MemoryLimit string `json:"memoryLimit,omitempty"`
@@ -281,9 +282,29 @@ type MaintenanceSpec struct {
 }
 
 // One entire bucket is reserved, including all runtime metadata and peer keys.
-// Prefix multiplexing and alternate S3 authorities are deliberately unsupported.
+// Shared pools reserve the bucket before fleets claim disjoint single-segment prefixes.
+// +kubebuilder:validation:XValidation:rule="has(self.prefix) == has(self.poolRef)",message="prefix and poolRef must be supplied together"
+// +kubebuilder:validation:XValidation:rule="!has(self.initialization) || has(self.poolRef)",message="initialization requires a pool reservation"
+// +kubebuilder:validation:XValidation:rule="!has(self.endpoint) || has(self.poolRef)",message="custom endpoints require a pool reservation"
 type StorageSpec struct {
-	// Name of the dedicated S3 bucket. The operator permanently reserves it for this fleet identity.
+	// One-time startup gate, bound to an operator-owned seed request.
+	// +optional
+	Initialization *SeedReference `json:"initialization,omitempty"`
+	// Single segment within a pool-owned bucket. Nested/overlapping prefixes are forbidden.
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	Prefix string `json:"prefix,omitempty"`
+	// Pool identity, permanently bound by the whole-bucket reservation.
+	// +optional
+	PoolRef *StoragePoolReference `json:"poolRef,omitempty"`
+	// +optional
+	Endpoint *ObjectStoreEndpoint `json:"endpoint,omitempty"`
+	// Disk-backed emptyDir request and limit; overrides sizeGiB only for Bucket.
+	// +optional
+	Scratch *ScratchSpec `json:"scratch,omitempty"`
+	// S3 bucket permanently reserved to this fleet, or to the referenced preview pool.
 	// +kubebuilder:validation:MinLength=3
 	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:Pattern=`^[a-z0-9][a-z0-9-]*[a-z0-9]$`
@@ -421,21 +442,31 @@ type CelldStorageReservation struct {
 	Spec ReservationSpec `json:"spec"`
 }
 type ReservationSpec struct {
+	// Empty means CelldFleet for existing reservations. Pool reservations own the whole bucket.
+	// +optional
+	// +kubebuilder:validation:Enum=CelldPreviewPool
+	OwnerKind string `json:"ownerKind,omitempty"`
+	// Empty reserves the whole bucket. Nonempty reserves exactly one path segment.
+	// +optional
+	Prefix string `json:"prefix,omitempty"`
+	// Custom object-store origin; bucket names remain globally reserved in this cluster.
+	// +optional
+	Endpoint string `json:"endpoint,omitempty"`
 	// InitialReplicas binds the replica component of SpecHash before provisioning.
 	// Optional only for reservations created before this field existed.
 	// +optional
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=100
 	InitialReplicas int32 `json:"initialReplicas,omitempty"`
-	// Dedicated S3 bucket permanently bound to this reservation.
+	// S3 bucket permanently bound to this reservation's owner (and optional prefix).
 	Bucket string `json:"bucket"`
-	// Namespace of the fleet that owns the reservation.
+	// Namespace of the fleet or pool that owns the reservation.
 	FleetNamespace string `json:"fleetNamespace"`
-	// Name of the fleet that owns the reservation.
+	// Name of the fleet or pool that owns the reservation.
 	FleetName string `json:"fleetName"`
-	// Exact Kubernetes UID of the owning fleet; recreating a fleet with the same name does not transfer the reservation.
+	// Exact Kubernetes UID of the owning fleet or pool; reusing a name never transfers a reservation.
 	FleetUID string `json:"fleetUID"`
-	// Fingerprint of the original immutable fleet configuration used to detect conflicting reuse.
+	// Fingerprint of the original immutable owner configuration used to detect conflicting reuse.
 	SpecHash string `json:"specHash"`
 }
 

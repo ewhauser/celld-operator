@@ -21,6 +21,7 @@ disposable CSI disks after verified shutdown.
 - [Install](site/src/content/docs/start/install.mdx), [create a fleet](site/src/content/docs/start/first-fleet.mdx), and [run an application](site/src/content/docs/start/first-application.md).
 - [Choose a storage profile](site/src/content/docs/configure/profiles.md) and [configure AWS permissions](site/src/content/docs/configure/aws.md).
 - [Expose HTTP traffic](site/src/content/docs/configure/networking.md) through an existing Gateway or Ingress controller.
+- [Create isolated application previews](docs/previews.md) on shared pools with small runtimes, unique URLs and automatic expiry.
 - [Scale](site/src/content/docs/operate/scaling.md), [restart](site/src/content/docs/operate/restart.md), [monitor](site/src/content/docs/operate/monitoring.md), and [troubleshoot](site/src/content/docs/troubleshoot/index.md).
 
 The [documentation website](https://ewhauser.github.io/celld-operator/) provides

@@ -1,0 +1,265 @@
+{
+  "run": "preview-density-a5374ed144",
+  "startedUTC": "2026-09-23T15:15:49Z",
+  "runtime": "ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29",
+  "args": {
+    "mode": "limits",
+    "seconds": 65,
+    "counts": [
+      10,
+      30,
+      50,
+      100
+    ],
+    "output": "docs/qualification/preview-density/limits.json"
+  },
+  "phases": [
+    {
+      "label": "small-64-idle",
+      "count": 2,
+      "elapsedSeconds": 66.56261574989185,
+      "nodes": [
+        {
+          "name": "preview-density-a5374ed144-small-64-0-aae7",
+          "prefix": "preview-density-a5374ed144-small-64-0-aae7",
+          "url": "http://127.0.0.1:35833",
+          "profile": "small",
+          "limitMiB": 64,
+          "deploySeconds": 0.20110895903781056,
+          "readySeconds": 10.244416332803667
+        },
+        {
+          "name": "preview-density-a5374ed144-small-64-1-b394",
+          "prefix": "preview-density-a5374ed144-small-64-1-b394",
+          "url": "http://127.0.0.1:35834",
+          "profile": "small",
+          "limitMiB": 64,
+          "deploySeconds": 0.20593199972063303,
+          "readySeconds": 10.215451458003372
+        }
+      ],
+      "initial": [
+        {
+          "name": "preview-density-a5374ed144-small-64-0-aae7",
+          "usage": 18563072,
+          "working": 18550784,
+          "anon": 16519168,
+          "cpuNS": 222297000,
+          "pids": 23
+        },
+        {
+          "name": "preview-density-a5374ed144-small-64-1-b394",
+          "usage": 25432064,
+          "working": 25399296,
+          "anon": 17055744,
+          "cpuNS": 90317000,
+          "pids": 25
+        }
+      ],
+      "final": [
+        {
+          "name": "preview-density-a5374ed144-small-64-0-aae7",
+          "usage": 16072704,
+          "working": 16060416,
+          "anon": 14106624,
+          "cpuNS": 960529000,
+          "pids": 23
+        },
+        {
+          "name": "preview-density-a5374ed144-small-64-1-b394",
+          "usage": 22839296,
+          "working": 22806528,
+          "anon": 14626816,
+          "cpuNS": 841802000,
+          "pids": 25
+        }
+      ],
+      "samples": [
+        [
+          {
+            "name": "preview-density-a5374ed144-small-64-0-aae7",
+            "usage": 18563072,
+            "working": 18550784,
+            "anon": 16519168,
+            "cpuNS": 222297000,
+            "pids": 23
+          },
+          {
+            "name": "preview-density-a5374ed144-small-64-1-b394",
+            "usage": 25432064,
+            "working": 25399296,
+            "anon": 17055744,
+            "cpuNS": 90317000,
+            "pids": 25
+          }
+        ],
+        [
+          {
+            "name": "preview-density-a5374ed144-small-64-0-aae7",
+            "usage": 18567168,
+            "working": 18554880,
+            "anon": 16519168,
+            "cpuNS": 222531000,
+            "pids": 23
+          },
+          {
+            "name": "preview-density-a5374ed144-small-64-1-b394",
+            "usage": 25440256,
+            "working": 25407488,
+            "anon": 17063936,
+            "cpuNS": 90536000,
+            "pids": 25
+          }
+        ],
+        [
+          {
+            "name": "preview-density-a5374ed144-small-64-0-aae7",
+            "usage": 18567168,
+            "working": 18554880,
+            "anon": 16519168,
+            "cpuNS": 332023000,
+            "pids": 23
+          },
+          {
+            "name": "preview-density-a5374ed144-small-64-1-b394",
+            "usage": 25313280,
+            "working": 25280512,
+            "anon": 16973824,
+            "cpuNS": 213199000,
+            "pids": 24
+          }
+        ],
+        [
+          {
+            "name": "preview-density-a5374ed144-small-64-0-aae7",
+            "usage": 17297408,
+            "working": 17285120,
+            "anon": 15286272,
+            "cpuNS": 450502000,
+            "pids": 23
+          },
+          {
+            "name": "preview-density-a5374ed144-small-64-1-b394",
+            "usage": 25276416,
+            "working": 25243648,
+            "anon": 16932864,
+            "cpuNS": 321106000,
+            "pids": 24
+          }
+        ],
+        [
+          {
+            "name": "preview-density-a5374ed144-small-64-0-aae7",
+            "usage": 15986688,
+            "working": 15974400,
+            "anon": 14020608,
+            "cpuNS": 558458000,
+            "pids": 23
+          },
+          {
+            "name": "preview-density-a5374ed144-small-64-1-b394",
+            "usage": 23990272,
+            "working": 23957504,
+            "anon": 15757312,
+            "cpuNS": 434243000,
+            "pids": 24
+          }
+        ],
+        [
+          {
+            "name": "preview-density-a5374ed144-small-64-0-aae7",
+            "usage": 16011264,
+            "working": 15998976,
+            "anon": 14045184,
+            "cpuNS": 672239000,
+            "pids": 23
+          },
+          {
+            "name": "preview-density-a5374ed144-small-64-1-b394",
+            "usage": 22659072,
+            "working": 22626304,
+            "anon": 14475264,
+            "cpuNS": 542890000,
+            "pids": 24
+          }
+        ],
+        [
+          {
+            "name": "preview-density-a5374ed144-small-64-0-aae7",
+            "usage": 16068608,
+            "working": 16056320,
+            "anon": 14086144,
+            "cpuNS": 791582000,
+            "pids": 23
+          },
+          {
+            "name": "preview-density-a5374ed144-small-64-1-b394",
+            "usage": 22687744,
+            "working": 22654976,
+            "anon": 14503936,
+            "cpuNS": 658119000,
+            "pids": 24
+          }
+        ],
+        [
+          {
+            "name": "preview-density-a5374ed144-small-64-0-aae7",
+            "usage": 16080896,
+            "working": 16068608,
+            "anon": 14114816,
+            "cpuNS": 895102000,
+            "pids": 23
+          },
+          {
+            "name": "preview-density-a5374ed144-small-64-1-b394",
+            "usage": 22851584,
+            "working": 22818816,
+            "anon": 14618624,
+            "cpuNS": 770810000,
+            "pids": 25
+          }
+        ]
+      ],
+      "health": {
+        "200": 64,
+        "503": 2
+      },
+      "storageRequests": {
+        "GET LIST 200": 27,
+        "GET wake 404": 4,
+        "PUT wake 200": 2,
+        "GET wake 200": 2,
+        "GET deploy 200": 4,
+        "PUT fleet 200": 30,
+        "PUT nodes 200": 39,
+        "GET drain 404": 4,
+        "GET nodes 200": 24,
+        "GET fleet 200": 26,
+        "PUT wake 412": 2,
+        "errors": 2
+      },
+      "summary": {
+        "meanWorkingMiB": 18.533203125,
+        "maxWorkingMiB": 24.23046875,
+        "totalWorkingMiB": 37.06640625,
+        "cpuMillicoresPerFleet": 11.190342981694048,
+        "storageRequestsPerFleetSecond": 1.2469461884110957
+      }
+    }
+  ],
+  "host": {
+    "NCPU": 4,
+    "MemTotal": 8307101696,
+    "Architecture": "aarch64",
+    "KernelVersion": "6.8.0-117-generic",
+    "ServerVersion": "29.5.2"
+  },
+  "launcherSHA256": "a9152bccdb7f07cf462c3a97802c92e4e43d448e748f8ace5e9b8032813dd2d4",
+  "aborted": "64 MiB workload made insufficient progress after more than two minutes; probe of a new cell timed out after 3 seconds. Re-running with bounded failure count.",
+  "cleanupLogs": {
+    "07e31ea33e28": " celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1025869 idle_us=1025660 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:27.253737Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1019077 idle_us=1018872 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:28.257552Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1003768 idle_us=1002689 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:28.931937Z  INFO celld::actor: node lease attempt started event=\"node_lease_attempt_started\" node=preview-density-a5374ed144-small-64-1-b394 attempt=\"renew\" prior_authority_headroom_ms=6665\n2026-09-23T15:18:28.938235Z  INFO celld::actor: node lease attempt completed event=\"node_lease_attempt\" node=preview-density-a5374ed144-small-64-1-b394 attempt=\"renew\" outcome=\"applied\" elapsed_ms=7 prior_authority_headroom_ms=6658 candidate_headroom_ms=9993\n2026-09-23T15:18:29.261431Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1003822 idle_us=1003423 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:30.287180Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1025629 idle_us=1025464 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:30.498640Z  INFO celld::ownership_store: refreshed the shared fleet sample event=\"fleet_sample_refreshed\" leases=1 elapsed_ms=6\n2026-09-23T15:18:31.287992Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1000768 idle_us=1000148 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:32.267589Z  INFO celld::actor: node lease attempt started event=\"node_lease_attempt_started\" node=preview-density-a5374ed144-small-64-1-b394 attempt=\"renew\" prior_authority_headroom_ms=6664\n2026-09-23T15:18:32.274504Z  INFO celld::actor: node lease attempt completed event=\"node_lease_attempt\" node=preview-density-a5374ed144-small-64-1-b394 attempt=\"renew\" outcome=\"applied\" elapsed_ms=7 prior_authority_headroom_ms=6657 candidate_headroom_ms=9993\n2026-09-23T15:18:32.298205Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1010130 idle_us=1009946 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:33.313786Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1015534 idle_us=1015359 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:34.319920Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1006074 idle_us=1005902 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:35.321427Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1001471 idle_us=1001297 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:35.602025Z  INFO celld::actor: node lease attempt started event=\"node_lease_attempt_started\" node=preview-density-a5374ed144-small-64-1-b394 attempt=\"renew\" prior_authority_headroom_ms=6665\n2026-09-23T15:18:35.609199Z  INFO celld::actor: node lease attempt completed event=\"node_lease_attempt\" node=preview-density-a5374ed144-small-64-1-b394 attempt=\"renew\" outcome=\"applied\" elapsed_ms=8 prior_authority_headroom_ms=6658 candidate_headroom_ms=9992\n2026-09-23T15:18:36.336383Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1014838 idle_us=1014679 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:37.359185Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1022568 idle_us=1022327 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:38.360340Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1001116 idle_us=1000811 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:38.936620Z  INFO celld::actor: node lease attempt started event=\"node_lease_attempt_started\" node=preview-density-a5374ed144-small-64-1-b394 attempt=\"renew\" prior_authority_headroom_ms=6665\n2026-09-23T15:18:38.942587Z  INFO celld::actor: node lease attempt completed event=\"node_lease_attempt\" node=preview-density-a5374ed144-small-64-1-b394 attempt=\"renew\" outcome=\"applied\" elapsed_ms=6 prior_authority_headroom_ms=6659 candidate_headroom_ms=9994\n2026-09-23T15:18:39.369690Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1009298 idle_us=1009123 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:40.398164Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1028406 idle_us=1028203 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:40.507348Z  INFO celld::ownership_store: refreshed the shared fleet sample event=\"fleet_sample_refreshed\" leases=1 elapsed_ms=12\n2026-09-23T15:18:41.401245Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1003032 idle_us=1002844 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:42.271634Z  INFO celld::actor: node lease attempt started event=\"node_lease_attempt_started\" node=preview-density-a5374ed144-small-64-1-b394 attempt=\"renew\" prior_authority_headroom_ms=6665\n2026-09-23T15:18:42.278410Z  INFO celld::actor: node lease attempt completed event=\"node_lease_attempt\" node=preview-density-a5374ed144-small-64-1-b394 attempt=\"renew\" outcome=\"applied\" elapsed_ms=7 prior_authority_headroom_ms=6658 candidate_headroom_ms=9993\n2026-09-23T15:18:42.421401Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1020132 idle_us=1019952 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:43.437255Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1015820 idle_us=1015311 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:44.461940Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1024608 idle_us=1024336 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:45.472142Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1010178 idle_us=1010010 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:45.608696Z  INFO celld::actor: node lease attempt started event=\"node_lease_attempt_started\" node=preview-density-a5374ed144-small-64-1-b394 attempt=\"renew\" prior_authority_headroom_ms=6663\n2026-09-23T15:18:45.615385Z  INFO celld::actor: node lease attempt completed event=\"node_lease_attempt\" node=preview-density-a5374ed144-small-64-1-b394 attempt=\"renew\" outcome=\"applied\" elapsed_ms=7 prior_authority_headroom_ms=6656 candidate_headroom_ms=9993\n2026-09-23T15:18:46.474098Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1001901 idle_us=1001703 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:47.475506Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1001220 idle_us=1000958 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:48.478849Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1003292 idle_us=1003120 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:48.943736Z  INFO celld::actor: node lease attempt started event=\"node_lease_attempt_started\" node=preview-density-a5374ed144-small-64-1-b394 attempt=\"renew\" prior_authority_headroom_ms=6665\n2026-09-23T15:18:48.950631Z  INFO celld::actor: node lease attempt completed event=\"node_lease_attempt\" node=preview-density-a5374ed144-small-64-1-b394 attempt=\"renew\" outcome=\"applied\" elapsed_ms=7 prior_authority_headroom_ms=6658 candidate_headroom_ms=9993\n2026-09-23T15:18:49.490403Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1011505 idle_us=1011146 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:50.506406Z  INFO celld::ownership_store: refreshed the shared fleet sample event=\"fleet_sample_refreshed\" leases=1 elapsed_ms=12\n2026-09-23T15:18:50.508721Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1018244 idle_us=1018051 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:51.531036Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1022289 idle_us=1022079 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:52.279674Z  INFO celld::actor: node lease attempt started event=\"node_lease_attempt_started\" node=preview-density-a5374ed144-small-64-1-b394 attempt=\"renew\" prior_authority_headroom_ms=6664\n2026-09-23T15:18:52.287854Z  INFO celld::actor: node lease attempt completed event=\"node_lease_attempt\" node=preview-density-a5374ed144-small-64-1-b394 attempt=\"renew\" outcome=\"applied\" elapsed_ms=8 prior_authority_headroom_ms=6656 candidate_headroom_ms=9992\n2026-09-23T15:18:52.541931Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1010847 idle_us=1010573 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:53.545233Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1003213 idle_us=1002961 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:54.547615Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1002346 idle_us=1002062 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:55.568497Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1020816 idle_us=1020503 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:55.620214Z  INFO celld::actor: node lease attempt started event=\"node_lease_attempt_started\" node=preview-density-a5374ed144-small-64-1-b394 attempt=\"renew\" prior_authority_headroom_ms=6659\n2026-09-23T15:18:55.626770Z  INFO celld::actor: node lease attempt completed event=\"node_lease_attempt\" node=preview-density-a5374ed144-small-64-1-b394 attempt=\"renew\" outcome=\"applied\" elapsed_ms=6 prior_authority_headroom_ms=6653 candidate_headroom_ms=9994\n2026-09-23T15:18:56.592088Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1023535 idle_us=1023011 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:57.592719Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1000583 idle_us=1000341 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:58.597327Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1004564 idle_us=1004387 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:58.958711Z  INFO celld::actor: node lease attempt started event=\"node_lease_attempt_started\" node=preview-density-a5374ed144-small-64-1-b394 attempt=\"renew\" prior_authority_headroom_ms=6662\n2026-09-23T15:18:58.966507Z  INFO celld::actor: node lease attempt completed event=\"node_lease_attempt\" node=preview-density-a5374ed144-small-64-1-b394 attempt=\"renew\" outcome=\"applied\" elapsed_ms=8 prior_authority_headroom_ms=6654 candidate_headroom_ms=9992\n2026-09-23T15:18:59.623267Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1025908 idle_us=1025537 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n",
+    "56f72cce85e0": "eview-density-a5374ed144-small-64-0-aae7 attempt=\"renew\" prior_authority_headroom_ms=6664\n2026-09-23T15:18:30.177961Z  INFO celld::actor: node lease attempt completed event=\"node_lease_attempt\" node=preview-density-a5374ed144-small-64-0-aae7 attempt=\"renew\" outcome=\"applied\" elapsed_ms=8 prior_authority_headroom_ms=6656 candidate_headroom_ms=9992\n2026-09-23T15:18:30.232999Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1000424 idle_us=1000332 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:31.261594Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1028547 idle_us=1028486 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:32.262762Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1001127 idle_us=1001040 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:32.352998Z  INFO celld::pool: isolate started isolate=6 slot=1 total=2\n2026-09-23T15:18:32.363407Z  INFO celld::ownership_store: refreshed the shared fleet sample event=\"fleet_sample_refreshed\" leases=1 elapsed_ms=3\n2026-09-23T15:18:33.286620Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1023774 idle_us=1023684 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:33.505248Z  INFO celld::actor: node lease attempt started event=\"node_lease_attempt_started\" node=preview-density-a5374ed144-small-64-0-aae7 attempt=\"renew\" prior_authority_headroom_ms=6664\n2026-09-23T15:18:33.512910Z  INFO celld::actor: node lease attempt completed event=\"node_lease_attempt\" node=preview-density-a5374ed144-small-64-0-aae7 attempt=\"renew\" outcome=\"applied\" elapsed_ms=8 prior_authority_headroom_ms=6657 candidate_headroom_ms=9993\n2026-09-23T15:18:34.287107Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1000342 idle_us=1000254 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:35.292252Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1005074 idle_us=1004990 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:36.313290Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1020996 idle_us=1020904 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:36.840540Z  INFO celld::actor: node lease attempt started event=\"node_lease_attempt_started\" node=preview-density-a5374ed144-small-64-0-aae7 attempt=\"renew\" prior_authority_headroom_ms=6665\n2026-09-23T15:18:36.851171Z  INFO celld::actor: node lease attempt completed event=\"node_lease_attempt\" node=preview-density-a5374ed144-small-64-0-aae7 attempt=\"renew\" outcome=\"applied\" elapsed_ms=11 prior_authority_headroom_ms=6654 candidate_headroom_ms=9989\n2026-09-23T15:18:37.336511Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1023172 idle_us=1023110 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:38.360541Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1023984 idle_us=1023919 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:39.385308Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1024731 idle_us=1024648 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:40.075784Z  INFO celld::ownership_store: refreshed the shared fleet sample event=\"fleet_sample_refreshed\" leases=1 elapsed_ms=9\n2026-09-23T15:18:40.178651Z  INFO celld::actor: node lease attempt started event=\"node_lease_attempt_started\" node=preview-density-a5374ed144-small-64-0-aae7 attempt=\"renew\" prior_authority_headroom_ms=6662\n2026-09-23T15:18:40.186268Z  INFO celld::actor: node lease attempt completed event=\"node_lease_attempt\" node=preview-density-a5374ed144-small-64-0-aae7 attempt=\"renew\" outcome=\"applied\" elapsed_ms=8 prior_authority_headroom_ms=6654 candidate_headroom_ms=9992\n2026-09-23T15:18:40.387468Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1002112 idle_us=1002014 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:41.400981Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1013474 idle_us=1013390 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:42.427860Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1026831 idle_us=1026616 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:43.435615Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1007705 idle_us=1007619 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:43.513822Z  INFO celld::actor: node lease attempt started event=\"node_lease_attempt_started\" node=preview-density-a5374ed144-small-64-0-aae7 attempt=\"renew\" prior_authority_headroom_ms=6665\n2026-09-23T15:18:43.521826Z  INFO celld::actor: node lease attempt completed event=\"node_lease_attempt\" node=preview-density-a5374ed144-small-64-0-aae7 attempt=\"renew\" outcome=\"applied\" elapsed_ms=8 prior_authority_headroom_ms=6657 candidate_headroom_ms=9992\n2026-09-23T15:18:44.461740Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1026078 idle_us=1026005 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:45.463064Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1001298 idle_us=1001231 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:46.484693Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1021592 idle_us=1021505 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:46.637044Z  WARN celld: HTTP connections failed event=\"http_connection_failures\" total=1 since_last=1 cause=\"incomplete_message\" cause_total=1 surface=\"public\" peer=Some(172.23.0.1:50240) error=connection closed before message completed\n2026-09-23T15:18:46.848701Z  INFO celld::actor: node lease attempt started event=\"node_lease_attempt_started\" node=preview-density-a5374ed144-small-64-0-aae7 attempt=\"renew\" prior_authority_headroom_ms=6665\n2026-09-23T15:18:46.854921Z  INFO celld::actor: node lease attempt completed event=\"node_lease_attempt\" node=preview-density-a5374ed144-small-64-0-aae7 attempt=\"renew\" outcome=\"applied\" elapsed_ms=7 prior_authority_headroom_ms=6659 candidate_headroom_ms=9994\n2026-09-23T15:18:47.393686Z  INFO celld::ownership_store: refreshed the shared fleet sample event=\"fleet_sample_refreshed\" leases=1 elapsed_ms=6\n2026-09-23T15:18:47.502665Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1017921 idle_us=1017839 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:48.526561Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1023848 idle_us=1023754 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:49.543263Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1016605 idle_us=1016528 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:50.184112Z  INFO celld::actor: node lease attempt started event=\"node_lease_attempt_started\" node=preview-density-a5374ed144-small-64-0-aae7 attempt=\"renew\" prior_authority_headroom_ms=6664\n2026-09-23T15:18:50.190988Z  INFO celld::actor: node lease attempt completed event=\"node_lease_attempt\" node=preview-density-a5374ed144-small-64-0-aae7 attempt=\"renew\" outcome=\"applied\" elapsed_ms=7 prior_authority_headroom_ms=6658 candidate_headroom_ms=9994\n2026-09-23T15:18:50.563205Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1019895 idle_us=1019532 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:51.583380Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1020113 idle_us=1020038 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:52.609606Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1026169 idle_us=1026058 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:53.519111Z  INFO celld::actor: node lease attempt started event=\"node_lease_attempt_started\" node=preview-density-a5374ed144-small-64-0-aae7 attempt=\"renew\" prior_authority_headroom_ms=6665\n2026-09-23T15:18:53.526170Z  INFO celld::actor: node lease attempt completed event=\"node_lease_attempt\" node=preview-density-a5374ed144-small-64-0-aae7 attempt=\"renew\" outcome=\"applied\" elapsed_ms=7 prior_authority_headroom_ms=6658 candidate_headroom_ms=9993\n2026-09-23T15:18:53.630318Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1020683 idle_us=1020593 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:54.655399Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1024997 idle_us=1024925 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:55.075877Z  INFO celld::ownership_store: refreshed the shared fleet sample event=\"fleet_sample_refreshed\" leases=1 elapsed_ms=10\n2026-09-23T15:18:55.672351Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1016797 idle_us=1016716 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:56.672593Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1000183 idle_us=1000115 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:56.854524Z  INFO celld::actor: node lease attempt started event=\"node_lease_attempt_started\" node=preview-density-a5374ed144-small-64-0-aae7 attempt=\"renew\" prior_authority_headroom_ms=6665\n2026-09-23T15:18:56.862199Z  INFO celld::actor: node lease attempt completed event=\"node_lease_attempt\" node=preview-density-a5374ed144-small-64-0-aae7 attempt=\"renew\" outcome=\"applied\" elapsed_ms=8 prior_authority_headroom_ms=6657 candidate_headroom_ms=9992\n2026-09-23T15:18:57.679532Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1006736 idle_us=1006593 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:58.682097Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1002514 idle_us=1002440 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:18:59.705351Z  INFO celld::ltx_repl: ship loop time ledger event=\"log_ship_loop\" wall_us=1023196 idle_us=1023118 stall_us=0 apply_us=0 scan_us=0 group_us=0 capture_us=0 submit_us=0 rounds=0\n2026-09-23T15:19:00.047780Z  INFO celld::pool: isolate retiring isolate=6 slot=1\n2026-09-23T15:19:00.048746Z  INFO celld::pool: isolate freed isolate=5 slot=0\n2026-09-23T15:19:00.189626Z  INFO celld::actor: node lease attempt started event=\"node_lease_attempt_started\" node=preview-density-a5374ed144-small-64-0-aae7 attempt=\"renew\" prior_authority_headroom_ms=6665\n2026-09-23T15:19:00.195866Z  INFO celld::actor: node lease attempt completed event=\"node_lease_attempt\" node=preview-density-a5374ed144-small-64-0-aae7 attempt=\"renew\" outcome=\"applied\" elapsed_ms=7 prior_authority_headroom_ms=6659 candidate_headroom_ms=9994\n2026-09-23T15:19:00.306379Z  WARN celld: HTTP connections failed event=\"http_connection_failures\" total=2 since_last=1 cause=\"incomplete_message\" cause_total=2 surface=\"public\" peer=Some(172.23.0.1:50242) error=connection closed before message completed\n",
+    "58ab408a345e": "",
+    "c94808a37c6c": "INFO: Formatting 1st pool, 1 set(s), 1 drives per set.\nINFO: WARNING: Host local has more than 0 drives of set. A host failure will result in data becoming unavailable.\nMinIO Object Storage Server\nCopyright: 2015-2026 MinIO, Inc.\nLicense: GNU AGPLv3 - https://www.gnu.org/licenses/agpl-3.0.html\nVersion: RELEASE.2025-09-07T16-13-09Z (go1.24.6 linux/arm64)\n\nAPI: http://172.23.0.2:9000  http://127.0.0.1:9000 \nWebUI: http://172.23.0.2:37385 http://127.0.0.1:37385  \n\nDocs: https://docs.min.io\n"
+  }
+}

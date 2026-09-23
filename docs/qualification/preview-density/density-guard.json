@@ -1,0 +1,38 @@
+{
+  "run": "preview-density-dc3aa308cc",
+  "startedUTC": "2026-09-23T15:35:32Z",
+  "runtime": "ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29",
+  "args": {
+    "mode": "density",
+    "limits": [
+      128,
+      256
+    ],
+    "skip_baseline": true,
+    "seconds": 65,
+    "counts": [
+      100
+    ],
+    "output": "docs/qualification/preview-density/density-100.json"
+  },
+  "phases": [],
+  "host": {
+    "NCPU": 4,
+    "MemTotal": 8307101696,
+    "Architecture": "aarch64",
+    "KernelVersion": "6.8.0-117-generic",
+    "ServerVersion": "29.5.2"
+  },
+  "launcherSHA256": "a9152bccdb7f07cf462c3a97802c92e4e43d448e748f8ace5e9b8032813dd2d4",
+  "scaleStop": {
+    "target": 100,
+    "reason": "75% memory headroom guard",
+    "currentBytes": 1288032256,
+    "perNewFleetBytes": 50331648
+  },
+  "completed": true,
+  "cleanupLogs": {
+    "preview-density-dc3aa308cc-store": "INFO: Formatting 1st pool, 1 set(s), 1 drives per set.\nINFO: WARNING: Host local has more than 0 drives of set. A host failure will result in data becoming unavailable.\nMinIO Object Storage Server\nCopyright: 2015-2026 MinIO, Inc.\nLicense: GNU AGPLv3 - https://www.gnu.org/licenses/agpl-3.0.html\nVersion: RELEASE.2025-09-07T16-13-09Z (go1.24.6 linux/arm64)\n\nAPI: http://172.23.0.2:9000  http://127.0.0.1:9000 \nWebUI: http://172.23.0.2:38325 http://127.0.0.1:38325  \n\nDocs: https://docs.min.io",
+    "preview-density-dc3aa308cc-proxy": ""
+  }
+}

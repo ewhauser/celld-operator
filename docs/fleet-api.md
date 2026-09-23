@@ -48,6 +48,11 @@ with coordinated maintenance so new Pods read it.
 A bucket reservation permanently binds the bucket to the fleet UID. Recreating
 a fleet with the same name does not transfer ownership. Its current-operation
 annotation is controller authority; status is a reconstructible projection.
+[Preview pools](previews.md) instead reserve the bucket to a pool UID, then bind
+each child fleet to a disjoint single-segment `storage.prefix` and `poolRef`.
+A pool-generated fleet may set a Secret-backed custom `storage.endpoint` and
+separate `storage.scratch.request`/`limit` for its disk-backed emptyDir. These
+fields are immutable and do not change ordinary dedicated fleet defaults.
 See [current operations](current-operation.md) before changing lifecycle code.
 
 The `/scale` subresource maps desired replicas to `spec.replicas` and observed

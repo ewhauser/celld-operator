@@ -40,17 +40,22 @@ spec:
           spec:
             properties:
               bucket:
-                description: Dedicated S3 bucket permanently bound to this reservation.
+                description: S3 bucket permanently bound to this reservation's owner
+                  (and optional prefix).
+                type: string
+              endpoint:
+                description: Custom object-store origin; bucket names remain globally
+                  reserved in this cluster.
                 type: string
               fleetName:
-                description: Name of the fleet that owns the reservation.
+                description: Name of the fleet or pool that owns the reservation.
                 type: string
               fleetNamespace:
-                description: Namespace of the fleet that owns the reservation.
+                description: Namespace of the fleet or pool that owns the reservation.
                 type: string
               fleetUID:
-                description: Exact Kubernetes UID of the owning fleet; recreating
-                  a fleet with the same name does not transfer the reservation.
+                description: Exact Kubernetes UID of the owning fleet or pool; reusing
+                  a name never transfers a reservation.
                 type: string
               initialReplicas:
                 description: |-
@@ -60,8 +65,18 @@ spec:
                 maximum: 100
                 minimum: 1
                 type: integer
+              ownerKind:
+                description: Empty means CelldFleet for existing reservations. Pool
+                  reservations own the whole bucket.
+                enum:
+                - CelldPreviewPool
+                type: string
+              prefix:
+                description: Empty reserves the whole bucket. Nonempty reserves exactly
+                  one path segment.
+                type: string
               specHash:
-                description: Fingerprint of the original immutable fleet configuration
+                description: Fingerprint of the original immutable owner configuration
                   used to detect conflicting reuse.
                 type: string
             required:

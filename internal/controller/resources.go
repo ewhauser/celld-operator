@@ -91,7 +91,7 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 		{Name: "POD_IP", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "status.podIP"}}},
 		{Name: "CELLD_NODE", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: nodeField}}},
 		{Name: "CELLD_ADVERTISE", Value: advertise},
-		{Name: "CELLD_BUCKET", Value: "s3://" + s.Storage.Bucket},
+		{Name: "CELLD_BUCKET", Value: s.Storage.URL()},
 		{Name: "AWS_REGION", Value: s.Storage.Region},
 		{Name: "CELLD_DURABILITY", Value: mode},
 		{Name: "CELLD_ADDR", Value: "0.0.0.0:8080"},
@@ -107,7 +107,15 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 	if execution.IdleEvictSeconds > 0 {
 		env = append(env, corev1.EnvVar{Name: "CELLD_IDLE_EVICT_S", Value: strconv.Itoa(int(execution.IdleEvictSeconds))})
 	}
-	if opts.LocalTest {
+	if endpoint := s.Storage.Endpoint; endpoint != nil {
+		env = append(env, corev1.EnvVar{Name: "S3_ENDPOINT", Value: endpoint.URL})
+		if parsed, _ := url.Parse(endpoint.URL); parsed.Scheme == "http" {
+			env = append(env, corev1.EnvVar{Name: "AWS_ALLOW_HTTP", Value: "true"})
+		}
+		for _, key := range [][2]string{{"AWS_ACCESS_KEY_ID", "accessKeyId"}, {"AWS_SECRET_ACCESS_KEY", "secretAccessKey"}} {
+			env = append(env, corev1.EnvVar{Name: key[0], ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{Name: endpoint.CredentialsSecretName, Key: key[1]}}})
+		}
+	} else if opts.LocalTest {
 		env = append(env, corev1.EnvVar{Name: "S3_ENDPOINT", Value: "http://minio.celld-test-store.svc:9000"}, corev1.EnvVar{Name: "AWS_ALLOW_HTTP", Value: "true"}, corev1.EnvVar{Name: "AWS_ACCESS_KEY_ID", Value: "qualification"}, corev1.EnvVar{Name: "AWS_SECRET_ACCESS_KEY", Value: "qualification-only"})
 	}
 	for _, entry := range s.Env {
@@ -209,8 +217,13 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 	}
 	if s.Profile == "Bucket" {
 		size := resource.MustParse(fmt.Sprintf("%dGi", s.Storage.SizeGiB))
+		request := size.DeepCopy()
+		if s.Storage.Scratch != nil {
+			size = resource.MustParse(s.Storage.Scratch.Limit)
+			request = resource.MustParse(s.Storage.Scratch.Request)
+		}
 		pod.Volumes = []corev1.Volume{{Name: "data", EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: &size}}}
-		pod.Containers[0].Resources.Requests[corev1.ResourceEphemeralStorage] = size
+		pod.Containers[0].Resources.Requests[corev1.ResourceEphemeralStorage] = request
 		pod.Containers[0].Resources.Limits[corev1.ResourceEphemeralStorage] = size
 	}
 	if opts.LauncherImage != "" {
@@ -357,26 +370,11 @@ func prerequisites(f *fleet.CelldFleet, opts Options) []client.Object {
 			Ports: []networkingv1.NetworkPolicyPort{port(9000)},
 		})
 	}
+	if endpoint := f.Spec.Storage.Endpoint; endpoint != nil {
+		policy.Spec.Egress = append(policy.Spec.Egress, destinationRule(endpoint.URL, endpoint.Egress))
+	}
 	if t := f.Spec.Telemetry; t != nil {
-		u, _ := url.Parse(t.CollectorURL) // validated before provisioning
-		p := int32(80)
-		if u.Scheme == "https" {
-			p = 443
-		}
-		if u.Port() != "" {
-			parsed, _ := strconv.Atoi(u.Port())
-			p = int32(parsed)
-		}
-		peer := networkingv1.NetworkPolicyPeer{}
-		if t.Egress.CIDR != "" {
-			peer.IPBlock = &networkingv1.IPBlock{CIDR: t.Egress.CIDR}
-		} else {
-			peer.PodSelector = &metav1.LabelSelector{MatchLabels: t.Egress.PodLabels}
-			if t.Egress.Namespace != "" {
-				peer.NamespaceSelector = &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": t.Egress.Namespace}}
-			}
-		}
-		policy.Spec.Egress = append(policy.Spec.Egress, networkingv1.NetworkPolicyEgressRule{To: []networkingv1.NetworkPolicyPeer{peer}, Ports: []networkingv1.NetworkPolicyPort{port(p)}})
+		policy.Spec.Egress = append(policy.Spec.Egress, destinationRule(t.CollectorURL, t.Egress))
 	}
 	pdb := &policyv1.PodDisruptionBudget{
 		ObjectMeta: metadata(f, f.Name),
@@ -394,4 +392,26 @@ func applicationService(f *fleet.CelldFleet) *corev1.Service {
 			Ports:    []corev1.ServicePort{{Name: "application", Port: 8080, TargetPort: intstr.FromInt32(8080)}},
 		},
 	}
+}
+
+func destinationRule(rawURL string, egress fleet.CollectorEgress) networkingv1.NetworkPolicyEgressRule {
+	u, _ := url.Parse(rawURL) // validated before provisioning
+	p := int32(80)
+	if u.Scheme == "https" {
+		p = 443
+	}
+	if u.Port() != "" {
+		parsed, _ := strconv.Atoi(u.Port())
+		p = int32(parsed)
+	}
+	peer := networkingv1.NetworkPolicyPeer{}
+	if egress.CIDR != "" {
+		peer.IPBlock = &networkingv1.IPBlock{CIDR: egress.CIDR}
+	} else {
+		peer.PodSelector = &metav1.LabelSelector{MatchLabels: egress.PodLabels}
+		if egress.Namespace != "" {
+			peer.NamespaceSelector = &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": egress.Namespace}}
+		}
+	}
+	return networkingv1.NetworkPolicyEgressRule{To: []networkingv1.NetworkPolicyPeer{peer}, Ports: []networkingv1.NetworkPolicyPort{{Protocol: new(corev1.ProtocolTCP), Port: new(intstr.FromInt32(p))}}}
 }

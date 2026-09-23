@@ -1,0 +1,15 @@
+{
+  "operatorHEAD": "53f73b1e73d359996845535133dc74415c77635f",
+  "runtimeSource": "739f2baa87a5bfc4bfe04e317adf6d774edf8740",
+  "files": {
+    "hack/preview-density/run.py": "d9a35d7a070b00962a6a1a9c2a8dbdd06a142952c698739e7e551c6b90e9a327",
+    "hack/preview-density/observe.py": "7bd43039d418e19d5731896def1137482360327f61b2f95c1ada597a097cc6d7",
+    "hack/preview-density/proxy.mjs": "c8928c6904fb2748132c5e53904112d6f839ffe6586cbe5b0e16cd7784b4c087",
+    "hack/preview-density/app/index.js": "86425c2eb1217de7b9f107787b5a6b72074eeef1bdab9bef1028d3d8def4ed40",
+    "hack/preview-density/app/wrangler.jsonc": "fc175a6d31c74d81f9fb814126ebcc0df9312a7964445f10590ebedc2244253d",
+    "cmd/celld-launcher/main.go": "1bcbd186100260524a9b564194576647eb84934a8ec0be45d99bd01401a7efc1",
+    "internal/launcher/supervisor.go": "2001bc611d02901abfd248f6124efc7ae461e2939155541f29d11aee749e06e2"
+  },
+  "note": "files hashes describe the corrected density rerun. quietHarnessSHA256 additionally includes the post-measurement two-fleet isolation check. Earlier runs predate the readiness and proxy fixes documented in README.",
+  "quietHarnessSHA256": "caa662c895f146f2470a6100a6635f3e8fdd0c7e4516b47555773ffe63c9fec3"
+}

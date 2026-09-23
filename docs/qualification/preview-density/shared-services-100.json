@@ -1,0 +1,929 @@
+{
+  "run": "preview-density-8c1b783de0",
+  "samples": [
+    {
+      "elapsedSeconds": 0.07667495822533965,
+      "containerCount": 18,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 25432064,
+          "working": 25427968,
+          "anon": 24018944,
+          "cpuNS": 310955000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 92241920,
+          "working": 92241920,
+          "anon": 90124288,
+          "cpuNS": 458650000,
+          "pids": 11
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 10.183813292067498,
+      "containerCount": 34,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 28852224,
+          "working": 28848128,
+          "anon": 27369472,
+          "cpuNS": 859239000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 171933696,
+          "working": 171933696,
+          "anon": 168116224,
+          "cpuNS": 934342000,
+          "pids": 11
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 20.29581016721204,
+      "containerCount": 50,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 29704192,
+          "working": 29700096,
+          "anon": 28164096,
+          "cpuNS": 1432810000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 199032832,
+          "working": 199032832,
+          "anon": 193101824,
+          "cpuNS": 1535910000,
+          "pids": 11
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 30.378264750353992,
+      "containerCount": 52,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 29921280,
+          "working": 29917184,
+          "anon": 28352512,
+          "cpuNS": 1967881000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 235143168,
+          "working": 235143168,
+          "anon": 227233792,
+          "cpuNS": 2118999000,
+          "pids": 11
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 40.45583120826632,
+      "containerCount": 52,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 29949952,
+          "working": 29945856,
+          "anon": 28352512,
+          "cpuNS": 2407843000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 238841856,
+          "working": 238841856,
+          "anon": 229289984,
+          "cpuNS": 2576086000,
+          "pids": 11
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 50.53684625029564,
+      "containerCount": 52,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30072832,
+          "working": 30068736,
+          "anon": 28459008,
+          "cpuNS": 2815388000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 243720192,
+          "working": 243720192,
+          "anon": 232525824,
+          "cpuNS": 3092508000,
+          "pids": 11
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 60.644911375362426,
+      "containerCount": 52,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30208000,
+          "working": 30203904,
+          "anon": 28532736,
+          "cpuNS": 3271875000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 246677504,
+          "working": 246677504,
+          "anon": 233771008,
+          "cpuNS": 3605763000,
+          "pids": 11
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 70.74588808324188,
+      "containerCount": 52,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30281728,
+          "working": 30277632,
+          "anon": 28688384,
+          "cpuNS": 3741661000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 248311808,
+          "working": 248311808,
+          "anon": 233803776,
+          "cpuNS": 4056500000,
+          "pids": 11
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 80.84728204226121,
+      "containerCount": 52,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30281728,
+          "working": 30277632,
+          "anon": 28704768,
+          "cpuNS": 4178329000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 251228160,
+          "working": 251228160,
+          "anon": 234967040,
+          "cpuNS": 4548921000,
+          "pids": 11
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 90.96480120811611,
+      "containerCount": 52,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30248960,
+          "working": 30244864,
+          "anon": 28647424,
+          "cpuNS": 4607542000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 260055040,
+          "working": 260055040,
+          "anon": 242032640,
+          "cpuNS": 5062712000,
+          "pids": 11
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 101.06381712527946,
+      "containerCount": 52,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30195712,
+          "working": 30191616,
+          "anon": 28639232,
+          "cpuNS": 5012804000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 261656576,
+          "working": 261656576,
+          "anon": 242057216,
+          "cpuNS": 5509542000,
+          "pids": 11
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 111.1799409170635,
+      "containerCount": 68,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30228480,
+          "working": 30224384,
+          "anon": 28643328,
+          "cpuNS": 5562310000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 284164096,
+          "working": 284164096,
+          "anon": 262189056,
+          "cpuNS": 6102661000,
+          "pids": 11
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 121.44348508305848,
+      "containerCount": 69,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30355456,
+          "working": 30351360,
+          "anon": 28733440,
+          "cpuNS": 6176449000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 310968320,
+          "working": 310968320,
+          "anon": 286322688,
+          "cpuNS": 6794853000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 131.65566695807502,
+      "containerCount": 84,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30584832,
+          "working": 30580736,
+          "anon": 28942336,
+          "cpuNS": 6793246000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 314089472,
+          "working": 314089472,
+          "anon": 286867456,
+          "cpuNS": 7367787000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 141.80945845833048,
+      "containerCount": 100,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30752768,
+          "working": 30748672,
+          "anon": 28946432,
+          "cpuNS": 7685247000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 323579904,
+          "working": 323579904,
+          "anon": 292679680,
+          "cpuNS": 8344962000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 151.97056408319622,
+      "containerCount": 102,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30789632,
+          "working": 30785536,
+          "anon": 28958720,
+          "cpuNS": 8457674000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 337379328,
+          "working": 337379328,
+          "anon": 302817280,
+          "cpuNS": 9244252000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 162.10407841717824,
+      "containerCount": 102,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30756864,
+          "working": 30752768,
+          "anon": 28917760,
+          "cpuNS": 8993106000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 340623360,
+          "working": 340623360,
+          "anon": 302829568,
+          "cpuNS": 9875546000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 172.2618724172935,
+      "containerCount": 102,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30736384,
+          "working": 30732288,
+          "anon": 28913664,
+          "cpuNS": 9525069000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 344870912,
+          "working": 344870912,
+          "anon": 303591424,
+          "cpuNS": 10577305000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 182.43173220800236,
+      "containerCount": 102,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30760960,
+          "working": 30756864,
+          "anon": 28917760,
+          "cpuNS": 10182336000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 348078080,
+          "working": 348078080,
+          "anon": 303611904,
+          "cpuNS": 11328783000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 192.5977607080713,
+      "containerCount": 102,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30851072,
+          "working": 30846976,
+          "anon": 28921856,
+          "cpuNS": 10754861000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 351444992,
+          "working": 351444992,
+          "anon": 303693824,
+          "cpuNS": 12030245000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 202.75526250014082,
+      "containerCount": 102,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30818304,
+          "working": 30814208,
+          "anon": 28950528,
+          "cpuNS": 11365288000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 354897920,
+          "working": 354897920,
+          "anon": 303767552,
+          "cpuNS": 12772308000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 212.90286012506112,
+      "containerCount": 102,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30691328,
+          "working": 30687232,
+          "anon": 28938240,
+          "cpuNS": 12017648000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 358305792,
+          "working": 358305792,
+          "anon": 303788032,
+          "cpuNS": 13531764000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 223.07857495825738,
+      "containerCount": 102,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30695424,
+          "working": 30691328,
+          "anon": 28942336,
+          "cpuNS": 12548862000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 361545728,
+          "working": 361545728,
+          "anon": 303828992,
+          "cpuNS": 14191896000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 233.22394729219377,
+      "containerCount": 102,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30724096,
+          "working": 30720000,
+          "anon": 28938240,
+          "cpuNS": 13268906000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 366968832,
+          "working": 366968832,
+          "anon": 303906816,
+          "cpuNS": 15065586000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 243.35390645824373,
+      "containerCount": 102,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30703616,
+          "working": 30699520,
+          "anon": 28913664,
+          "cpuNS": 13939379000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 370442240,
+          "working": 370442240,
+          "anon": 303968256,
+          "cpuNS": 15854875000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 253.50602312525734,
+      "containerCount": 102,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30662656,
+          "working": 30658560,
+          "anon": 28880896,
+          "cpuNS": 14561299000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 373719040,
+          "working": 373719040,
+          "anon": 303976448,
+          "cpuNS": 16566485000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 263.6711946669966,
+      "containerCount": 102,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30756864,
+          "working": 30752768,
+          "anon": 28966912,
+          "cpuNS": 15317963000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 378347520,
+          "working": 378347520,
+          "anon": 304017408,
+          "cpuNS": 17472945000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 273.8328766669147,
+      "containerCount": 102,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30728192,
+          "working": 30724096,
+          "anon": 28950528,
+          "cpuNS": 15949948000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 381726720,
+          "working": 381726720,
+          "anon": 304046080,
+          "cpuNS": 18225271000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 283.9865576252341,
+      "containerCount": 102,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30732288,
+          "working": 30728192,
+          "anon": 28934144,
+          "cpuNS": 16480543000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 384876544,
+          "working": 384876544,
+          "anon": 304050176,
+          "cpuNS": 18847241000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 294.15291587496176,
+      "containerCount": 102,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30990336,
+          "working": 30986240,
+          "anon": 28938240,
+          "cpuNS": 17033389000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 318308352,
+          "working": 318308352,
+          "anon": 305074176,
+          "cpuNS": 19777761000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 304.38833050010726,
+      "containerCount": 102,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30683136,
+          "working": 30679040,
+          "anon": 28934144,
+          "cpuNS": 17708041000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 321818624,
+          "working": 321818624,
+          "anon": 305082368,
+          "cpuNS": 20551766000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 314.57431995822117,
+      "containerCount": 102,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30707712,
+          "working": 30703616,
+          "anon": 28897280,
+          "cpuNS": 18325159000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 325160960,
+          "working": 325160960,
+          "anon": 305102848,
+          "cpuNS": 21287031000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 324.72218279214576,
+      "containerCount": 102,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30674944,
+          "working": 30670848,
+          "anon": 28921856,
+          "cpuNS": 19004514000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 328589312,
+          "working": 328589312,
+          "anon": 305139712,
+          "cpuNS": 22052415000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 334.91769383335486,
+      "containerCount": 101,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30580736,
+          "working": 30576640,
+          "anon": 28815360,
+          "cpuNS": 19823492000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 332574720,
+          "working": 332574720,
+          "anon": 305541120,
+          "cpuNS": 22972903000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 345.0662547503598,
+      "containerCount": 85,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30605312,
+          "working": 30601216,
+          "anon": 28819456,
+          "cpuNS": 20652924000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 335990784,
+          "working": 335990784,
+          "anon": 305553408,
+          "cpuNS": 23916946000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 355.34986404236406,
+      "containerCount": 79,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30674944,
+          "working": 30670848,
+          "anon": 28823552,
+          "cpuNS": 21413861000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 339435520,
+          "working": 339435520,
+          "anon": 305991680,
+          "cpuNS": 24810654000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 365.4802772081457,
+      "containerCount": 69,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30580736,
+          "working": 30576640,
+          "anon": 28749824,
+          "cpuNS": 22137865000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 344035328,
+          "working": 344035328,
+          "anon": 308219904,
+          "cpuNS": 25637272000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 375.5736649581231,
+      "containerCount": 53,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30662656,
+          "working": 30658560,
+          "anon": 28798976,
+          "cpuNS": 22820092000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 348835840,
+          "working": 348835840,
+          "anon": 310894592,
+          "cpuNS": 26427473000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 385.6375414999202,
+      "containerCount": 37,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30732288,
+          "working": 30728192,
+          "anon": 28860416,
+          "cpuNS": 23428109000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 350576640,
+          "working": 350576640,
+          "anon": 310915072,
+          "cpuNS": 27089907000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 395.6866495832801,
+      "containerCount": 21,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 31326208,
+          "working": 31322112,
+          "anon": 28884992,
+          "cpuNS": 24028723000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 355872768,
+          "working": 355872768,
+          "anon": 314830848,
+          "cpuNS": 27788968000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 405.7351502920501,
+      "containerCount": 18,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30728192,
+          "working": 30724096,
+          "anon": 28876800,
+          "cpuNS": 24545827000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 356577280,
+          "working": 356577280,
+          "anon": 314830848,
+          "cpuNS": 28358204000,
+          "pids": 12
+        }
+      ]
+    },
+    {
+      "elapsedSeconds": 415.7696252502501,
+      "containerCount": 5,
+      "services": [
+        {
+          "name": "preview-density-8c1b783de0-proxy",
+          "usage": 30715904,
+          "working": 30711808,
+          "anon": 28893184,
+          "cpuNS": 24893303000,
+          "pids": 11
+        },
+        {
+          "name": "preview-density-8c1b783de0-store",
+          "usage": 356782080,
+          "working": 356782080,
+          "anon": 314843136,
+          "cpuNS": 28759665000,
+          "pids": 12
+        }
+      ]
+    }
+  ]
+}
