@@ -97,37 +97,41 @@ code loaded by the runtime. They are independent of the container image digest,
 Kubernetes object generation and fleet lifecycle readiness. Observation never
 publishes code, calls `/reload`, changes replicas or authorizes runtime removal.
 
-The operator polls the private, read-only `GET /state?view=application` endpoint
-at most once every 15 seconds per fleet, with eight concurrent requests and a
-10-second collection deadline. Both the snapshot and the runtime's last successful
-deployment-pointer observation must be at most 90 seconds old. The runtime image
-must support application observation schema 1; earlier images report Unknown
-with `Unsupported` node details and continue normal lifecycle operations. No
-image pin is automatically changed by installing this operator version.
+The operator reads the existing private `GET /state` endpoint at most once every
+15 seconds per fleet, with eight concurrent requests, a 10-second collection
+deadline and a 1 MiB limit per response. This requires no new runtime patch or
+image update. Missing deployment fields, oversized responses and unavailable
+nodes yield Unknown while normal lifecycle operations continue.
 
 Status contains a collection timestamp, expected and freshly observed node
-counts, unavailable coverage, observed versions grouped by version and artifact
-prefix, pending/swapping cell totals and at most 100 Pod diagnostics. Runtime
-incarnation and Pod identity fence observations; a changed membership inventory
-invalidates convergence. Counts omit unavailable samples and are not complete
-fleet totals when coverage is incomplete. `target` is present only with complete
-fresh coverage and agreement on the observed pointer's version and prefix.
+counts, unavailable coverage, loaded versions grouped by version and artifact
+prefix, pending/swapping cell totals and at most 100 Pod diagnostics. Responses
+must be at most 90 seconds old. Pod UID, container incarnation, IP, readiness and
+workload ownership are checked against opening and closing membership inventories.
+Counts omit unavailable samples and are not complete fleet totals when coverage
+is incomplete. `observedVersion` is present only with complete fresh coverage and
+agreement on the loaded version and prefix; cells may still be transitioning.
 
 | ApplicationConverged | Meaning |
 | --- | --- |
-| True / Converged | Every current Pod is ready and freshly observed, all agree on the target and have adopted it, and no resident cells remain pending or swapping. |
-| False / Converging | Coverage and target agreement are complete, but a node or its resident cells is still transitioning. |
-| False / AdoptionFailed | A runtime reports failure to adopt the agreed target; previous code may still be serving. |
-| Unknown | Observations are stale, unsupported, incomplete, interrupted by membership changes, or disagree about the target. |
+| True / Converged | Every current Pod is ready and freshly observed, all report the same loaded version and prefix, and no resident cells are observed pending or swapping. |
+| False / MixedVersions | Coverage is complete, but loaded versions or artifact prefixes differ. |
+| False / Converging | Nodes agree on the loaded version, but resident cells are still transitioning. |
+| Unknown | Observations are stale, unsupported, malformed, incomplete or interrupted by membership changes. |
 
-Convergence is relative to the **last observed target**, not a promise that no
-newer deployment has since been published. A pipeline waiting for a particular
-release must also compare `status.application.target.version` with the version
-it deployed and require a fresh `observedAt`. A common old version alone does not
-establish convergence. Numeric application generations are process-local and are
-never compared across nodes; rolling back to an older version is supported.
+**This reports observed agreement, not adoption of the latest published release.**
+The existing API exposes neither the deployment pointer's freshness nor failed
+adoption attempts. All nodes may agree on an old version even when a newer
+release cannot be loaded or the pointer is unavailable. A pipeline waiting for a
+particular release must compare `status.application.observedVersion.version` and
+`prefix` with its expected artifacts, require `ApplicationConverged=True` and
+check a fresh `observedAt` and condition `observedGeneration`.
 
-This condition covers node adoption and resident-cell transition. It does not
-prove application health or that all long-lived requests from earlier generations
-have ended. It does not gate `Ready`, scaling, maintenance or deletion. If the
-operator stops, its persisted observations age; clients must check timestamps.
+Numeric application generations are process-local and never compared across
+nodes. A resident cell is pending when its generation differs from its own node's
+current generation; rollback is supported. Celld samples its actor census and
+current generation separately, so this is an observation rather than an atomic
+rollout-completion guarantee. It does not prove application health or that every
+long-lived request from an earlier generation has ended. The condition does not
+gate `Ready`, scaling, maintenance or deletion. If the operator stops, persisted
+observations age; clients must check timestamps.

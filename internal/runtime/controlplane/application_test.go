@@ -9,102 +9,93 @@ import (
 	"time"
 )
 
-func applicationWire(now time.Time) map[string]any {
-	return map[string]any{"schema_version": 1, "runtime_generation": "generation-a", "sampled_at_ms": now.UnixMilli(), "snapshot_valid": true,
-		"loaded": map[string]any{"version": "v2", "prefix": "deploy/v2/"}, "local_generation": 2,
-		"target":         map[string]any{"version": "v2", "prefix": "deploy/v2/", "observed_at_ms": now.UnixMilli()},
-		"pointer_status": "observed", "adoption_status": "adopted", "resident_cells": 3, "pending_cells": 0, "swapping_cells": 0}
+func applicationWire() map[string]any {
+	return map[string]any{"deployment": map[string]any{"version": "v2", "prefix": "deploy/v2/", "generation": 2, "swapping": 0, "cells": map[string]any{"cell-a": 2, "cell-b": 1}}}
 }
 func TestApplicationReadOnlyContract(t *testing.T) {
-	now := time.Now().Truncate(time.Millisecond)
-	data, _ := json.Marshal(applicationWire(now))
+	now := time.Now()
+	data, _ := json.Marshal(applicationWire())
 	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.RequestURI() != "/state?view=application" {
-			t.Error("not a read-only compact observation", r.Method, r.URL)
+		if r.Method != http.MethodGet || r.URL.RequestURI() != "/state" {
+			t.Error("not an existing read-only observation", r.Method, r.URL)
 		}
 		writeJSON(w, string(data))
 	})
-	a, err := c.Application(t.Context(), target)
+	a, err := c.Application(t.Context(), Target{IP: target.IP})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !a.Fresh(time.Now(), now.Add(-time.Minute), 90*time.Second) || a.Loaded.Version != "v2" {
-		t.Fatalf("valid snapshot lost: %+v", a)
+	if !a.Fresh(time.Now(), now.Add(-time.Minute), 90*time.Second) || a.Loaded.Version != "v2" || a.PendingCells != 1 || a.ResidentCells != 2 {
+		t.Fatalf("valid observation lost: %+v", a)
 	}
 	if _, err := c.Application(t.Context(), Target{IP: target.IP, Generation: "another-process"}); err == nil {
-		t.Fatal("accepted wrong incarnation")
+		t.Fatal("accepted unverifiable incarnation")
 	}
 }
 func TestApplicationRejectsMalformedOrUnsupportedSnapshots(t *testing.T) {
-	now := time.Now().Truncate(time.Millisecond)
-	for _, scenario := range []string{"missing count", "null count", "negative", "excessive", "unknown schema", "missing schema", "empty identity", "missing target", "bad target", "bad enum", "oversized version", "invalid pending", "missing local generation"} {
+	for _, scenario := range []string{"missing deployment", "null deployment", "missing cells", "null cells", "missing swapping", "null swapping", "negative swapping", "excessive swapping", "oversized version", "missing generation", "zero generation", "future cell generation", "null cell generation", "negative cell generation", "empty prefix"} {
 		t.Run(scenario, func(t *testing.T) {
-			m := applicationWire(now)
+			m := applicationWire()
+			d := m["deployment"].(map[string]any)
 			switch scenario {
-			case "missing count":
-				delete(m, "pending_cells")
-			case "null count":
-				m["pending_cells"] = nil
-			case "negative":
-				m["pending_cells"] = -1
-			case "excessive":
-				m["resident_cells"] = 1e12
-			case "unknown schema":
-				m["schema_version"] = 2
-			case "missing schema":
-				delete(m, "schema_version")
-			case "empty identity":
-				m["runtime_generation"] = ""
-			case "missing target":
-				delete(m, "target")
-			case "bad target":
-				m["target"] = nil
-			case "bad enum":
-				m["adoption_status"] = "successful"
+			case "missing deployment":
+				delete(m, "deployment")
+			case "null deployment":
+				m["deployment"] = nil
+			case "missing cells":
+				delete(d, "cells")
+			case "null cells":
+				d["cells"] = nil
+			case "missing swapping":
+				delete(d, "swapping")
+			case "null swapping":
+				d["swapping"] = nil
+			case "negative swapping":
+				d["swapping"] = -1
+			case "excessive swapping":
+				d["swapping"] = 1e12
 			case "oversized version":
-				m["loaded"].(map[string]any)["version"] = strings.Repeat("a", 257)
-			case "invalid pending":
-				m["pending_cells"] = 4
-			case "missing local generation":
-				delete(m, "local_generation")
+				d["version"] = strings.Repeat("a", 257)
+			case "missing generation":
+				delete(d, "generation")
+			case "zero generation":
+				d["generation"] = 0
+			case "future cell generation":
+				d["cells"] = map[string]any{"cell": 3}
+			case "null cell generation":
+				d["cells"] = map[string]any{"cell": nil}
+			case "negative cell generation":
+				d["cells"] = map[string]any{"cell": -1}
+			case "empty prefix":
+				d["prefix"] = ""
 			}
 			data, _ := json.Marshal(m)
-			if _, err := decodeApplication(data, "", now); err == nil {
-				t.Fatal("invalid snapshot accepted")
+			if _, err := decodeApplication(data, "", time.Now()); err == nil {
+				t.Fatal("invalid observation accepted")
 			}
 		})
 	}
 }
-func TestApplicationFreshnessRequiresBothObservations(t *testing.T) {
-	now := time.Now().Truncate(time.Millisecond)
-	data, _ := json.Marshal(applicationWire(now))
+func TestApplicationFreshness(t *testing.T) {
+	now := time.Now()
+	data, _ := json.Marshal(applicationWire())
 	good, err := decodeApplication(data, "", now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, scenario := range []string{"old target", "future target", "old sample", "future sample", "old response", "previous pod", "inconsistent snapshot", "pointer failure"} {
+	for _, scenario := range []string{"old response", "future response", "previous pod", "missing deployment"} {
 		t.Run(scenario, func(t *testing.T) {
 			a := good
-			target := *a.Target
-			a.Target = &target
 			started := now.Add(-time.Minute)
 			switch scenario {
-			case "old target":
-				a.Target.ObservedAtMS = now.Add(-2 * time.Minute).UnixMilli()
-			case "future target":
-				a.Target.ObservedAtMS = now.Add(time.Minute).UnixMilli()
-			case "old sample":
-				a.SampledAtMS = now.Add(-2 * time.Minute).UnixMilli()
-			case "future sample":
-				a.SampledAtMS = now.Add(time.Minute).UnixMilli()
 			case "old response":
 				a.ReceivedAt = now.Add(-2 * time.Minute)
+			case "future response":
+				a.ReceivedAt = now.Add(time.Minute)
 			case "previous pod":
 				started = now.Add(time.Second)
-			case "inconsistent snapshot":
-				a.SnapshotValid = false
-			case "pointer failure":
-				a.PointerStatus = "unavailable"
+			case "missing deployment":
+				a.Loaded = nil
 			}
 			if a.Fresh(now, started, 90*time.Second) {
 				t.Fatal("stale observation fresh")
@@ -112,11 +103,31 @@ func TestApplicationFreshnessRequiresBothObservations(t *testing.T) {
 		})
 	}
 }
+func TestApplicationLocalGenerationsAndOptionalIdentity(t *testing.T) {
+	m := applicationWire()
+	d := m["deployment"].(map[string]any)
+	d["cells"] = map[string]any{}
+	m["shutdown"] = map[string]any{"runtime_generation": "process-a"}
+	data, _ := json.Marshal(m)
+	a, err := decodeApplication(data, "process-a", time.Now())
+	if err != nil || a.PendingCells != 0 || a.RuntimeGeneration != "process-a" {
+		t.Fatalf("empty resident census: %+v, %v", a, err)
+	}
+	if _, err := decodeApplication(data, "process-b", time.Now()); err == nil {
+		t.Fatal("accepted wrong identity")
+	}
+	d["cells"] = map[string]any{"unknown": 0}
+	data, _ = json.Marshal(m)
+	a, err = decodeApplication(data, "", time.Now())
+	if err != nil || a.PendingCells != 1 {
+		t.Fatalf("unknown cell generation must remain pending: %+v, %v", a, err)
+	}
+}
 
-// Captured from scripts/test-application-status.py against the real native runtime
-// and disposable MinIO. Preserve runtime serialization, including flattened targets.
+// Captured with hack/test-application-state.py against celld c91ca54, without
+// the proposed application observation patch, and disposable MinIO.
 func TestApplicationNativeRuntimeFixtures(t *testing.T) {
-	data, err := os.ReadFile("testdata/application-v1.json")
+	data, err := os.ReadFile("testdata/application-state.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,25 +137,19 @@ func TestApplicationNativeRuntimeFixtures(t *testing.T) {
 	}
 	for name, data := range samples {
 		t.Run(name, func(t *testing.T) {
-			var timestamp struct {
-				SampledAtMS int64 `json:"sampled_at_ms"`
-			}
-			if err := json.Unmarshal(data, &timestamp); err != nil {
-				t.Fatal(err)
-			}
-			now := time.UnixMilli(timestamp.SampledAtMS)
+			now := time.Now()
 			a, err := decodeApplication(data, "", now)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if !a.Fresh(now, now.Add(-time.Hour), 90*time.Second) {
-				t.Fatal("native snapshot failed freshness")
+				t.Fatal("native observation failed freshness")
 			}
 			if name == "transition" && a.PendingCells == 0 {
 				t.Fatal("pending resident cells lost")
 			}
-			if name == "failure" && (a.AdoptionStatus != "failed" || a.Loaded.Version == a.Target.Version) {
-				t.Fatal("failed adoption hid previous serving version")
+			if name != "transition" && a.PendingCells != 0 {
+				t.Fatal("unexpected pending cells")
 			}
 		})
 	}

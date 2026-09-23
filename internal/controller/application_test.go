@@ -23,11 +23,11 @@ func (f applicationReaderFunc) Application(ctx context.Context, target controlpl
 }
 func applicationSnapshot(now time.Time) controlplane.Application {
 	v := controlplane.ApplicationVersion{Version: "v2", Prefix: "deploy/v2/"}
-	return controlplane.Application{RuntimeGeneration: "process-a", SampledAtMS: now.UnixMilli(), SnapshotValid: true, Loaded: &v, LocalGeneration: 2, Target: &controlplane.ApplicationTarget{ApplicationVersion: v, ObservedAtMS: now.UnixMilli()}, PointerStatus: "observed", AdoptionStatus: "adopted", ResidentCells: 3, ReceivedAt: now}
+	return controlplane.Application{RuntimeGeneration: "process-a", Loaded: &v, LocalGeneration: 2, ResidentCells: 3, ReceivedAt: now}
 }
 func TestApplicationConvergence(t *testing.T) {
 	for _, profile := range []string{"Bucket", "PersistentFleet", "Deployment"} {
-		for _, scenario := range []string{"converged", "mixed versions", "delayed cells", "swapping", "failed adoption", "stale target", "unreachable", "unsupported", "target disagreement", "same version different artifacts", "rollback"} {
+		for _, scenario := range []string{"converged", "mixed versions", "delayed cells", "swapping", "stale response", "unreachable", "unsupported", "same version different artifacts", "different local generations", "rollback"} {
 			t.Run(profile+"/"+scenario, func(t *testing.T) {
 				x := newOperationFixture(t, profile)
 				x.r.ApplicationRuntime = applicationReaderFunc(func(_ context.Context, target controlplane.Target) (controlplane.Application, error) {
@@ -35,7 +35,6 @@ func TestApplicationConvergence(t *testing.T) {
 					if scenario == "rollback" {
 						a.Loaded.Version = "v1"
 						a.Loaded.Prefix = "deploy/v1/"
-						a.Target.ApplicationVersion = *a.Loaded
 					}
 					if target.IP == "10.0.0.3" {
 						switch scenario {
@@ -45,18 +44,16 @@ func TestApplicationConvergence(t *testing.T) {
 							a.PendingCells = 1
 						case "swapping":
 							a.SwappingCells = 1
-						case "failed adoption":
-							a.AdoptionStatus = "failed"
-						case "stale target":
-							a.Target.ObservedAtMS = x.clock.Add(-2 * time.Minute).UnixMilli()
+						case "stale response":
+							a.ReceivedAt = x.clock.Add(-2 * time.Minute)
 						case "unreachable":
 							return a, errors.New("unreachable")
 						case "unsupported":
 							return a, controlplane.ErrUnsupported
-						case "target disagreement":
-							a.Target.Version = "v3"
 						case "same version different artifacts":
 							a.Loaded.Prefix = "other/"
+						case "different local generations":
+							a.LocalGeneration = 99
 						}
 					}
 					return a, nil
@@ -64,9 +61,9 @@ func TestApplicationConvergence(t *testing.T) {
 				got, status, reason := x.r.observeApplication(t.Context(), x.f)
 				want := metav1.ConditionFalse
 				switch scenario {
-				case "converged", "rollback":
+				case "converged", "different local generations", "rollback":
 					want = metav1.ConditionTrue
-				case "stale target", "unreachable", "unsupported", "target disagreement":
+				case "stale response", "unreachable", "unsupported":
 					want = metav1.ConditionUnknown
 				}
 				if status != want {
@@ -75,8 +72,15 @@ func TestApplicationConvergence(t *testing.T) {
 				if got.ExpectedNodes != 3 || len(got.Nodes) != 3 {
 					t.Fatalf("wrong coverage: %+v", got)
 				}
-				if want == metav1.ConditionUnknown && got.Target != nil {
-					t.Fatal("published authoritative target with incomplete observations")
+				if want == metav1.ConditionUnknown && got.ObservedVersion != nil {
+					t.Fatal("published common version with incomplete observations")
+				}
+				if scenario == "mixed versions" || scenario == "same version different artifacts" {
+					if reason != "MixedVersions" || got.ObservedVersion != nil {
+						t.Fatal("mixed versions reported common version")
+					}
+				} else if want != metav1.ConditionUnknown && got.ObservedVersion == nil {
+					t.Fatal("common loaded version missing")
 				}
 				if scenario == "delayed cells" && got.PendingCells != 1 {
 					t.Fatal("pending cells lost")
@@ -194,8 +198,8 @@ func TestApplicationStatusPatchAndPollInterval(t *testing.T) {
 	if c := meta.FindStatusCondition(f.Status.Conditions, "ApplicationConverged"); c.Status != metav1.ConditionUnknown {
 		t.Fatal("lost capability preserved success")
 	}
-	if f.Status.Application.Target != nil {
-		t.Fatal("stale target retained as authoritative")
+	if f.Status.Application.ObservedVersion != nil {
+		t.Fatal("stale response retained as authoritative")
 	}
 }
 
@@ -211,8 +215,8 @@ func TestEnvtestApplicationStatusRoundTrip(t *testing.T) {
 		t.Fatalf("application status pruned: %+v", f.Status.Application)
 	}
 	// Exercise nested schema fields and list-map round trips against admission.
-	f.Status.Application.Target = &fleet.ApplicationVersion{Version: "v2", Prefix: "deploy/v2/"}
-	f.Status.Application.Versions = []fleet.ApplicationVersionCount{{ApplicationVersion: *f.Status.Application.Target, Nodes: 1}}
+	f.Status.Application.ObservedVersion = &fleet.ApplicationVersion{Version: "v2", Prefix: "deploy/v2/"}
+	f.Status.Application.Versions = []fleet.ApplicationVersionCount{{ApplicationVersion: *f.Status.Application.ObservedVersion, Nodes: 1}}
 	f.Status.Application.Nodes = []fleet.ApplicationNodeStatus{{Name: "alpha-0", UID: "pod-0", RuntimeGeneration: "process-0", Version: "v2", Reason: "Converged"}}
 	if err := r.Status().Update(t.Context(), f); err != nil {
 		t.Fatal(err)
@@ -221,14 +225,14 @@ func TestEnvtestApplicationStatusRoundTrip(t *testing.T) {
 	if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Status.Application.Target.Version != "v2" || got.Status.Application.Versions[0].Prefix != "deploy/v2/" || got.Status.Application.Nodes[0].RuntimeGeneration != "process-0" {
+	if got.Status.Application.ObservedVersion.Version != "v2" || got.Status.Application.Versions[0].Prefix != "deploy/v2/" || got.Status.Application.Nodes[0].RuntimeGeneration != "process-0" {
 		t.Fatal("nested application status pruned")
 	}
 }
 
-func TestApplicationTargetExpiresDuringCollection(t *testing.T) {
+func TestApplicationResponseExpiresDuringCollection(t *testing.T) {
 	x := newOperationFixture(t, "Bucket")
-	now := x.clock
+	now := x.clock.Add(2 * time.Minute)
 	var reads atomic.Int32
 	x.r.now = func() time.Time {
 		if reads.Add(1) >= 5 {
@@ -238,11 +242,11 @@ func TestApplicationTargetExpiresDuringCollection(t *testing.T) {
 	}
 	x.r.ApplicationRuntime = applicationReaderFunc(func(context.Context, controlplane.Target) (controlplane.Application, error) {
 		a := applicationSnapshot(now)
-		a.Target.ObservedAtMS = now.Add(-85 * time.Second).UnixMilli()
+		a.ReceivedAt = now.Add(-85 * time.Second)
 		return a, nil
 	})
 	_, status, _ := x.r.observeApplication(t.Context(), x.f)
 	if status != metav1.ConditionUnknown {
-		t.Fatal("target expired during collection but convergence stayed true")
+		t.Fatal("response expired during collection but convergence stayed true")
 	}
 }

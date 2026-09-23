@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"slices"
 	"time"
 )
 
@@ -18,27 +17,17 @@ type ApplicationVersion struct {
 	Version string `json:"version"`
 	Prefix  string `json:"prefix"`
 }
-type ApplicationTarget struct {
-	ApplicationVersion
-	ObservedAtMS int64 `json:"observed_at_ms"`
-}
+
 type Application struct {
-	RuntimeGeneration string              `json:"runtime_generation"`
-	SampledAtMS       int64               `json:"sampled_at_ms"`
-	SnapshotValid     bool                `json:"snapshot_valid"`
-	Loaded            *ApplicationVersion `json:"loaded"`
-	LocalGeneration   uint64              `json:"local_generation"`
-	Target            *ApplicationTarget  `json:"target"`
-	PointerStatus     string              `json:"pointer_status"`
-	AdoptionStatus    string              `json:"adoption_status"`
-	ResidentCells     int64               `json:"resident_cells"`
-	PendingCells      int64               `json:"pending_cells"`
-	SwappingCells     int64               `json:"swapping_cells"`
-	ReceivedAt        time.Time           `json:"-"`
+	RuntimeGeneration                          string
+	Loaded                                     *ApplicationVersion
+	LocalGeneration                            uint64
+	ResidentCells, PendingCells, SwappingCells int64
+	ReceivedAt                                 time.Time
 }
 
 func (c *Client) Application(ctx context.Context, target Target) (Application, error) {
-	data, code, err := c.call(ctx, target, http.MethodGet, "/state?view=application", nil)
+	data, code, err := c.call(ctx, target, http.MethodGet, "/state", nil)
 	if err != nil {
 		return Application{}, err
 	}
@@ -48,60 +37,67 @@ func (c *Client) Application(ctx context.Context, target Target) (Application, e
 	return decodeApplication(data, target.Generation, time.Now())
 }
 
+// Decode the existing deployment object. Application generations are local to
+// each process and must never be compared between nodes. The actor census and
+// current generation are sampled separately by celld; this is an observation,
+// not an atomic rollout-completion receipt or a view of the S3 deployment pointer.
 func decodeApplication(data []byte, generation string, received time.Time) (Application, error) {
 	m, err := decodeObject(data)
 	if err != nil {
 		return Application{}, err
 	}
-	var version uint32
-	if err := required(m, "schema_version", &version); err != nil || version != 1 {
+	raw, ok := m["deployment"]
+	if !ok {
 		return Application{}, ErrUnsupported
 	}
-	var out Application
-	// Explicit zero counts and false validity are distinct from omitted fields.
+	deployment, err := decodeObject(raw)
+	if err != nil {
+		return Application{}, err
+	}
+	out := Application{Loaded: &ApplicationVersion{}, ReceivedAt: received}
+	var cells map[string]json.RawMessage
 	for k, p := range map[string]any{
-		"runtime_generation": &out.RuntimeGeneration, "sampled_at_ms": &out.SampledAtMS,
-		"snapshot_valid": &out.SnapshotValid, "local_generation": &out.LocalGeneration,
-		"pointer_status": &out.PointerStatus, "adoption_status": &out.AdoptionStatus,
-		"resident_cells": &out.ResidentCells, "pending_cells": &out.PendingCells, "swapping_cells": &out.SwappingCells,
+		"version": &out.Loaded.Version, "prefix": &out.Loaded.Prefix,
+		"generation": &out.LocalGeneration, "swapping": &out.SwappingCells, "cells": &cells,
 	} {
-		if err := required(m, k, p); err != nil {
+		if err := required(deployment, k, p); err != nil {
 			return Application{}, err
 		}
 	}
-	for _, k := range []string{"loaded", "target"} {
-		if _, ok := m[k]; !ok {
-			return Application{}, errors.New("incomplete deployment snapshot")
+	if out.Loaded.Version == "" || len(out.Loaded.Version) > 256 || out.Loaded.Prefix == "" || len(out.Loaded.Prefix) > 1024 || out.LocalGeneration == 0 || out.SwappingCells < 0 || out.SwappingCells > 1_000_000_000 {
+		return Application{}, errors.New("invalid deployment observation")
+	}
+	for cell := range cells {
+		var local uint64
+		if err := required(cells, cell, &local); err != nil {
+			return Application{}, err
+		}
+		if local > out.LocalGeneration {
+			return Application{}, errors.New("inconsistent deployment generations")
+		}
+		if local != out.LocalGeneration {
+			out.PendingCells++
 		}
 	}
-	if err := json.Unmarshal(m["loaded"], &out.Loaded); err != nil {
-		return Application{}, err
+	out.ResidentCells = int64(len(cells))
+	// Older runtimes need not expose the lifecycle extension for this read. When
+	// available, retain the identity as diagnostics and honor an explicit target.
+	if raw, ok := m["shutdown"]; ok {
+		var shutdown struct {
+			RuntimeGeneration string `json:"runtime_generation"`
+		}
+		if err := json.Unmarshal(raw, &shutdown); err != nil {
+			return Application{}, err
+		}
+		out.RuntimeGeneration = shutdown.RuntimeGeneration
 	}
-	if err := json.Unmarshal(m["target"], &out.Target); err != nil {
-		return Application{}, err
-	}
-	if out.RuntimeGeneration == "" || len(out.RuntimeGeneration) > 128 || (generation != "" && generation != out.RuntimeGeneration) {
+	if len(out.RuntimeGeneration) > 128 || (generation != "" && generation != out.RuntimeGeneration) {
 		return Application{}, ErrIdentity
 	}
-	validVersion := func(v *ApplicationVersion) bool {
-		return v != nil && v.Version != "" && len(v.Version) <= 256 && v.Prefix != "" && len(v.Prefix) <= 1024
-	}
-	if (out.Loaded != nil && !validVersion(out.Loaded)) || (out.Target != nil && (!validVersion(&out.Target.ApplicationVersion) || out.Target.ObservedAtMS <= 0)) ||
-		(out.SnapshotValid && (out.Loaded == nil || out.LocalGeneration == 0)) || (out.PointerStatus == "observed" && out.Target == nil) ||
-		!slices.Contains([]string{"unknown", "observed", "unavailable"}, out.PointerStatus) ||
-		!slices.Contains([]string{"unknown", "adopting", "adopted", "unchanged", "failed"}, out.AdoptionStatus) ||
-		out.ResidentCells < 0 || out.ResidentCells > 1_000_000_000 || out.PendingCells < 0 || out.PendingCells > out.ResidentCells || out.SwappingCells < 0 || out.SwappingCells > 1_000_000_000 {
-		return Application{}, errors.New("invalid deployment snapshot")
-	}
-	out.ReceivedAt = received
 	return out, nil
 }
 
-// Freshness covers both the node snapshot and its last successful pointer read.
-// A recent HTTP response cannot make an old deployment target current again.
+// Fresh measures the operator's HTTP observation, not deployment-pointer age.
 func (a Application) Fresh(now, started time.Time, maxAge time.Duration) bool {
-	sample := time.UnixMilli(a.SampledAtMS)
-	return a.SnapshotValid && a.Target != nil && a.PointerStatus == "observed" &&
-		fresh(a.ReceivedAt, now, maxAge) && fresh(sample, now, maxAge) && !sample.Before(started) &&
-		fresh(time.UnixMilli(a.Target.ObservedAtMS), now, maxAge) && !time.UnixMilli(a.Target.ObservedAtMS).Before(started) && a.Target.ObservedAtMS <= a.SampledAtMS
+	return a.Loaded != nil && fresh(a.ReceivedAt, now, maxAge) && !a.ReceivedAt.Before(started)
 }

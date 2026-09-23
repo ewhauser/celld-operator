@@ -51,17 +51,9 @@ func (r *Reconciler) applicationSample(ctx context.Context, f *fleet.CelldFleet,
 		return s
 	}
 	s.fresh = true
-	switch {
-	case a.AdoptionStatus == "failed":
-		s.node.Reason = "AdoptionFailed"
-	case a.Loaded == nil || *a.Loaded != a.Target.ApplicationVersion || a.AdoptionStatus == "adopting":
-		s.node.Reason = "Adopting"
-	case a.AdoptionStatus != "adopted" && a.AdoptionStatus != "unchanged":
-		s.node.Reason = "StaleOrIncomplete"
-		s.fresh = false
-	case a.PendingCells > 0 || a.SwappingCells > 0:
+	if a.PendingCells > 0 || a.SwappingCells > 0 {
 		s.node.Reason = "CellsTransitioning"
-	default:
+	} else {
 		s.node.Reason = "Converged"
 	}
 	return s
@@ -73,7 +65,7 @@ func (r *Reconciler) applicationSample(ctx context.Context, f *fleet.CelldFleet,
 func (r *Reconciler) observeApplication(ctx context.Context, f *fleet.CelldFleet) (*fleet.ApplicationStatus, metav1.ConditionStatus, string) {
 	out := &fleet.ApplicationStatus{ObservedAt: metav1.NewTime(r.capacityNow())}
 	unknown := func(reason string) (*fleet.ApplicationStatus, metav1.ConditionStatus, string) {
-		out.Target = nil
+		out.ObservedVersion = nil
 		return out, metav1.ConditionUnknown, reason
 	}
 	if err := f.ValidateRuntime(); err != nil {
@@ -118,8 +110,7 @@ func (r *Reconciler) observeApplication(ctx context.Context, f *fleet.CelldFleet
 	wg.Wait()
 	out.ObservedAt = metav1.NewTime(r.capacityNow())
 	versions := map[controlplane.ApplicationVersion]int32{}
-	var target *controlplane.ApplicationVersion
-	targetsDiffer, progressing, failed := false, false, false
+	progressing := false
 	for _, sample := range samples {
 		if sample.fresh && !sample.state.Fresh(r.capacityNow(), sample.started, applicationMaxAge) {
 			sample.fresh = false
@@ -135,16 +126,9 @@ func (r *Reconciler) observeApplication(ctx context.Context, f *fleet.CelldFleet
 		if a.Loaded != nil {
 			versions[*a.Loaded]++
 		}
-		if target == nil {
-			t := a.Target.ApplicationVersion
-			target = &t
-		} else if *target != a.Target.ApplicationVersion {
-			targetsDiffer = true
-		}
 		out.PendingCells += a.PendingCells
 		out.SwappingCells += a.SwappingCells
 		progressing = progressing || sample.node.Reason != "Converged"
-		failed = failed || sample.node.Reason == "AdoptionFailed"
 	}
 	for v, count := range versions {
 		out.Versions = append(out.Versions, fleet.ApplicationVersionCount{Version: v.Version, Prefix: v.Prefix, Nodes: count})
@@ -170,13 +154,10 @@ func (r *Reconciler) observeApplication(ctx context.Context, f *fleet.CelldFleet
 	if len(pods) == 0 || len(pods) != int(out.ExpectedNodes) || out.UnavailableNodes != 0 {
 		return unknown("IncompleteCoverage")
 	}
-	if targetsDiffer || target == nil {
-		return unknown("TargetsDisagree")
+	if len(out.Versions) != 1 {
+		return out, metav1.ConditionFalse, "MixedVersions"
 	}
-	out.Target = &fleet.ApplicationVersion{Version: target.Version, Prefix: target.Prefix}
-	if failed {
-		return out, metav1.ConditionFalse, "AdoptionFailed"
-	}
+	out.ObservedVersion = &fleet.ApplicationVersion{Version: out.Versions[0].Version, Prefix: out.Versions[0].Prefix}
 	if progressing {
 		return out, metav1.ConditionFalse, "Converging"
 	}
@@ -216,6 +197,6 @@ func (r *Reconciler) reportApplication(ctx context.Context, key client.ObjectKey
 	application, status, reason := r.observeApplication(collectCtx, f)
 	cancel()
 	f.Status.Application = application
-	meta.SetStatusCondition(&f.Status.Conditions, metav1.Condition{Type: "ApplicationConverged", Status: status, Reason: reason, Message: "Application convergence is relative to fresh observed deployment targets; inspect status.application for coverage and node details", ObservedGeneration: f.Generation})
+	meta.SetStatusCondition(&f.Status.Conditions, metav1.Condition{Type: "ApplicationConverged", Status: status, Reason: reason, Message: "Application convergence describes observed node agreement and resident-cell generations, not adoption of the latest published release; inspect status.application for coverage", ObservedGeneration: f.Generation})
 	return r.Status().Patch(ctx, f, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{}))
 }

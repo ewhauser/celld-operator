@@ -725,17 +725,9 @@ spec:
                   observedNodes:
                     format: int32
                     type: integer
-                  pendingCells:
-                    description: Counts from valid fresh observations only; incomplete
-                      coverage is Unknown.
-                    format: int64
-                    type: integer
-                  swappingCells:
-                    format: int64
-                    type: integer
-                  target:
-                    description: Common freshly observed target; omitted when targets
-                      disagree or coverage is incomplete.
+                  observedVersion:
+                    description: Common loaded version; omitted when versions disagree
+                      or coverage is incomplete.
                     properties:
                       prefix:
                         maxLength: 1024
@@ -747,6 +739,14 @@ spec:
                     - prefix
                     - version
                     type: object
+                  pendingCells:
+                    description: Counts from valid fresh observations only; incomplete
+                      coverage is Unknown.
+                    format: int64
+                    type: integer
+                  swappingCells:
+                    format: int64
+                    type: integer
                   unavailableNodes:
                     format: int32
                     type: integer

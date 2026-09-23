@@ -138,21 +138,41 @@ celld shutdown, S3 recovery or EBS removal. The opt-in real-binary tests describ
 exercise the launcher/controller handshake separately. See the native and Kind
 records for replicated recovery; verify CSI/EBS deletion in your deployment.
 
-## Application observation schema 1
+## Application deployment observations
 
-The optional `GET /state?view=application` view returns a compact deployment
-snapshot, omitting the ordinary `/state` per-cell map. The typed client's
-`ApplicationReader` is a separate read-only interface. It checks required fields,
-explicit zero counts, enums, bounded version/prefix strings, runtime incarnation,
-and both snapshot and target freshness. Missing and unknown schemas are
-unsupported; neither old `/state` output nor `/reload` is used as a fallback.
+The typed client's separate read-only `ApplicationReader` uses the existing
+`GET /state` response's `deployment` object: `version`, `prefix`, `generation`,
+`cells` and `swapping`. It requires explicit counts and cell maps, bounds strings,
+and rejects malformed data. A missing deployment object is unsupported. The
+existing `shutdown.runtime_generation`, when present, supplies diagnostic process
+identity; application observations do not require a new lifecycle schema.
 
-This view requires the runtime deployment-observation change. The currently
-pinned `.3` runtime does not provide this versioned view. Until a compatible image
-containing that change is built and explicitly selected, application status is
-Unknown. Existing strict-shutdown and capacity contracts are unchanged.
+Resident-cell generations are compared only against that node's current local
+generation. Unknown cell generation zero remains pending; a cell generation newer
+than the sampled node generation invalidates the observation. The actor census
+and current generation are not sampled atomically. Response freshness is measured
+locally by the operator and says nothing about the age of the S3 deployment pointer.
+
+This works with the currently pinned runtime without another runtime patch or
+image release. Existing strict-shutdown, image requirements and capacity contracts
+are unchanged. The observer never calls `/reload` or reads S3 credentials.
 
 See [application deployment observations](fleet-api.md#application-deployment-observations)
-for aggregation and convergence semantics. Deterministic tests cover malformed
-responses, missing capabilities, failed/stale observations, rollback, mixed
-versions, delayed cells and membership changes; envtest verifies status admission.
+for aggregation and the limits of convergence. Tests cover malformed responses,
+missing fields, stale observations, rollback, mixed versions, delayed cells and
+membership changes; envtest verifies status admission. The opt-in
+`hack/test-application-state.py` harness exercises native celld with disposable
+MinIO, including deployment, a resident-cell transition, rollback and the limit
+that a missing deployment pointer cannot be detected from serving-version state:
+
+```sh
+CELLD_TEST_BINARY=/absolute/path/to/celld \
+CELLD_ESBUILD=/absolute/path/to/esbuild \
+python3 hack/test-application-state.py
+```
+
+It needs Docker and the AWS CLI, uses only explicit loopback S3 endpoints and
+fixture credentials, and cleans up its own runtime and container. Set
+`CELLD_STATE_FIXTURE` to capture responses for decoder regression tests. The
+checked-in fixture was captured from celld revision `c91ca54`, without the proposed
+application-observation patch. This is native runtime coverage, not EKS validation.

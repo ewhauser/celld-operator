@@ -28,8 +28,8 @@ func (in *ApplicationNodeStatus) DeepCopy() *ApplicationNodeStatus {
 func (in *ApplicationStatus) DeepCopyInto(out *ApplicationStatus) {
 	*out = *in
 	in.ObservedAt.DeepCopyInto(&out.ObservedAt)
-	if in.Target != nil {
-		in, out := &in.Target, &out.Target
+	if in.ObservedVersion != nil {
+		in, out := &in.ObservedVersion, &out.ObservedVersion
 		*out = new(ApplicationVersion)
 		**out = **in
 	}

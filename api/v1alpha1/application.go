@@ -30,16 +30,16 @@ type ApplicationNodeStatus struct {
 }
 
 // ApplicationStatus describes the last bounded observation of current fleet
-// membership. Convergence is relative to observed deployment pointers, not an
-// assertion that a newer deployment has not been published since the poll.
+// membership. Convergence means observed agreement; it does not establish that
+// nodes have adopted the latest published deployment.
 type ApplicationStatus struct {
 	ObservedAt       metav1.Time `json:"observedAt"`
 	ExpectedNodes    int32       `json:"expectedNodes"`
 	ObservedNodes    int32       `json:"observedNodes"`
 	UnavailableNodes int32       `json:"unavailableNodes"`
-	// Common freshly observed target; omitted when targets disagree or coverage is incomplete.
+	// Common loaded version; omitted when versions disagree or coverage is incomplete.
 	// +optional
-	Target *ApplicationVersion `json:"target,omitempty"`
+	ObservedVersion *ApplicationVersion `json:"observedVersion,omitempty"`
 	// +optional
 	// +kubebuilder:validation:MaxItems=100
 	Versions []ApplicationVersionCount `json:"versions,omitempty"`
