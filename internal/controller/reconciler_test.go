@@ -128,7 +128,7 @@ func TestProvisionProfilesAndIsolation(t *testing.T) {
 		t.Fatal("unsafe persistent lifecycle")
 	}
 	container := sts.Spec.Template.Spec.Containers[0]
-	if container.LivenessProbe != nil || container.StartupProbe != nil || container.ReadinessProbe.HTTPGet.Path != "/.well-known/celld/health" || len(container.Command) != 1 || container.Command[0] != "/launcher/celld-launcher" {
+	if container.LivenessProbe == nil || container.LivenessProbe.HTTPGet.Path != "/livez" || container.LivenessProbe.HTTPGet.Port.IntVal != 8083 || container.StartupProbe != nil || container.ReadinessProbe.HTTPGet.Path != "/.well-known/celld/health" || len(container.Command) != 1 || container.Command[0] != "/launcher/celld-launcher" {
 		t.Fatal("runtime startup/readiness contract bypassed")
 	}
 	spread := sts.Spec.Template.Spec.TopologySpreadConstraints[0]
@@ -392,9 +392,10 @@ func TestReadinessRequiresObservedWorkload(t *testing.T) {
 
 func TestAPIDefaultedProbeIsNotDrift(t *testing.T) {
 	f := fixture("alpha", "bucket-alpha", "Bucket")
-	want := workload(f, Options{}).(*appsv1.Deployment)
+	want := workload(f, Options{LauncherImage: fixtureLauncher}).(*appsv1.Deployment)
 	got := want.DeepCopy()
 	got.Spec.Template.Spec.Containers[0].ReadinessProbe.SuccessThreshold = 1
+	got.Spec.Template.Spec.Containers[0].LivenessProbe.HTTPGet.Scheme = corev1.URISchemeHTTP
 	if !matches(want, got) {
 		t.Fatal("Kubernetes defaulted readiness successThreshold must not block infrastructure")
 	}

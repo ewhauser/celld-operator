@@ -39,28 +39,28 @@ func validateDelayedWitnessHealth(output string) error {
 	return nil
 }
 
-// delayPersistentWitness controls only this disposable test's administrative
-// Pod replacement. A new launcher child is not recovery evidence: require the
+// delayPersistentWitness observes automatic recovery while this disposable
+// test suspends a retained witness. A new child is not recovery evidence: require the
 // exact predecessor's undecided-witness retry before starting the bounded hold.
 func (h *harness) delayPersistentWitness(first, witness leaseLossTarget, storageUnchanged func() bool) {
-	peerStopped := func() {
+	peerSuspended := func() {
 		assert(storageUnchanged(), "delayed-witness recovery changed replicas, operation or disk identity")
 		pod := h.get("pod", nameOf(witness.pod))
-		assert(uidOf(pod) == uidOf(witness.pod), "withheld witness Pod was replaced early")
+		assert(uidOf(pod) == uidOf(witness.pod) && celldRestarts(pod) == celldRestarts(witness.pod), "readiness failure restarted the suspended witness")
 		state, err := h.launcherState(witness.fleet, pod)
 		must(err)
-		assert(state.Invocation == witness.state.Invocation && state.Generation == witness.state.Generation && state.PID == witness.state.PID && state.Phase == "ExitedUnrequested" && state.ChildExited && !state.RemovalReady(), "withheld witness child is no longer the exact stopped invocation")
+		assert(state.Invocation == witness.state.Invocation && state.Generation == witness.state.Generation && state.PID == witness.state.PID && state.Phase == "Running" && !state.ChildExited && !state.RemovalReady(), "withheld witness child is no longer the exact suspended invocation")
 	}
 	var replacement object
 	var child launcher.State
 	h.waitFor("delayed witness: replacement beta-0 has a new exact launcher child", 3*time.Minute, func() bool {
-		peerStopped()
+		peerSuspended()
 		pod, err := h.tryGet("fleets", "pod", nameOf(first.pod))
-		if err != nil || uidOf(pod) == uidOf(first.pod) || str(pod, "status", "podIP") == "" {
+		if err != nil || uidOf(pod) != uidOf(first.pod) || str(pod, "status", "podIP") == "" {
 			return false
 		}
 		state, err := h.launcherState(first.fleet, pod)
-		if err != nil || state.PID == 0 {
+		if err != nil || state.PID == 0 || state.Generation == first.state.Generation {
 			return false
 		}
 		assert(!state.ChildExited && state.Phase == "Running", "replacement child failed before delayed-witness observation: %v", state)
@@ -71,7 +71,7 @@ func (h *harness) delayPersistentWitness(first, witness leaseLossTarget, storage
 	})
 	var logs string
 	blocked := func() bool {
-		peerStopped()
+		peerSuspended()
 		pod := h.get("pod", nameOf(replacement))
 		assert(uidOf(pod) == uidOf(replacement), "recovering Pod was replaced during delayed-witness check")
 		state, err := h.launcherState(first.fleet, pod)
@@ -98,7 +98,7 @@ func (h *harness) delayPersistentWitness(first, witness leaseLossTarget, storage
 			break
 		}
 	}
-	h.hold(2*time.Second, "delayed witness: recovery stays unready without loss or removal authority", blocked)
+	h.hold(20*time.Second, "delayed witness: recovery stays unready without loss or removal authority", blocked)
 	assert(blocked(), "delayed-witness invariant changed before peer release")
 	fmt.Printf("PASS: delayed witness releases peer=%s pod_uid=%s after exact child pod_uid=%s invocation=%s generation=%s pid=%d retried predecessor=%s/%s without readiness or loss\n", nameOf(witness.pod), uidOf(witness.pod), uidOf(replacement), child.Invocation, child.Generation, child.PID, nameOf(first.pod), first.state.Generation)
 }
