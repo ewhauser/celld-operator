@@ -234,6 +234,13 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 		pod.Volumes = append(pod.Volumes, corev1.Volume{Name: "launcher", EmptyDir: &corev1.EmptyDirVolumeSource{}}, corev1.Volume{Name: "launcher-key", Secret: &corev1.SecretVolumeSource{SecretName: launcherSecretName(f), DefaultMode: new(int32(0o440))}})
 		c := &pod.Containers[0]
 		c.Command = []string{"/launcher/celld-launcher"}
+		c.LivenessProbe = &corev1.Probe{
+			HTTPGet:          &corev1.HTTPGetAction{Path: "/livez", Port: intstr.FromInt32(8083)},
+			PeriodSeconds:    5,
+			TimeoutSeconds:   1,
+			FailureThreshold: 3,
+			SuccessThreshold: 1,
+		}
 		c.Env = append(c.Env, corev1.EnvVar{Name: "POD_UID", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.uid"}}}, corev1.EnvVar{Name: "NODE_NAME", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "spec.nodeName"}}})
 		if lifecycle.TerminationGraceSeconds != fleet.DefaultTerminationGrace {
 			// Hand the launcher the pod's grace period; it splits that into the

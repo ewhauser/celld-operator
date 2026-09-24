@@ -90,6 +90,19 @@ type supervisor struct {
 }
 
 func (s *supervisor) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Kubelet needs no operation authority to check process liveness. Keep this
+	// independent of application readiness and expose no invocation or proof.
+	if r.Method == http.MethodGet && r.URL.Path == "/livez" {
+		s.mu.Lock()
+		failed := s.state.Phase == "ExitedUnrequested"
+		s.mu.Unlock()
+		if failed {
+			http.Error(w, "child exited unexpectedly", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	if r.Method != "POST" || r.URL.Path != "/v2" {
 		http.Error(w, "unsupported", 404)
 		return
@@ -405,7 +418,8 @@ func Run(ctx context.Context, c Config) error {
 		s.mu.Unlock()
 	case <-done:
 		// An unsolicited exit cannot certify an operation. Retain the lock and
-		// report failure; no automatic child restart resurrects an invocation.
+		// report failed liveness until kubelet terminates this container. Its
+		// successor must acquire the inherited lock and seed a fresh generation.
 		s.mu.Lock()
 		s.state.ChildExited = true
 		s.mu.Unlock()

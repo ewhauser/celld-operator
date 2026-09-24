@@ -45,21 +45,20 @@ The operator's unit tests independently cover the upgrade state machine.
 Fault tests terminate the actual manager before and after a guarded workload
 update, then require the same operation to complete with exactly one replica
 write. They also run contraction through injected S3 latency, then exceed the
-runtime's S3 lease TTL. Authenticated launcher observations must show every child
-stopped without a strict removal proof, while Pod/PVC/PV identities remain intact
-after storage returns. Recovery is an explicit administrative replacement of only
-those failed Pods, with UID preconditions and ordinary deletion grace. The test
-replaces beta-0 first and keeps beta-1's exact failed child stopped until the new
-beta-0 child reports an undecided-witness retry for its captured predecessor
-generation. It then holds that observed condition for at least two seconds,
-rejecting readiness, bounded loss, disk changes or removal authority before
-replacing beta-1. A child merely starting does not satisfy this recovery check.
-The delay belongs only to the disposable test, not operator orchestration.
-Successful recovery requires new runtime generations, all acknowledged writes, and unchanged
-PersistentFleet PVC/PV/CSI identity on the same Node UID and boot. This is not
-automatic controller recovery or permission to move an old disk to another host.
-No retirement markers or binding files are reset. The external suite uses a real
-HPA and Metrics Server to write the fleet's `/scale` subresource.
+runtime's S3 lease TTL. Container logs must show watchdog self-fencing, followed
+by automatic kubelet container restarts with fresh launcher/runtime identities
+and unchanged Pod/PVC/PV/CSI identities. No removal operation or proof may appear.
+The test suspends beta-1's exact child before partitioning S3, so beta-0's new
+child must report an undecided-witness retry for its captured predecessor. It
+holds that observed condition for twenty seconds, rejecting readiness, loss,
+disk changes, or a restart of either live child. This exceeds the liveness
+failure window and verifies readiness failures and slow recovery do not trigger
+restart loops. Killing the suspended beta-1 child also exercises an arbitrary
+unexpected exit; kubelet must restart it automatically. Successful recovery
+requires all acknowledged writes and unchanged PersistentFleet storage on the
+same Node UID and boot. This does not authorize moving an old disk to another
+host. No retirement markers or binding files are reset. The external suite uses
+a real HPA and Metrics Server to write the fleet's `/scale` subresource.
 
 These suites establish local Kubernetes, protocol and hostpath CSI behavior.
 MinIO data is not durable across replacement of its Pod; these scenarios do not

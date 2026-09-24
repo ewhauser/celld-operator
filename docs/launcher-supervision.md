@@ -75,7 +75,7 @@ invocation and disk identity. A signed `Stopped` response missing any proof is
 rejected.
 
 There is no old endpoint or old wire-format compatibility, launcher handoff
-request, positive receipt archive, automatic child restart or second execution
+request, positive receipt archive, in-process child restart or second execution
 engine. Requests/responses retain their domain-separated HMAC authentication;
 existing private networking and credential binding remain in force.
 
@@ -95,9 +95,26 @@ proof. Duplicate requests cannot retry a failed capture into success.
 A requested stop can end with `ChildExited`, `InheritedLockReleased` and
 `RestartDenied` true while its operation remains `Failed` and data safety is
 false. An unsolicited child exit reports `ExitedUnrequested`, holds the local
-lock and refuses late operation adoption. Linux retains parent-death signaling,
-PID-1 orphan reaping, and the inherited descriptor across fork/exec. Pod absence
-and expired leases cannot substitute for these proofs.
+lock and refuses late operation adoption. Its unauthenticated `GET /livez` on
+port 8083 returns 503 only in this phase, causing kubelet to restart the container
+after three failed probes at five-second intervals. The endpoint exposes no
+invocation identity or removal authority; `/v2` still requires authentication.
+
+Application readiness is independent: waiting for the volume lock, startup,
+runtime recovery, intentional draining, failed removal, and retired-disk blockage
+all keep launcher liveness healthy. Slow dependencies alone do not cause a
+restart. Detection normally takes at most fifteen seconds, followed by kubelet
+restart/backoff and the launcher's existing ten-second startup spacing. Restored
+readiness still depends on celld acquiring its lease and completing recovery.
+
+Kubelet terminates the failed launcher without creating a retirement marker or
+removal certificate. Its successor keeps the same Pod UID and retained storage
+(including `emptyDir`), acquires the inherited lock, checks host/boot and disk
+retirement, and seeds a fresh invocation and cryptographic generation. Old
+generations cannot authorize the new child. No failed invocation is resumed,
+retired disk reopened, or cross-host reuse authorized. Linux retains parent-death
+signaling, PID-1 orphan reaping, and the inherited descriptor across fork/exec.
+Pod absence and expired leases cannot substitute for these proofs.
 
 A launcher crash loses its in-memory result. If Kubernetes has not durably
 captured completion, removal remains blocked. The negative disk marker only

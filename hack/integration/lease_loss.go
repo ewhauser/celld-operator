@@ -73,73 +73,75 @@ func (h *harness) exerciseLeaseLoss() {
 		}
 		return true
 	}
-	failed := func() bool {
-		assert(unchanged(), "lease loss changed replicas, Pod identity, operation or disk identity")
-		for _, target := range targets {
-			state, err := h.launcherState(target.fleet, target.pod)
-			if err != nil || state.Phase != "ExitedUnrequested" || !state.ChildExited {
-				return false
-			}
-			assert(state.Generation == target.state.Generation && state.Invocation == target.state.Invocation, "failed runtime invocation changed")
-			assert(state.Operation == "" && !state.RemovalReady() && !state.RuntimeDataSafe() && !state.InheritedLockReleased, "lease loss manufactured removal authority")
-		}
-		return true
-	}
-	// Include the acknowledged tail immediately before S3 becomes unavailable,
-	// not only values which had the entire earlier fault sequence to upload.
-	h.writeLedger("client", "alpha")
-	h.writeLedger("client-beta", "beta")
-	h.toxic("POST", "/proxies/minio/toxics", object{"name": "partition", "type": "timeout", "stream": "upstream", "attributes": object{"timeout": 0}})
-	func() {
-		defer h.toxic("DELETE", "/proxies/minio/toxics/partition", nil)
-		// Native node leases expire after ten seconds. Wait for explicit process
-		// evidence, not delayed Kubernetes readiness projections.
-		h.waitFor("S3 lease expiry stops every runtime without removal authority", time.Minute, failed)
-	}()
-	for _, target := range targets {
-		// Preserve predecessor recovery and acknowledged-tail evidence before
-		// ordinary Pod replacement makes these container logs unavailable.
-		const limit = 8 << 20
-		fmt.Printf("BEGIN PRE-REPLACEMENT RUNTIME LOG pod=%s uid=%s limit_bytes=%d\n", nameOf(target.pod), uidOf(target.pod), limit)
-		logs, err := h.try(command{args: h.kubectl("-n", "fleets", "logs", nameOf(target.pod), "-c", "celld", "--tail=-1", "--timestamps=true", "--limit-bytes=8388608", "--request-timeout=15s"), timeout: 20 * time.Second})
-		fmt.Printf("%s\n", logs)
-		if len(logs) >= limit {
-			fmt.Println("PRE-REPLACEMENT RUNTIME LOG BYTE LIMIT REACHED; capture may be truncated")
-		}
-		fmt.Printf("END PRE-REPLACEMENT RUNTIME LOG pod=%s uid=%s\n", nameOf(target.pod), uidOf(target.pod))
-		must(err)
-		assert(strings.Contains(logs, "node_lease_watchdog_fence"), "%s did not stop because its S3 lease expired", nameOf(target.pod))
-	}
-	h.hold(12*time.Second, "restoring S3 does not restart failed children or delete disks", failed)
-	fmt.Println("PASS: lease-loss fail-stop preserves all Pod/PVC/PV identities; no strict proof or automatic restart")
-
-	// This is an explicit administrative action in the disposable test. It is
-	// ordinary same-host recovery of nonretired storage with no active operation,
-	// never a substitute for a strict retirement proof or cross-host fencing.
 	var recovering, witness *leaseLossTarget
 	for i := range targets {
 		target := &targets[i]
-		switch {
-		case target.fleet != "beta":
-			h.replaceFailedPod(*target)
-		case nameOf(target.pod) == "beta-0":
+		if nameOf(target.pod) == "beta-0" {
 			recovering = target
-		case nameOf(target.pod) == "beta-1":
+		}
+		if nameOf(target.pod) == "beta-1" {
 			witness = target
 		}
 	}
 	assert(recovering != nil && witness != nil, "delayed-witness recovery requires both persistent ordinals")
-	h.replaceFailedPod(*recovering)
-	h.delayPersistentWitness(*recovering, *witness, func() bool {
-		for fleetName, claims := range oldClaims {
-			if specReplicas(h.get("statefulset", fleetName)) != 2 || len(sub(h.currentState(fleetName), "Operation")) != 0 || !same(h.claims(fleetName), claims) {
-				return false
+	// Include the acknowledged tail immediately before S3 becomes unavailable,
+	// not only values which had the entire earlier fault sequence to upload.
+	h.writeLedger("client", "alpha")
+	h.writeLedger("client-beta", "beta")
+	// Suspend the retained witness without exiting it. Its launcher stays live
+	// despite failed application readiness; beta-0 must wait for this exact
+	// predecessor instead of declaring loss or restarting during recovery.
+	h.k("-n", "fleets", "exec", nameOf(witness.pod), "-c", "celld", "--", "/bin/sh", "-c", `kill -STOP "$1"`, "signal-child", fmt.Sprint(witness.state.PID))
+	resumeWitness := func() {
+		h.k("-n", "fleets", "exec", nameOf(witness.pod), "-c", "celld", "--", "/bin/sh", "-c", `kill -CONT "$1"`, "signal-child", fmt.Sprint(witness.state.PID))
+	}
+	witnessReleased := false
+	defer func() {
+		if !witnessReleased {
+			resumeWitness()
+		}
+	}()
+	fenced := map[string]bool{}
+	observeFence := func(target leaseLossTarget) bool {
+		name := nameOf(target.pod)
+		if fenced[name] {
+			return true
+		}
+		// A probe may already have restarted PID 1. Accept fence evidence from
+		// either container log, never from readiness or a missing process alone.
+		for _, previous := range []bool{false, true} {
+			logs, err := h.tryK("-n", "fleets", "logs", name, "-c", "celld", fmt.Sprintf("--previous=%t", previous), "--tail=-1", "--limit-bytes=8388608", "--request-timeout=5s")
+			if err == nil && strings.Contains(logs, "node_lease_watchdog_fence") {
+				fenced[name] = true
+				fmt.Printf("PASS: lease watchdog self-fenced pod=%s uid=%s previous=%t\n", name, uidOf(target.pod), previous)
+				return true
 			}
 		}
-		return true
-	})
-	h.replaceFailedPod(*witness)
-	h.waitFor("explicit administrative Pod replacement restores both fleets", 8*time.Minute, func() bool {
+		return false
+	}
+	h.toxic("POST", "/proxies/minio/toxics", object{"name": "partition", "type": "timeout", "stream": "upstream", "attributes": object{"timeout": 0}})
+	func() {
+		defer h.toxic("DELETE", "/proxies/minio/toxics/partition", nil)
+		// Native node leases expire after ten seconds. The suspended witness
+		// cannot run its watchdog until released below.
+		h.waitFor("S3 lease expiry self-fences all runnable children", 2*time.Minute, func() bool {
+			assert(unchanged(), "lease loss changed replicas, Pod identity, operation or disk identity")
+			all := true
+			for _, target := range targets {
+				if nameOf(target.pod) != nameOf(witness.pod) && !observeFence(target) {
+					all = false
+				}
+			}
+			return all
+		})
+	}()
+	h.delayPersistentWitness(*recovering, *witness, unchanged)
+	// Also cover an arbitrary child crash. The other three targets exercised
+	// watchdog exits; killing this suspended child makes witness release
+	// deterministic instead of racing lease renewal against its watchdog.
+	h.k("-n", "fleets", "exec", nameOf(witness.pod), "-c", "celld", "--", "/bin/sh", "-c", `kill -KILL "$1"`, "signal-child", fmt.Sprint(witness.state.PID))
+	witnessReleased = true
+	h.waitFor("kubelet automatically restores both fleets on the same Pods and disks", 8*time.Minute, func() bool {
 		for _, target := range targets {
 			var pod object
 			for _, candidate := range h.fleetPods(target.fleet) {
@@ -147,15 +149,16 @@ func (h *harness) exerciseLeaseLoss() {
 					pod = candidate
 				}
 			}
-			if pod == nil || uidOf(pod) == uidOf(target.pod) || str(pod, "status", "podIP") == "" {
+			assert(unchanged(), "automatic recovery replaced Pods or storage, or created a removal operation")
+			if pod == nil || str(pod, "status", "podIP") == "" || celldRestarts(pod) <= celldRestarts(target.pod) {
 				return false
 			}
 			state, err := h.launcherState(target.fleet, pod)
 			if err != nil || state.Phase != "Running" || state.Generation == target.state.Generation || state.Invocation == target.state.Invocation {
 				return false
 			}
+			assert(state.Operation == "" && !state.ChildExited && !state.RemovalReady() && !state.RuntimeDataSafe() && !state.InheritedLockReleased && !state.RestartDenied, "recovery manufactured removal authority")
 			if target.fleet == "beta" {
-				assert(str(pod, "status", "podIP") != str(target.pod, "status", "podIP"), "PersistentFleet reused its Pod IP; DNS rebinding was not exercised")
 				assert(str(pod, "spec", "nodeName") == str(target.pod, "spec", "nodeName") && uidOf(h.cluster("node", str(pod, "spec", "nodeName"))) == target.node, "persistent recovery moved to another node identity")
 				assert(state.BootID == target.state.BootID && state.DiskID == target.state.DiskID, "persistent recovery changed boot or disk identity")
 			}
@@ -163,7 +166,7 @@ func (h *harness) exerciseLeaseLoss() {
 		return h.settled("alpha", 2) && h.settled("beta", 2)
 	})
 	for fleetName, before := range oldClaims {
-		assert(same(h.claims(fleetName), before), "administrative recovery replaced claims or CSI disks")
+		assert(same(h.claims(fleetName), before), "automatic recovery replaced claims or CSI disks")
 	}
 	for _, target := range targets {
 		if target.fleet != "beta" {
@@ -173,21 +176,18 @@ func (h *harness) exerciseLeaseLoss() {
 		advertise := strings.TrimSpace(h.k("-n", "fleets", "exec", nameOf(pod), "-c", "celld", "--", "printenv", "CELLD_ADVERTISE"))
 		want := fmt.Sprintf("%s.%s-peers.%s.svc:8081", nameOf(pod), target.fleet, str(pod, "metadata", "namespace"))
 		assert(advertise == want, "PersistentFleet advertises %q, expected stable peer DNS %q", advertise, want)
-		fmt.Printf("PASS: PersistentFleet DNS rebinding pod=%s old_ip=%s new_ip=%s advertise=%s\n", nameOf(pod), str(target.pod, "status", "podIP"), str(pod, "status", "podIP"), advertise)
+		fmt.Printf("PASS: PersistentFleet same-Pod recovery pod=%s old_ip=%s new_ip=%s advertise=%s\n", nameOf(pod), str(target.pod, "status", "podIP"), str(pod, "status", "podIP"), advertise)
 	}
 	h.readLedger("client", "alpha")
 	h.readLedger("client-beta", "beta")
-	fmt.Println("PASS: explicit administrative recovery uses new Pod/runtime identities and retains same-host PersistentFleet disks and every acknowledged write")
+	fmt.Println("PASS: automatic container recovery uses fresh runtime identities, retains Pod/storage identities and every acknowledged write")
 }
 
-func (h *harness) replaceFailedPod(target leaseLossTarget) {
-	assert(len(sub(h.currentState(target.fleet), "Operation")) == 0, "administrative recovery raced a lifecycle operation")
-	pod := h.get("pod", nameOf(target.pod))
-	assert(uidOf(pod) == uidOf(target.pod), "administrative recovery target Pod changed")
-	state, err := h.launcherState(target.fleet, pod)
-	must(err)
-	assert(state.Generation == target.state.Generation && state.Invocation == target.state.Invocation && state.Phase == "ExitedUnrequested" && state.ChildExited && !state.RemovalReady(), "refusing to replace a different or nonfailed runtime")
-	body := encode(object{"apiVersion": "v1", "kind": "DeleteOptions", "preconditions": object{"uid": uidOf(pod)}})
-	path := h.writeFile("delete-failed-"+nameOf(pod)+".json", []byte(body))
-	h.k("delete", "--raw", "/api/v1/namespaces/fleets/pods/"+nameOf(pod), "-f", path)
+func celldRestarts(pod object) int64 {
+	for _, container := range list(pod, "status", "containerStatuses") {
+		if str(container, "name") == "celld" {
+			return num(container, "restartCount")
+		}
+	}
+	return 0
 }

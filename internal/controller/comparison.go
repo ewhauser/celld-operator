@@ -128,8 +128,10 @@ func normalizePod(p *corev1.PodSpec) {
 					e.ValueFrom.FieldRef.APIVersion = "v1"
 				}
 			}
-			if c.ReadinessProbe != nil && c.ReadinessProbe.HTTPGet != nil && c.ReadinessProbe.HTTPGet.Scheme == "" {
-				c.ReadinessProbe.HTTPGet.Scheme = corev1.URISchemeHTTP
+			for _, probe := range []*corev1.Probe{c.ReadinessProbe, c.LivenessProbe, c.StartupProbe} {
+				if probe != nil && probe.HTTPGet != nil && probe.HTTPGet.Scheme == "" {
+					probe.HTTPGet.Scheme = corev1.URISchemeHTTP
+				}
 			}
 		}
 	}

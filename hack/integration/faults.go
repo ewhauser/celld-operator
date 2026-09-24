@@ -53,7 +53,7 @@ func (h *harness) exerciseFaults() {
 		h.readLedger("client", "alpha")
 	}()
 	h.exerciseLeaseLoss()
-	fmt.Println("PASS: both profiles preserve acknowledged writes across before/after-effect manager crashes, storage latency and explicit administrative recovery after lease loss")
+	fmt.Println("PASS: both profiles preserve acknowledged writes across before/after-effect manager crashes, storage latency and automatic container recovery after lease loss")
 }
 
 func (h *harness) toxic(method, path string, body any) {
