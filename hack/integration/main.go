@@ -20,6 +20,7 @@ import (
 
 type options struct {
 	suite, runtimeImage, upgradeImage, operatorImage string
+	runtimeLocalImage                                string
 }
 
 type harness struct {
@@ -31,6 +32,7 @@ type harness struct {
 	arch, launcherImage         string
 	operatorArgs                []string
 	created, builtLauncher      bool
+	previewAlarm                int64
 	ledgers                     map[string][]ledgerEntry
 }
 
@@ -41,10 +43,11 @@ func main() {
 func realMain() (code int) {
 	var opts options
 	fs := flag.NewFlagSet("integration", flag.ContinueOnError)
-	fs.StringVar(&opts.suite, "suite", "all", "suite: all, lifecycle, maintenance, faults, external")
+	fs.StringVar(&opts.suite, "suite", "all", "suite: all, lifecycle, maintenance, faults, external, previews")
 	fs.StringVar(&opts.runtimeImage, "runtime-image", os.Getenv("CELLD_RUNTIME_IMAGE"), "required immutable ghcr.io/ewhauser/celld@sha256:... fork image")
 	fs.StringVar(&opts.upgradeImage, "upgrade-image", os.Getenv("CELLD_UPGRADE_IMAGE"), "optional second fork digest for live upgrade qualification")
 	fs.StringVar(&opts.operatorImage, "operator-image", "", "published controller/launcher image to qualify instead of building source")
+	fs.StringVar(&opts.runtimeLocalImage, "runtime-local-image", os.Getenv("CELLD_PREVIEW_IMAGE"), "locally built preview runtime/CLI image; previews suite only")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -55,7 +58,11 @@ func realMain() (code int) {
 		fmt.Fprintln(os.Stderr, "unexpected arguments:", fs.Args())
 		return 2
 	}
-	if !runtimeImagePin.MatchString(opts.runtimeImage) {
+	if opts.runtimeLocalImage != "" && opts.suite != "previews" {
+		fmt.Fprintln(os.Stderr, "--runtime-local-image is only supported for previews")
+		return 2
+	}
+	if opts.runtimeLocalImage == "" && !runtimeImagePin.MatchString(opts.runtimeImage) {
 		fmt.Fprintln(os.Stderr, "--runtime-image or CELLD_RUNTIME_IMAGE must name the strict fork by immutable digest")
 		return 2
 	}
@@ -64,7 +71,7 @@ func realMain() (code int) {
 		return 2
 	}
 	switch opts.suite {
-	case "all", "lifecycle", "maintenance", "faults", "external":
+	case "all", "lifecycle", "maintenance", "faults", "external", "previews":
 	default:
 		fmt.Fprintln(os.Stderr, "unknown suite:", opts.suite)
 		return 2
@@ -91,6 +98,9 @@ func realMain() (code int) {
 	h.kubeconfig = filepath.Join(h.tmp, "kubeconfig")
 	h.env = append(append([]string{}, os.Environ()...), "KUBECONFIG="+h.kubeconfig)
 	h.nodes = []string{h.name + "-control-plane", h.name + "-worker", h.name + "-worker2"}
+	if opts.suite == "previews" {
+		h.nodes = h.nodes[:1]
+	}
 	defer func() {
 		if err := h.cleanup(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -128,6 +138,12 @@ func (h *harness) exercise() {
 	h.createCluster()
 	h.loadImages()
 	h.deployStore()
+	if h.opts.suite == "previews" {
+		h.startOperator()
+		h.exercisePreviews()
+		fmt.Println("PASS: real operator preview integration", h.opts.runtimeImage)
+		return
+	}
 	h.deployApplication()
 	h.installStorageClass()
 	h.startOperator()
@@ -163,6 +179,9 @@ func (h *harness) diagnostics(recovered any) {
 			{"get", "pods", "-A", "-o", "wide"},
 			{"-n", "fleets", "get", "celldfleets", "-o", "yaml"},
 			{"get", "celldstoragereservations", "-o", "json"},
+			{"-n", "fleets", "get", "celldpreviews,ingresses", "-o", "yaml"},
+			{"-n", "fleets", "logs", "preview-edge", "--tail=80"},
+			{"-n", "fleets", "logs", "preview-executor", "--tail=80"},
 			{"-n", "fleets", "get", "events", "--sort-by=.lastTimestamp"},
 			// An autoscaler that declines to act leaves nothing in the objects
 			// above: it records why in its own conditions, and the answer is
@@ -183,6 +202,12 @@ func (h *harness) diagnostics(recovered any) {
 			if err != nil {
 				fmt.Println(err)
 			}
+		}
+	}
+	if h.opts.suite == "previews" {
+		for _, file := range []string{"/tmp/watch.log", "/tmp/seed.log"} {
+			out, _ := h.try(command{args: h.kubectl("-n", "fleets", "exec", "preview-executor", "--", "cat", file), timeout: 15 * time.Second, background: true})
+			fmt.Println(out)
 		}
 	}
 	if out, err := h.try(command{args: h.kubectl("-n", "celld-system", "logs", "deployment/celld-operator"), timeout: 5 * time.Minute, background: true}); err == nil {

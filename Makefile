@@ -135,3 +135,8 @@ site:
 
 site-dev:
 	cd site && pnpm install --frozen-lockfile && pnpm dev
+
+.PHONY: integration-previews
+# CELLD_PREVIEW_IMAGE must contain both preview runtime and CLI support.
+integration-previews:
+	go run ./hack/integration --suite previews

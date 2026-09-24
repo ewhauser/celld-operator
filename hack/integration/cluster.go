@@ -93,6 +93,9 @@ func verified(body []byte, sha, what string) []byte {
 
 func (h *harness) createCluster() {
 	config := kindConfig
+	if h.opts.suite == "previews" {
+		config = strings.Split(config, "- role: worker")[0]
+	}
 	configPath := h.writeFile("kind.yaml", []byte(config))
 	fmt.Println("Creating isolated cluster", h.name)
 	// Name is unique; cleanup is authorized only for this invocation's cluster.
@@ -101,7 +104,9 @@ func (h *harness) createCluster() {
 	calico := h.writeFile("calico.yaml", verified(h.fetch(calicoURL, time.Minute), calicoSHA, calicoURL))
 	h.k("apply", "-f", calico)
 	h.k("wait", "--for=condition=Ready", "nodes", "--all", "--timeout=240s")
-	h.k("taint", "nodes", h.nodes[0], "node-role.kubernetes.io/control-plane:NoSchedule-")
+	if len(h.nodes) > 1 {
+		h.k("taint", "nodes", h.nodes[0], "node-role.kubernetes.io/control-plane:NoSchedule-")
+	}
 	h.k("-n", "kube-system", "rollout", "status", "daemonset/calico-node", "--timeout=240s")
 	h.k("apply", "-f", filepath.Join(h.root, "config", "crd"))
 	h.k("wait", "--for=condition=Established", "crd/celldfleets.celld.eric.dev", "--timeout=60s")
@@ -128,7 +133,19 @@ func (h *harness) loadImages() {
 	if h.opts.operatorImage != "" {
 		images = append(images, h.opts.operatorImage)
 	}
-	images = append(images, csiImages...)
+	if h.opts.suite == "previews" {
+		images = []string{minioImage, mcImage, curlImage, previewEdgeImage}
+		if h.opts.runtimeLocalImage != "" {
+			h.loadPreviewRuntime()
+		} else {
+			images = append(images, h.opts.runtimeImage)
+		}
+		if h.opts.operatorImage != "" {
+			images = append(images, h.opts.operatorImage)
+		}
+	} else {
+		images = append(images, csiImages...)
+	}
 	for index, image := range images {
 		// Docker's containerd store may have only the local platform of
 		// a multiarch image. Export that platform explicitly; ordinary
@@ -360,7 +377,11 @@ func (h *harness) startOperator() {
 		h.goBuild(h.path("celld-launcher"), "./cmd/celld-launcher")
 		h.launcherImage = "celld-launcher-test:" + h.name
 		h.builtLauncher = true
-		h.writeFile("Dockerfile", []byte("FROM "+h.opts.runtimeImage+"\nCOPY celld-launcher /celld-launcher\n"))
+		base := h.opts.runtimeImage
+		if h.opts.runtimeLocalImage != "" {
+			base = h.opts.runtimeLocalImage
+		}
+		h.writeFile("Dockerfile", []byte("FROM "+base+"\nCOPY celld-launcher /celld-launcher\n"))
 		h.sh(3*time.Minute, "docker", "build", "-t", h.launcherImage, h.tmp)
 		h.sh(3*time.Minute, "kind", "load", "docker-image", "--name", h.name, h.launcherImage)
 	}
@@ -373,6 +394,9 @@ func (h *harness) startOperator() {
 	}
 	h.k("-n", operatorNS, "patch", "deployment", "celld-operator", "--type=strategic", "-p", encode(object{"spec": object{"replicas": 1, "template": object{"spec": spec}}}))
 	h.k("-n", operatorNS, "rollout", "status", "deployment/celld-operator", "--timeout=120s")
+	if h.opts.suite == "previews" {
+		return
+	}
 	metrics := h.writeFile("metrics.yaml", verified(h.fetch(metricsURL, 2*time.Minute), metricsSHA, metricsURL))
 	h.k("apply", "-f", metrics)
 	h.k("-n", "kube-system", "patch", "deployment", "metrics-server", "--type=json", "-p", `[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]`)
