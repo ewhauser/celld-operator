@@ -18,12 +18,15 @@ to understand how it uses object storage and peer disks, when writes are
 acknowledged, and how recovery works. Those runtime tradeoffs should guide your
 choice of profile.
 
-This page covers the Kubernetes configuration for that choice. Both profiles
-also require the strict launcher; upstream documentation does not replace the
+This page covers the Kubernetes configuration for that choice. PersistentFleet
+also requires the strict launcher; upstream documentation does not replace the
 operator's disk-removal contract.
 
-For `profile: Bucket`, choose `bucketWorkload: Ordered` if you need deterministic
-scale-in. Bucket uses temporary local disk and does not need CSI or PVCs.
+`profile: Bucket` runs `CELLD_DURABILITY=bucket`: every acknowledged write is in
+the bucket first, so the temporary local disk is a cache. Pods run celld
+directly, without the launcher, and Bucket does not need CSI or PVCs. Choose
+`bucketWorkload: Ordered` if you need deterministic zone assignment and
+highest-ordinal scale-in.
 
 Choose `profile: PersistentFleet` when the runtime should use persistent local
 peer disks. Configure `storage.storageClassName` with a supported dynamic CSI
@@ -34,8 +37,9 @@ class using `Delete`, `WaitForFirstConsumer` and RWOP claims. See
 | --- | --- | --- |
 | Local disk | Disk-backed `emptyDir`, bounded by `sizeGiB`. | One new RWOP claim per current ordinal. |
 | Layout | Immutable Deployment or Ordered StatefulSet. | StatefulSet. |
-| Scale-in | Ordered only. | Highest ordinal after strict proof. |
-| Restart/upgrade | Whole captured working set with downtime permission. | Same, followed by old-disk cleanup and fresh claims. |
+| Scale-in | One member per step; highest ordinal for Ordered. | Highest ordinal after strict proof. |
+| Restart/upgrade | Rolling, one member at a time; no downtime permission. | Whole captured working set with downtime permission, followed by old-disk cleanup and fresh claims. |
+| PodDisruptionBudget | `maxUnavailable: 1`; node drains evict one member at a time. | `maxUnavailable: 0`. |
 
 Neither profile provisions your bucket, runtime AWS identity, worker nodes or
 ingress controller. Optional [routing](../networking/) can configure a public

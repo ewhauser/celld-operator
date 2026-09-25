@@ -10,7 +10,7 @@ Use an explicit compatible fork image; the operator supplies no default runtime 
 | Kubernetes | 1.31 or newer, IPv4 Pod networking and enforced NetworkPolicy. |
 | Runtime | Registry-pinned OCI `@sha256:...` reference to the compatible celld fork, strict shutdown schema 1. |
 | Recovery fleet | Homogeneous compatible fork including native `bucket_complete` readers. |
-| Launcher | Digest-pinned image built from the matching operator source; required for both profiles. |
+| Launcher | Digest-pinned image built from the matching operator source; required for PersistentFleet. Bucket fleets run celld directly. |
 | Persistent storage | Supported dynamic CSI, RWOP, `Delete`, `WaitForFirstConsumer` and external-provisioner deletion finalizer. |
 | Capacity policy | Metrics Server for built-in observations; Prometheus is optional. |
 

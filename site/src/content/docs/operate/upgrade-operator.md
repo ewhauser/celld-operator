@@ -31,9 +31,17 @@ until then fleets report `InfrastructureBlocked` naming that file. A peer Servic
 with any other difference, including a different `appProtocol`, stays blocked.
 Rolling back to an earlier controller reports the new field as drift.
 
-Inspect current operations and the release's workload-template compatibility
-before changing the launcher image. The operator does not silently roll out a
-drifted fleet template. Do not erase current authority or force a workload update
+Bucket fleets created by earlier releases converge in place: one rolling update
+removes the launcher from the Pod template and switches the workload to
+one-member rolling updates, and the PodDisruptionBudget becomes
+`maxUnavailable: 1`. An in-flight Bucket current operation is dropped and
+recorded with outcome `Superseded`. Updating the budget needs the
+PodDisruptionBudget `update` verb; reapply `config/rbac/fleet-namespace.yaml`
+first if you manage that Role yourself.
+
+Inspect PersistentFleet current operations and the release's workload-template
+compatibility before changing the launcher image. The operator does not silently
+roll out a drifted PersistentFleet template. Do not erase current authority or force a workload update
 to work around a blocker.
 
 A controller restart resumes captured current operations; status can be rebuilt.

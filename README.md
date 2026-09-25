@@ -42,7 +42,7 @@ until CNI enforcement is attested. Local integration suites are available for re
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for formatting, linting, hooks, and container
 builds, and [docs/](docs/README.md) for architecture and test evidence.
-Test evidence and boundaries: [qualification records](docs/qualification/README.md). Both profiles require an explicit compatible fork runtime digest and a digest-pinned launcher. The controller uses celld control-plane proof and has no S3 or EC2 client.
+Test evidence and boundaries: [qualification records](docs/qualification/README.md). Both profiles require an explicit compatible fork runtime digest; PersistentFleet also requires a digest-pinned launcher and uses celld control-plane proof. The controller has no S3 or EC2 client.
 
 ## Contributor references
 

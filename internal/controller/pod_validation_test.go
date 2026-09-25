@@ -184,7 +184,7 @@ func TestRuntimeIdentityIgnoresInjectedContainers(t *testing.T) {
 }
 
 func TestMaintenanceWithAdmittedPods(t *testing.T) {
-	for _, profile := range []string{"Bucket", "PersistentFleet"} {
+	for _, profile := range []string{"PersistentFleet"} {
 		for _, kind := range []string{"Restart", "Upgrade"} {
 			t.Run(profile+"/"+kind, func(t *testing.T) {
 				x := newOperationFixture(t, profile)
@@ -213,7 +213,7 @@ func TestMaintenanceWithAdmittedPods(t *testing.T) {
 }
 
 func TestProvisioningReportsUnsupportedComposition(t *testing.T) {
-	for _, profile := range []string{"Bucket", "PersistentFleet"} {
+	for _, profile := range []string{"PersistentFleet"} {
 		t.Run(profile, func(t *testing.T) {
 			x := newOperationFixture(t, profile)
 			x.admit = func(p *corev1.PodSpec) {

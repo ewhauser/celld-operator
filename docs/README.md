@@ -7,8 +7,8 @@ describes implemented behavior and operational limits.
 The implementation has three authority boundaries:
 
 - [celld control plane](runtime-control-plane.md): generation-bound data safety.
-- [Launcher](launcher-supervision.md): exact process exit and restart exclusion.
-- [Current operation](current-operation.md): bounded Kubernetes authority and conditional infrastructure changes.
+- [Launcher](launcher-supervision.md): exact process exit and restart exclusion (PersistentFleet).
+- [Current operation](current-operation.md): bounded Kubernetes authority and conditional infrastructure changes (PersistentFleet; Bucket fleets roll one member at a time without it).
 
 Additional contributor references:
 

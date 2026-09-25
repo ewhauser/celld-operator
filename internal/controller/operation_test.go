@@ -233,10 +233,12 @@ func (x *operationFixture) syncWorkload() {
 		w.Status.ReadyReplicas = n
 		w.Status.Replicas = n
 		w.Status.ObservedGeneration = w.Generation
+		w.Status.UpdatedReplicas = n
 	case *appsv1.Deployment:
 		w.Status.ReadyReplicas = n
 		w.Status.Replicas = n
 		w.Status.ObservedGeneration = w.Generation
+		w.Status.UpdatedReplicas = n
 	}
 	if err := x.r.Status().Update(ctx, w); err != nil {
 		t.Fatal(err)
@@ -244,7 +246,7 @@ func (x *operationFixture) syncWorkload() {
 	x.clock = x.clock.Add(time.Second)
 }
 func TestStrictRemovalBothProfiles(t *testing.T) {
-	for _, profile := range []string{"Bucket", "PersistentFleet"} {
+	for _, profile := range []string{"PersistentFleet"} {
 		t.Run(profile, func(t *testing.T) {
 			x := newOperationFixture(t, profile)
 			x.desired(2)
@@ -353,7 +355,7 @@ func TestCancellationReversalPauseAndNewRequests(t *testing.T) {
 	for _, phase := range []string{"Intent", "Requesting", "ProofCaptured"} {
 		for _, change := range []string{"reverse", "pause", "restart", "upgrade"} {
 			t.Run(phase+"/"+change, func(t *testing.T) {
-				x := newOperationFixture(t, "Bucket")
+				x := newOperationFixture(t, "PersistentFleet")
 				x.desired(2)
 				x.until(phase)
 				id := x.state().Operation.ID
@@ -534,7 +536,7 @@ func TestLostResponsesAndControllerRestarts(t *testing.T) {
 	}
 }
 func TestStaleReservationAndWorkloadWriters(t *testing.T) {
-	x := newOperationFixture(t, "Bucket")
+	x := newOperationFixture(t, "PersistentFleet")
 	x.desired(2)
 	x.until("Intent")
 	res := &fleet.CelldStorageReservation{}
@@ -604,7 +606,7 @@ func TestCurrentAuthorityBoundedAndStatusRebuildable(t *testing.T) {
 	t.Logf("maximum completed authority size: %d bytes", maxSize)
 }
 func TestMaintenanceUsesCurrentWorkingSet(t *testing.T) {
-	for _, profile := range []string{"Bucket", "PersistentFleet"} {
+	for _, profile := range []string{"PersistentFleet"} {
 		for _, kind := range []string{"Restart", "Upgrade"} {
 			t.Run(profile+"/"+kind, func(t *testing.T) {
 				x := newOperationFixture(t, profile)
@@ -694,7 +696,7 @@ func TestLauncherCrashCaptureBoundary(t *testing.T) {
 	}
 }
 func TestStateRejectsUnboundOrOversizedAuthority(t *testing.T) {
-	x := newOperationFixture(t, "Bucket")
+	x := newOperationFixture(t, "PersistentFleet")
 	x.desired(2)
 	x.until("ProofCaptured")
 	res := envReservation(t, x.r, x.f)
@@ -774,27 +776,8 @@ func TestNoRuntimeProofFromAbsentPodOrReadiness(t *testing.T) {
 	}
 }
 
-func TestDeploymentBucketMaintenanceAndContractionBoundary(t *testing.T) {
-	x := newOperationFixture(t, "Deployment")
-	x.desired(2)
-	for range 3 {
-		x.step()
-	}
-	if x.state().Operation != nil || x.requests != 0 || replicas(x.workload()) != 3 {
-		t.Fatal("arbitrary deployment victim admitted")
-	}
-	x.desired(3)
-	x.edit(func(f *fleet.CelldFleet) {
-		f.Spec.Maintenance = &fleet.MaintenanceSpec{RestartToken: "restart", AllowCoordinatedDowntime: true}
-	})
-	x.until("Intent")
-	x.finish()
-	if x.state().RestartToken != "restart" || x.state().Applied != 3 {
-		t.Fatal("deployment working set failed")
-	}
-}
 func TestDeleteUsesStrictWorkingSetAndDisposesDisks(t *testing.T) {
-	for _, profile := range []string{"Bucket", "PersistentFleet"} {
+	for _, profile := range []string{"PersistentFleet"} {
 		t.Run(profile, func(t *testing.T) {
 			x := newOperationFixture(t, profile)
 			if err := x.r.Delete(t.Context(), x.f); err != nil {
@@ -889,7 +872,7 @@ func TestHundredMemberMaintenanceFitsBound(t *testing.T) {
 }
 
 func TestEffectCannotSweepUncapturedPods(t *testing.T) {
-	for _, profile := range []string{"Bucket", "PersistentFleet", "Deployment"} {
+	for _, profile := range []string{"PersistentFleet"} {
 		t.Run(profile, func(t *testing.T) {
 			x := newOperationFixture(t, profile)
 			if profile == "Deployment" {
@@ -925,7 +908,7 @@ func TestEffectCannotSweepUncapturedPods(t *testing.T) {
 }
 
 func TestMissingDeterministicTargetCannotBeAdopted(t *testing.T) {
-	x := newOperationFixture(t, "Bucket")
+	x := newOperationFixture(t, "PersistentFleet")
 	p := &corev1.Pod{}
 	if err := x.r.Get(t.Context(), client.ObjectKey{Namespace: x.f.Namespace, Name: "alpha-2"}, p); err != nil {
 		t.Fatal(err)

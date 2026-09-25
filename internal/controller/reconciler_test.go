@@ -109,7 +109,12 @@ func TestProvisionProfilesAndIsolation(t *testing.T) {
 		if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), p); err != nil {
 			t.Fatal(err)
 		}
-		if len(p.Spec.Ingress) != 3 || len(p.Spec.Ingress[0].From) != 2 || p.Spec.Ingress[0].From[0].PodSelector.MatchLabels[FleetLabel] != string(f.UID) || p.Spec.Ingress[0].From[1].NamespaceSelector == nil {
+		// Only PersistentFleet exposes the launcher port to the operator.
+		rules := 2
+		if f.Spec.Profile == "PersistentFleet" {
+			rules = 3
+		}
+		if len(p.Spec.Ingress) != rules || len(p.Spec.Ingress[0].From) != 2 || p.Spec.Ingress[0].From[0].PodSelector.MatchLabels[FleetLabel] != string(f.UID) || p.Spec.Ingress[0].From[1].NamespaceSelector == nil {
 			t.Fatal("peer isolation is not constrained")
 		}
 		w := workload(f, r.Options)
@@ -178,40 +183,32 @@ func TestConcurrentReservation(t *testing.T) {
 		t.Fatalf("got %d writers", len(list.Items))
 	}
 }
+
+// PersistentFleet workloads fail closed on unapproved change; Bucket
+// convergence is covered in bucket_test.go.
 func TestNoUnsafeMutationsOrRecreation(t *testing.T) {
-	for _, change := range []string{"scale-in", "profile", "missing", "drift", "delete"} {
+	for _, change := range []string{"profile", "missing", "drift"} {
 		t.Run(change, func(t *testing.T) {
-			f := fixture("alpha", "bucket-alpha", "Bucket")
+			f := fixture("alpha", "bucket-alpha", "PersistentFleet")
 			r := setup(t, f)
 			f = reconcile(t, r, f)
 			switch change {
-			case "scale-in":
-				f.Spec.Replicas = 2
-			case "scale-out":
-				f.Spec.Replicas = 4
 			case "profile":
-				f.Spec.Profile = "PersistentFleet"
-				f.Spec.Storage.StorageClassName = "disposable"
+				f.Spec.Profile = "Bucket"
+				if err := r.Update(t.Context(), f); err != nil {
+					t.Fatal(err)
+				}
 			case "missing":
-				if err := r.Delete(t.Context(), &appsv1.Deployment{Name: f.Name, Namespace: f.Namespace}); err != nil {
+				if err := r.Delete(t.Context(), &appsv1.StatefulSet{Name: f.Name, Namespace: f.Namespace}); err != nil {
 					t.Fatal(err)
 				}
 			case "drift":
-				d := &appsv1.Deployment{}
-				if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), d); err != nil {
+				sts := &appsv1.StatefulSet{}
+				if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), sts); err != nil {
 					t.Fatal(err)
 				}
-				d.Spec.Template.Spec.Containers[0].Image = "unexpected"
-				if err := r.Update(t.Context(), d); err != nil {
-					t.Fatal(err)
-				}
-			case "delete":
-				if err := r.Delete(t.Context(), f); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if change == "scale-in" || change == "scale-out" || change == "profile" {
-				if err := r.Update(t.Context(), f); err != nil {
+				sts.Spec.Template.Spec.Containers[0].Image = "unexpected"
+				if err := r.Update(t.Context(), sts); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -220,27 +217,27 @@ func TestNoUnsafeMutationsOrRecreation(t *testing.T) {
 			if c == nil || c.Status != metav1.ConditionTrue {
 				t.Fatal("unsafe operation not blocked")
 			}
-			ds := &appsv1.DeploymentList{}
-			if err := r.List(t.Context(), ds); err != nil {
+			list := &appsv1.StatefulSetList{}
+			if err := r.List(t.Context(), list); err != nil {
 				t.Fatal(err)
 			}
 			if change == "missing" {
-				if len(ds.Items) != 0 {
+				if len(list.Items) != 0 {
 					t.Fatal("missing workload recreated")
 				}
-			} else if len(ds.Items) != 1 || *ds.Items[0].Spec.Replicas != 3 {
+			} else if len(list.Items) != 1 || *list.Items[0].Spec.Replicas != 3 || (change == "drift" && list.Items[0].Spec.Template.Spec.Containers[0].Image != "unexpected") {
 				t.Fatal("workload disrupted")
 			}
 		})
 	}
 }
 func TestCreationCrashFailsClosed(t *testing.T) {
-	f := fixture("alpha", "bucket-alpha", "Bucket")
+	f := fixture("alpha", "bucket-alpha", "PersistentFleet")
 	r := setup(t, f)
 	base := r.Client
 	r.Client = interceptor.NewClient(base.(client.WithWatch), interceptor.Funcs{
 		Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
-			if _, ok := obj.(*appsv1.Deployment); ok {
+			if _, ok := obj.(*appsv1.StatefulSet); ok {
 				return errors.New("injected create failure")
 			}
 			return c.Create(ctx, obj, opts...)
@@ -253,7 +250,7 @@ func TestCreationCrashFailsClosed(t *testing.T) {
 	reason(t, reconcile(t, r, f), "LifecycleBlocked")
 }
 func TestMissingPrerequisitesAndIsolationDrift(t *testing.T) {
-	f := fixture("alpha", "bucket-alpha", "Bucket")
+	f := fixture("alpha", "bucket-alpha", "PersistentFleet")
 	r := setup(t, f)
 	r.NetworkPolicyEnforced = false
 	reason(t, reconcile(t, r, f), "IsolationUnverified")
@@ -327,7 +324,7 @@ func TestReservationCannotBeReclaimedByNewUID(t *testing.T) {
 // not as a storage scope conflict: the reservation still binds exactly this
 // fleet, and the reason an operator sees has to name the actual failure.
 func TestUnreadableOperationReportsInvalidState(t *testing.T) {
-	r, f := lifecycleSetup(t, "Bucket")
+	r, f := lifecycleSetup(t, "PersistentFleet")
 	res := &fleet.CelldStorageReservation{}
 	if err := r.Get(t.Context(), types.NamespacedName{Name: reservationName(f)}, res); err != nil {
 		t.Fatal(err)
@@ -371,6 +368,8 @@ func TestReadinessRequiresObservedWorkload(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.Status.ReadyReplicas = 3
+	d.Status.UpdatedReplicas = 3
+	d.Status.Replicas = 3
 	d.Status.ObservedGeneration = 1
 	if err := r.Status().Update(t.Context(), d); err != nil {
 		t.Fatal(err)
@@ -391,8 +390,8 @@ func TestReadinessRequiresObservedWorkload(t *testing.T) {
 }
 
 func TestAPIDefaultedProbeIsNotDrift(t *testing.T) {
-	f := fixture("alpha", "bucket-alpha", "Bucket")
-	want := workload(f, Options{LauncherImage: fixtureLauncher}).(*appsv1.Deployment)
+	f := fixture("alpha", "bucket-alpha", "PersistentFleet")
+	want := workload(f, Options{LauncherImage: fixtureLauncher}).(*appsv1.StatefulSet)
 	got := want.DeepCopy()
 	got.Spec.Template.Spec.Containers[0].ReadinessProbe.SuccessThreshold = 1
 	got.Spec.Template.Spec.Containers[0].LivenessProbe.HTTPGet.Scheme = corev1.URISchemeHTTP
@@ -440,10 +439,10 @@ func TestRejectAdditionalWorkloadConfiguration(t *testing.T) {
 	}
 	for name, mutate := range mutations {
 		t.Run(name, func(t *testing.T) {
-			f := fixture("alpha", "bucket-alpha", "Bucket")
+			f := fixture("alpha", "bucket-alpha", "PersistentFleet")
 			r := setup(t, f)
 			reconcile(t, r, f)
-			d := &appsv1.Deployment{}
+			d := &appsv1.StatefulSet{}
 			if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), d); err != nil {
 				t.Fatal(err)
 			}

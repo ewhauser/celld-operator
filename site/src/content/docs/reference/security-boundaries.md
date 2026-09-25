@@ -13,7 +13,8 @@ The cluster-scoped role covers fleet discovery/status, permanent reservations,
 current PV/StorageClass/node inspection and attachment observations. Each fleet
 namespace has a separate Role for workloads, Pods, Services, policies, credentials
 and guarded PVC creation/deletion. Service updates only fill unset fields a newer
-release declares on operator-created Services. The controller's leader-election
+release declares on operator-created Services. PodDisruptionBudget updates
+converge Bucket fleet budgets only. The controller's leader-election
 lease is scoped to its own namespace.
 
 Use the shipped chart and `config/rbac/fleet-namespace.yaml` as the exact permission
@@ -27,7 +28,7 @@ reclaim policy or grant itself cloud credentials.
 | --- | --- |
 | 8080 application | Same-namespace Pods labeled `celld.eric.dev/client-of: <fleet>`, plus explicitly selected routing data-plane Pods when enabled. |
 | 8081 celld internal | Same-fleet peers and trusted operator-namespace Pods. |
-| 8083 launcher | Trusted operator-namespace Pods; HMAC authenticates every request and response. No Service exposes it. |
+| 8083 launcher (PersistentFleet) | Trusted operator-namespace Pods; HMAC authenticates every request and response. No Service exposes it. |
 | 8082 health / 8084 metrics | Operator probes and configured monitoring; restrict with your cluster policy. |
 
 Generated NetworkPolicy requires an enforcing CNI. The operator's enforcement
@@ -36,7 +37,9 @@ the unauthenticated celld internal listener through public ingress.
 
 ## Proof and trust
 
-An immutable per-fleet Secret supplies the launcher HMAC key. Exact Pod,
+Bucket fleets have no launcher, key or proof: their writes are in S3 before
+acknowledgement. For PersistentFleet, an immutable per-fleet Secret supplies the
+launcher HMAC key. Exact Pod,
 container, host/boot, invocation, generation and disk identities bind the response
 to the captured target. The runtime result is positive data-safety authority;
 the launcher's lock and restart denial independently establish process exclusion.
@@ -56,8 +59,8 @@ runtime and launcher artifacts. See [current operations](../../contracts/current
 Mutating admission such as service-mesh sidecars, workload-identity credentials,
 telemetry injection, registry mirrors and policy-engine hardening may add
 containers, init containers, environment, volumes and mounts. No injector is
-named or allow-listed. Before trusting a Pod's proof, and again while the fleet
-is steady, the operator refuses only changes that could make that proof wrong:
+named or allow-listed. For PersistentFleet, before trusting a Pod's proof, and
+again while the fleet is steady, the operator refuses only changes that could make that proof wrong:
 
 - a container other than the operator's own mounting the data disk, launcher
   binary or launcher key, or any extra mount of those volumes

@@ -5,17 +5,20 @@ Use the task-oriented [installation guide](../site/src/content/docs/start/instal
 [maintenance guide](../site/src/content/docs/operate/restart.md) and
 [deletion guide](../site/src/content/docs/operate/deletion.md).
 
-Both Bucket and PersistentFleet need a compatible digest-pinned fork runtime and
-launcher. The operator has Kubernetes credentials only; celld receives the runtime
+Both Bucket and PersistentFleet need a compatible digest-pinned fork runtime;
+only PersistentFleet uses the launcher. The operator has Kubernetes credentials only; celld receives the runtime
 bucket identity. The manager does not read S3 recovery metadata or terminate EC2
 instances. The fleet namespace Role includes guarded PVC deletion; storage
 finalizers remain under Kubernetes and CSI control. Its Service `update` verb only
 fills fields a newer release declares on an otherwise exactly matching
 operator-created Service; any other difference remains `InfrastructureBlocked`.
+Its PodDisruptionBudget `update` verb converges Bucket fleet budgets; Bucket
+workloads and NetworkPolicies are likewise converged, while PersistentFleet
+objects stay verify-only.
 
 For implementation details use [current operations](current-operation.md),
 [launcher supervision](launcher-supervision.md) and [typed control plane](runtime-control-plane.md).
-A blocked operation must preserve current authority and storage. Removing an
+A blocked PersistentFleet operation must preserve current authority and storage. Removing an
 annotation, claim finalizer or fleet finalizer is not a recovery procedure.
 
 ## Build and validate

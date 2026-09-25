@@ -22,7 +22,7 @@ Run these commands from a clone of the [celld operator repository](https://githu
    docker buildx imagetools inspect YOUR_REGISTRY/celld-operator:YOUR_TAG
    ```
 
-   Authenticate Docker to your registry before pushing, and check that the inspection lists the platforms used by your EKS nodes. If the registry is private, create an image pull Secret in `celld-system` and set chart `imagePullSecrets` for the manager. Fleet Pods also pull the launcher image: create the registry Secret in each fleet namespace and reference it in the runtime ServiceAccount's `imagePullSecrets`, or configure node-level registry access. The chart value does not grant fleet namespaces access. See the [chart values](../../api/helm-values/). The image includes the operator and launcher binaries. The runtime is a separately pinned compatible celld fork image; stock upstream releases do not provide the required strict API.
+   Authenticate Docker to your registry before pushing, and check that the inspection lists the platforms used by your EKS nodes. If the registry is private, create an image pull Secret in `celld-system` and set chart `imagePullSecrets` for the manager. PersistentFleet Pods also pull the launcher image: create the registry Secret in each fleet namespace and reference it in the runtime ServiceAccount's `imagePullSecrets`, or configure node-level registry access. The chart value does not grant fleet namespaces access. See the [chart values](../../api/helm-values/). The image includes the operator and launcher binaries. The runtime is a separately pinned compatible celld fork image; stock upstream releases do not provide the required strict API.
 
 2. **Install or update the CRDs.** Helm does not upgrade CRDs from a chart's `crds/` directory. Apply the repository copies on every operator upgrade.
 
@@ -41,7 +41,7 @@ Run these commands from a clone of the [celld operator repository](https://githu
      --set 'fleetNamespaces={fleets}'
    ```
 
-   Both profiles require the digest-pinned launcher image. The chart's operator ServiceAccount is `celld-celld-operator` for this release name and needs no AWS association.
+   PersistentFleet requires the digest-pinned launcher image; Bucket fleets run celld directly and do not use it. The chart's operator ServiceAccount is `celld-celld-operator` for this release name and needs no AWS association.
 
 4. **Check the rollout and namespace permissions.** A healthy installation has both requested operator replicas available and a RoleBinding in `fleets` whose subject is `celld-celld-operator` in `celld-system`.
 

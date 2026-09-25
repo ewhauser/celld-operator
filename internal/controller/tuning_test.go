@@ -90,12 +90,15 @@ func TestTuningIsAppliedToTheTemplate(t *testing.T) {
 	if *pod.TerminationGracePeriodSeconds != 180 {
 		t.Fatalf("grace not applied: %d", *pod.TerminationGracePeriodSeconds)
 	}
-	// Bucket uses the same strict launcher on its temporary disk.
+	// Bucket runs celld directly; its grace bounds celld's own SIGTERM drain.
 	b := fixture("beta", "bucket-beta", "Bucket")
 	b.Spec.Lifecycle = &fleet.LifecycleSpec{ShutdownSeconds: 60, TerminationGraceSeconds: 90}
 	bp := podTemplate(b, opts).Spec
-	if v, has := envValue(bp.Containers[0].Env, "LAUNCHER_TERMINATION_GRACE_SECONDS"); !has || v != "90" {
-		t.Fatal("Bucket lacks bounded launcher termination")
+	if _, has := envValue(bp.Containers[0].Env, "LAUNCHER_TERMINATION_GRACE_SECONDS"); has || len(bp.InitContainers) != 0 || bp.Containers[0].Command != nil {
+		t.Fatal("Bucket must not run under the launcher")
+	}
+	if v, _ := envValue(bp.Containers[0].Env, "CELLD_SHUTDOWN_TOTAL_MS"); v != "60000" {
+		t.Fatal("Bucket drain bound not applied")
 	}
 	if *bp.TerminationGracePeriodSeconds != 90 {
 		t.Fatal("Bucket grace not applied")

@@ -1,8 +1,8 @@
 # Runtime requirements
 
 Provisioning requires an explicit registry-pinned OCI image ending in
-`@sha256:<64 lowercase hex digits>` and a digest-pinned
-launcher image. There is no default runtime image and no list of stock upstream
+`@sha256:<64 lowercase hex digits>`. PersistentFleet also requires a
+digest-pinned launcher image. There is no default runtime image and no list of stock upstream
 releases accepted as substitutes.
 
 The required fork is based on upstream v0.5.1 and exposes strict shutdown schema

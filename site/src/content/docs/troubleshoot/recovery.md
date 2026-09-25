@@ -3,7 +3,11 @@ title: Runtime exit and recovery
 description: Diagnose a stopped child or delayed retained witness without discarding recovery data or removal authority.
 ---
 
-A running Pod does not imply that its celld child is running. The launcher starts
+This page mostly concerns PersistentFleet, whose Pods run under the launcher.
+Bucket Pods run celld directly: an exited container restarts normally, and a
+lost member loses no acknowledged write because the bucket already holds it.
+
+In PersistentFleet, a running Pod does not imply that its celld child is running. The launcher starts
 one child and deliberately does not restart it after an unsolicited exit. There
 is no liveness or startup probe that resets this state; the application readiness
 probe becomes unhealthy. Lease expiry during an S3 outage can therefore leave a
@@ -35,8 +39,8 @@ also need the PVC/PV UIDs, CSI handle, Node UID and host boot identity. The
 | `.3` predecessor recovery reports an undecided witness | Check the named retained peer, stable peer DNS, network policy, scheduling and volume access. The first node may need the peer's early follower listener before either becomes ready. |
 | Bounded startup retries exhausted | The child stops with recovery evidence retained. Resolve peer availability and investigate a coordinated administrative restart; do not erase data to make it healthy. |
 | Strict removal is `Failed`, unknown, or its positive proof was lost | Follow [blocked operations](../lifecycle/). A new token or Pod cannot reconstruct a missing `data_safe` result. |
-| Fleet reason `DiskRetired` | A previous Pod on this disk was stopped without an operator request (for example `kubectl delete pod`, node-pressure eviction, node shutdown or preemption), so its launcher retired the disk and the replacement will not start. Acknowledged data is retained in the bucket. There is no automatic disk replacement yet ([#60](https://github.com/ewhauser/celld-operator/issues/60)); preserve the claim and marker. |
-| Fleet reason `LauncherBlocked`, or a lock, host or boot mismatch | The message carries the launcher's reason. Preserve the disk and binding files. Never clear them to permit a replacement writer. |
+| Fleet reason `DiskRetired` (PersistentFleet) | A previous Pod on this disk was stopped without an operator request (for example `kubectl delete pod`, node-pressure eviction, node shutdown or preemption), so its launcher retired the disk and the replacement will not start. Acknowledged data is retained in the bucket. There is no automatic disk replacement yet ([#60](https://github.com/ewhauser/celld-operator/issues/60)); preserve the claim and marker. |
+| Fleet reason `LauncherBlocked` (PersistentFleet), or a lock, host or boot mismatch | The message carries the launcher's reason. Preserve the disk and binding files. Never clear them to permit a replacement writer. |
 
 ## Retained-peer startup
 
@@ -70,6 +74,6 @@ not been retired, and the exact same-host/boot/storage constraints can be met.
 Cross-host or cross-boot reuse remains blocked even if Kubernetes attaches the
 volume. Permanent host loss requires separate recovery planning.
 
-Planned [restart](../../operate/restart/) and [runtime upgrade](../../operate/upgrade-runtime/)
+Planned PersistentFleet [restart](../../operate/restart/) and [runtime upgrade](../../operate/upgrade-runtime/)
 are different: they require positive strict proof, dispose of the old disks,
 and resume on fresh disks. They cannot be used to bypass a missing removal proof.
