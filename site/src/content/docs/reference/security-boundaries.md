@@ -50,6 +50,26 @@ runtime and launcher artifacts. See [current operations](../../contracts/current
 [disposable disks](../../contracts/disposable-disks/) and
 [qualification](../../qualification/) for boundaries and tests.
 
+## Admission mutations
+
+Mutating admission such as service-mesh sidecars, workload-identity credentials,
+telemetry injection, registry mirrors and policy-engine hardening may add
+containers, init containers, environment, volumes and mounts. No injector is
+named or allow-listed. Before trusting a Pod's proof, and again while the fleet
+is steady, the operator refuses only changes that could make that proof wrong:
+
+- a container other than the operator's own mounting the data disk, launcher
+  binary or launcher key, or any extra mount of those volumes
+- a different image digest, command, args or working directory for the runtime
+  or launcher (a registry rewrite that keeps the digest is accepted)
+- an override or removal of an operator-set environment variable
+- a mount that shadows or nests inside an operator mount path
+- `hostPID`, `hostIPC`, `hostNetwork`, `shareProcessNamespace` or an ephemeral
+  debug container
+
+Admission that can add privileged or hostPath containers is trusted with the
+node, and the operator does not attempt to detect it.
+
 ## Optional routing
 
 Fleet editors can configure public hostnames and controller-specific Ingress

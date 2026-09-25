@@ -26,7 +26,7 @@ func TestCollectorRuntimeAndMetrics(t *testing.T) {
 	}
 }
 func testCollectorRuntimeAndMetrics(t *testing.T, profile string) {
-	for _, scenario := range []string{"complete", "unknown shutdown schema", "denied", "missing cpu", "stale", "future", "unknown state", "restarted", "oversize", "redirect", "bad window", "wrong identity", "unready", "canceled"} {
+	for _, scenario := range []string{"complete", "unknown shutdown schema", "denied", "missing cpu", "stale", "future", "unknown state", "restarted", "oversize", "redirect", "bad window", "wrong identity", "unready", "canceled", "sidecar", "duplicate runtime"} {
 		t.Run(scenario, func(t *testing.T) {
 			now := time.Now().Truncate(time.Second)
 			f := fixture("alpha", "bucket-alpha", profile)
@@ -35,6 +35,11 @@ func testCollectorRuntimeAndMetrics(t *testing.T, profile string) {
 			p := &corev1.Pod{Name: "alpha-pod", Namespace: f.Namespace, UID: "pod-uid", Labels: labels(f), Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "celld", Image: fixtureRuntime}}}, Status: corev1.PodStatus{PodIP: "127.0.0.1", ContainerStatuses: []corev1.ContainerStatus{{Name: "celld", ContainerID: "container-1", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: metav1.NewTime(now.Add(-time.Hour))}}}}, Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}}}
 			if scenario == "unready" {
 				p.Status.Conditions[0].Status = corev1.ConditionFalse
+			}
+			if scenario == "sidecar" {
+				// Admission-injected sidecars precede or follow the runtime; neither
+				// its presence nor its usage may displace the runtime sample.
+				p.Spec.Containers = append([]corev1.Container{{Name: "istio-proxy", Image: "proxy:fixture"}}, p.Spec.Containers...)
 			}
 			r := setup(t, f, p)
 			raw, err := os.ReadFile("../runtime/controlplane/testdata/state.json")
@@ -50,7 +55,12 @@ func testCollectorRuntimeAndMetrics(t *testing.T, profile string) {
 			timestamp := now
 			window := "15s"
 			name := p.Name
+			containers := []any{map[string]any{"name": "celld", "usage": usage}}
 			switch scenario {
+			case "sidecar":
+				containers = append([]any{map[string]any{"name": "istio-proxy", "usage": map[string]string{"cpu": "999m", "memory": "500Mi"}}}, containers...)
+			case "duplicate runtime":
+				containers = append(containers, containers[0])
 			case "unknown shutdown schema":
 				state["shutdown"] = map[string]any{"schema_version": 2, "capabilities": "future schema"}
 			case "missing cpu":
@@ -101,7 +111,7 @@ func testCollectorRuntimeAndMetrics(t *testing.T, profile string) {
 						t.Error(err)
 					}
 				}
-				_ = json.NewEncoder(w).Encode(map[string]any{"apiVersion": "metrics.k8s.io/v1beta1", "kind": "PodMetrics", "metadata": map[string]string{"name": name, "namespace": p.Namespace}, "timestamp": timestamp.Format(time.RFC3339Nano), "window": window, "containers": []any{map[string]any{"name": "celld", "usage": usage}}})
+				_ = json.NewEncoder(w).Encode(map[string]any{"apiVersion": "metrics.k8s.io/v1beta1", "kind": "PodMetrics", "metadata": map[string]string{"name": name, "namespace": p.Namespace}, "timestamp": timestamp.Format(time.RFC3339Nano), "window": window, "containers": containers})
 			}))
 			defer server.Close()
 			c, err := NewCollector(r.Client, &rest.Config{Host: server.URL})
@@ -129,7 +139,7 @@ func testCollectorRuntimeAndMetrics(t *testing.T, profile string) {
 				t.Fatal(o)
 			}
 			s := o.Samples[0]
-			if scenario == "complete" || scenario == "unready" {
+			if scenario == "complete" || scenario == "unready" || scenario == "sidecar" {
 				if s.CPU != 123 || s.MemoryMiB != 100 || s.MetricsAt.IsZero() || s.RuntimeAt.IsZero() || s.Ready != (scenario != "unready") || s.RuntimeMemoryMiB != 52 {
 					t.Fatal(s)
 				}
