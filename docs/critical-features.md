@@ -14,6 +14,7 @@
 | Public routing | Optional mutable HTTPRoute or Ingress to port 8080, explicit data-plane ingress policy, ownership-safe updates and cleanup. |
 | Application visibility | Read-only observed versions, coverage and resident-cell convergence; unsupported or stale runtime observations remain Unknown. |
 | Capacity | Manual targets, Shadow, ScaleOut, Automatic and External ownership all share the same executor and safety checks. |
+| Kubernetes prerequisites | Services, NetworkPolicy and PodDisruptionBudget are created, then verified exactly. The only in-place change fills a field a newer release declares and the live object leaves unset, such as the peer port's `appProtocol: tcp`, pinned to the verified resourceVersion. Any other difference blocks as `InfrastructureBlocked`. |
 | Failure handling | Ambiguous or failed proof remains blocked. Status edits, timeouts and missing Pods cannot authorize removal. |
 
 All nodes that may participate in recovery must run a compatible fork, including

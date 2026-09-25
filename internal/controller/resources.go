@@ -318,7 +318,10 @@ func prerequisites(f *fleet.CelldFleet, opts Options) []client.Object {
 			ClusterIP:                corev1.ClusterIPNone,
 			PublishNotReadyAddresses: true,
 			Selector:                 labels(f),
-			Ports:                    []corev1.ServicePort{{Name: "peer", Port: 8081, TargetPort: intstr.FromInt32(8081)}},
+			// Peer RPC is an opaque byte stream. The standard appProtocol field keeps
+			// service meshes and proxies from sniffing it as HTTP (#59); the port name
+			// stays stable because Services created by earlier releases carry it.
+			Ports: []corev1.ServicePort{{Name: "peer", Port: 8081, TargetPort: intstr.FromInt32(8081), AppProtocol: new("tcp")}},
 		},
 	}
 	same := networkingv1.NetworkPolicyPeer{PodSelector: selector(f)}

@@ -35,7 +35,8 @@ also need the PVC/PV UIDs, CSI handle, Node UID and host boot identity. The
 | `.3` predecessor recovery reports an undecided witness | Check the named retained peer, stable peer DNS, network policy, scheduling and volume access. The first node may need the peer's early follower listener before either becomes ready. |
 | Bounded startup retries exhausted | The child stops with recovery evidence retained. Resolve peer availability and investigate a coordinated administrative restart; do not erase data to make it healthy. |
 | Strict removal is `Failed`, unknown, or its positive proof was lost | Follow [blocked operations](../lifecycle/). A new token or Pod cannot reconstruct a missing `data_safe` result. |
-| Retired-disk marker, lock, host or boot mismatch | Preserve the disk and binding files. Never clear them to permit a replacement writer. |
+| Fleet reason `DiskRetired` | A previous Pod on this disk was stopped without an operator request (for example `kubectl delete pod`, node-pressure eviction, node shutdown or preemption), so its launcher retired the disk and the replacement will not start. Acknowledged data is retained in the bucket. There is no automatic disk replacement yet ([#60](https://github.com/ewhauser/celld-operator/issues/60)); preserve the claim and marker. |
+| Fleet reason `LauncherBlocked`, or a lock, host or boot mismatch | The message carries the launcher's reason. Preserve the disk and binding files. Never clear them to permit a replacement writer. |
 
 ## Retained-peer startup
 

@@ -13,9 +13,11 @@ rules:
   - apiGroups: ['']
     resources: [serviceaccounts]
     verbs: [get]
+  # Update applies only to filling unset fields a newer release declares on an
+  # otherwise exactly matching operator-created Service, pinned to its resourceVersion.
   - apiGroups: ['']
     resources: [services]
-    verbs: [get, create]
+    verbs: [get, create, update]
   # Delete applies only to exact UID/RV-bound claims after captured strict removal proof.
   - apiGroups: ['']
     resources: [persistentvolumeclaims]

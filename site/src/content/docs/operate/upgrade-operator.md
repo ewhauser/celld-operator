@@ -22,6 +22,15 @@ kubectl --context YOUR_CONTEXT apply -f config/crd/
 helm --kube-context YOUR_CONTEXT upgrade celld charts/celld-operator   --namespace celld-system --reuse-values   --set image.digest=sha256:YOUR_OPERATOR_DIGEST   --set launcherImage=YOUR_REGISTRY/celld-operator@sha256:YOUR_OPERATOR_DIGEST
 ```
 
+The controller declares `appProtocol: tcp` on each fleet's peer Service port.
+Peer Services created by earlier releases lack it; the controller fills that field
+in place when the Service otherwise matches exactly. That needs the Service
+`update` verb in the fleet-namespace Role, which the chart's Role includes. If you apply `config/rbac/fleet-namespace.yaml`
+yourself, reapply the release's copy in every fleet namespace before the chart;
+until then fleets report `InfrastructureBlocked` naming that file. A peer Service
+with any other difference, including a different `appProtocol`, stays blocked.
+Rolling back to an earlier controller reports the new field as drift.
+
 Inspect current operations and the release's workload-template compatibility
 before changing the launcher image. The operator does not silently roll out a
 drifted fleet template. Do not erase current authority or force a workload update

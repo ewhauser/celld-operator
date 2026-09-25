@@ -12,8 +12,9 @@ celld alone holds the fleet's runtime bucket identity.
 The cluster-scoped role covers fleet discovery/status, permanent reservations,
 current PV/StorageClass/node inspection and attachment observations. Each fleet
 namespace has a separate Role for workloads, Pods, Services, policies, credentials
-and guarded PVC creation/deletion. The controller's leader-election lease is
-scoped to its own namespace.
+and guarded PVC creation/deletion. Service updates only fill unset fields a newer
+release declares on operator-created Services. The controller's leader-election
+lease is scoped to its own namespace.
 
 Use the shipped chart and `config/rbac/fleet-namespace.yaml` as the exact permission
 reference. The tests audit actual reconciler calls against these grants.

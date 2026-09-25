@@ -189,6 +189,11 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 	}
 	for _, obj := range prerequisites(f, r.Options) {
 		if err := r.ensure(ctx, obj); err != nil {
+			// A lost field-upgrade race retries from a fresh read instead of
+			// reporting a conflict the next verification may not find.
+			if apierrors.IsConflict(err) {
+				return ctrl.Result{}, err
+			}
 			return r.report(ctx, f, h, "InfrastructureBlocked", err.Error(), false)
 		}
 	}
@@ -259,8 +264,9 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 	// Maintenance validates each admitted Pod before trusting its proof. Check the
 	// same contract now so an incompatible admission mutation is reported while
 	// the fleet is steady, not first discovered by a maintenance request.
+	var pods []corev1.Pod
 	if s := h.j; s != nil {
-		pods, err := r.currentPods(ctx, f, s)
+		pods, err = r.currentPods(ctx, f, s)
 		if err != nil {
 			return r.report(ctx, f, h, "PodCompositionUnsupported", err.Error(), false)
 		}
@@ -273,9 +279,39 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 		}
 	}
 	if readyReplicas(actual) != replicas(actual) {
+		if reason, message := r.blockedLauncher(ctx, f, pods); reason != "" {
+			return r.report(ctx, f, h, reason, message, false)
+		}
 		return r.report(ctx, f, h, "Provisioning", "Waiting for ready replicas; inspect Pod scheduling, PVC binding and runtime readiness. Capacity is externally provisioned", true)
 	}
 	return r.report(ctx, f, h, "Provisioned", "Initial infrastructure and runtime readiness observed", true)
+}
+
+// blockedLauncher explains an unready replica whose launcher will never start
+// its child, which readiness alone reports as indefinite provisioning. It is a
+// bounded, authenticated read with no operation; an unreachable or starting
+// launcher is not evidence of anything and leaves the ordinary reason.
+func (r *Reconciler) blockedLauncher(ctx context.Context, f *fleet.CelldFleet, pods []corev1.Pod) (string, string) {
+	if r.Options.LauncherImage == "" {
+		return "", ""
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	for i := range pods {
+		p := &pods[i]
+		if !p.DeletionTimestamp.IsZero() || podReady(p) || p.Status.PodIP == "" {
+			continue
+		}
+		state, err := r.callLauncher(ctx, f, p, "", "")
+		if err != nil || state.Phase != "Blocked" {
+			continue
+		}
+		if state.Error == launcher.ErrDiskRetired.Error() {
+			return "DiskRetired", fmt.Sprintf("Pod %s cannot start: its disk was retired when a previous Pod on it stopped without an operator request, and a retired disk is never reopened. Acknowledged data is retained in the bucket. There is no automatic disk replacement; do not remove the marker or reuse the claim", p.Name)
+		}
+		return "LauncherBlocked", fmt.Sprintf("Pod %s launcher is blocked and will not start the runtime: %s", p.Name, state.Error)
+	}
+	return "", ""
 }
 
 func (r *Reconciler) ensure(ctx context.Context, desired client.Object) error {
@@ -287,8 +323,35 @@ func (r *Reconciler) ensure(ctx context.Context, desired client.Object) error {
 	if err != nil {
 		return err
 	}
-	if !matches(desired, actual) {
+	if matches(desired, actual) {
+		return nil
+	}
+	// The only mutation authorized here: an object that already matches except for
+	// a field a newer release declares and the live object leaves unset. matches
+	// still requires this fleet's label, no owners and no deletion.
+	upgraded := backfill(desired, actual)
+	if upgraded == nil {
 		return fmt.Errorf("%T %s conflicts with required isolation/infrastructure; refusing adoption or mutation", actual, actual.GetName())
+	}
+	// upgraded is the live object plus only the filled field, so allocated
+	// addresses and server defaults go back unchanged. Update carries the
+	// resourceVersion just verified: any concurrent writer turns this into a
+	// Conflict and the next reconcile verifies from scratch.
+	if err := r.Update(ctx, upgraded); err != nil {
+		if apierrors.IsForbidden(err) {
+			// Not NamespaceAccessDenied: admission policy also answers Forbidden.
+			return fmt.Errorf("%T %s field upgrade refused; the fleet-namespace Role from config/rbac/fleet-namespace.yaml must grant update: %w", actual, actual.GetName(), err)
+		}
+		return err
+	}
+	// Re-read into an empty object rather than trusting the decoded Update
+	// response (see emptyObject). An admission rewrite is refused, not adopted.
+	verified := emptyObject(desired)
+	if err := r.Get(ctx, client.ObjectKeyFromObject(desired), verified); err != nil {
+		return err
+	}
+	if !matches(desired, verified) {
+		return fmt.Errorf("%T %s does not match required isolation/infrastructure after field upgrade; refusing further mutation", verified, verified.GetName())
 	}
 	return nil
 }
