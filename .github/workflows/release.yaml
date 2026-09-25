@@ -186,6 +186,7 @@ jobs:
           DIGEST: ${{ needs.publish.outputs.digest }}
         run: |
           docker pull "$IMAGE@$DIGEST"
+          make integration-store-images
           CELLD_RUNTIME_IMAGE="$(cat hack/runtime-image.txt)" go run ./hack/integration --suite lifecycle --operator-image "$IMAGE@$DIGEST"
 
   release:
