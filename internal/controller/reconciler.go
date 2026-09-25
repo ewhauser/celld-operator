@@ -2,6 +2,7 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -46,7 +47,7 @@ type Reconciler struct {
 }
 
 func digest(data []byte) string { h := sha256.Sum256(data); return hex.EncodeToString(h[:]) }
-func specHash(f *fleet.CelldFleet) string {
+func reservationSpecJSON(f *fleet.CelldFleet) []byte {
 	spec := f.Spec
 	// Preserve reservation hashes from before the opt-in Ordered layout existed.
 	if spec.BucketWorkload == "Deployment" {
@@ -58,7 +59,23 @@ func specHash(f *fleet.CelldFleet) string {
 	spec.RuntimeImage = ""
 	spec.Maintenance = nil
 	b, _ := json.Marshal(spec)
-	return digest(b)
+	return b
+}
+func specHash(f *fleet.CelldFleet) string { return digest(reservationSpecJSON(f)) }
+func legacyQualificationSpecHash(f *fleet.CelldFleet) string {
+	b := reservationSpecJSON(f)
+	// v0.0.2 serialized this required field immediately before profile. Restore
+	// exactly that JSON layout without changing hashes written for new fleets.
+	marker := []byte(`"profile":`)
+	i := bytes.Index(b, marker)
+	if i < 0 {
+		return ""
+	}
+	legacy := make([]byte, 0, len(b)+len(`"qualification":"Experimental",`))
+	legacy = append(legacy, b[:i]...)
+	legacy = append(legacy, []byte(`"qualification":"Experimental",`)...)
+	legacy = append(legacy, b[i:]...)
+	return digest(legacy)
 }
 func reservationName(f *fleet.CelldFleet) string {
 	if f.Spec.Storage.Prefix != "" {

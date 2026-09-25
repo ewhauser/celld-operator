@@ -32,9 +32,9 @@ import (
 const (
 	calicoURL     = "https://raw.githubusercontent.com/projectcalico/calico/v3.29.3/manifests/calico.yaml"
 	calicoSHA     = "9a575859428b822a224dedafc4238555b6b0f910f2abf12983f20f871860914e"
-	minioImage    = "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z"
+	minioImage    = "celld-integration/minio:RELEASE.2025-09-07T16-13-09Z"
 	curlImage     = "curlimages/curl:8.12.1"
-	mcImage       = "quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z"
+	mcImage       = "celld-integration/mc:RELEASE.2025-08-13T08-35-41Z"
 	toxiproxy     = "ghcr.io/shopify/toxiproxy:2.12.0"
 	metricsServer = "registry.k8s.io/metrics-server/metrics-server:v0.8.0"
 	metricsURL    = "https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.8.0/components.yaml"

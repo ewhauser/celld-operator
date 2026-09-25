@@ -101,16 +101,18 @@ manifests-check:
 	python3 hack/check-generated.py
 
 # Actual Kind workloads, strict fork runtime and hostpath CSI RWOP/Delete storage.
-.PHONY: integration integration-lifecycle integration-maintenance integration-faults integration-external
-integration:
+.PHONY: integration-store-images integration integration-lifecycle integration-maintenance integration-faults integration-external
+integration-store-images:
+	bash hack/build-integration-store.sh
+integration: integration-store-images
 	go run ./hack/integration --suite all
-integration-lifecycle:
+integration-lifecycle: integration-store-images
 	go run ./hack/integration --suite lifecycle
-integration-maintenance:
+integration-maintenance: integration-store-images
 	go run ./hack/integration --suite maintenance
-integration-faults:
+integration-faults: integration-store-images
 	go run ./hack/integration --suite faults
-integration-external:
+integration-external: integration-store-images
 	go run ./hack/integration --suite external
 
 .PHONY: chart-sync chart-check chart-package
@@ -138,5 +140,5 @@ site-dev:
 
 .PHONY: integration-previews
 # CELLD_PREVIEW_IMAGE must contain both preview runtime and CLI support.
-integration-previews:
+integration-previews: integration-store-images
 	go run ./hack/integration --suite previews

@@ -229,6 +229,10 @@ func (r *Reconciler) reservationMatches(_ context.Context, f *fleet.CelldFleet, 
 	baseline.Spec.Replicas = h.res.Spec.InitialReplicas
 	want.InitialReplicas = h.res.Spec.InitialReplicas
 	want.SpecHash = specHash(baseline)
+	if equality.Semantic.DeepEqual(want, h.res.Spec) {
+		return true
+	}
+	want.SpecHash = legacyQualificationSpecHash(baseline)
 	return equality.Semantic.DeepEqual(want, h.res.Spec)
 }
 func replicas(w client.Object) int32 {
