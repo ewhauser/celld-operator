@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -11,8 +10,7 @@ import (
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	"github.com/ewhauser/celld-operator/internal/capacity"
-	"github.com/ewhauser/celld-operator/internal/launcher"
-	corev1 "k8s.io/api/core/v1"
+	"github.com/ewhauser/celld-operator/internal/runtime/controlplane"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -29,44 +27,43 @@ func enableCapacity(t *testing.T, r *Reconciler, f *fleet.CelldFleet, mode strin
 	}
 	return got
 }
-func TestCapacityEntriesUseStrictCurrentOperation(t *testing.T) {
-	for _, profile := range []string{"PersistentFleet"} {
-		for _, mode := range []string{"Automatic", "External", "Shadow", "ScaleOut"} {
-			t.Run(profile+"/"+mode, func(t *testing.T) {
-				x := newOperationFixture(t, profile)
-				x.f = enableCapacity(t, x.r, x.f, mode)
-				if mode == "External" {
-					x.desired(2)
-				}
-				for range 50 {
-					x.step()
-					if x.state().Operation != nil {
-						break
-					}
-					x.clock = x.clock.Add(15 * time.Second)
-				}
-				if mode == "Shadow" || mode == "ScaleOut" {
-					if x.state().Operation != nil || x.requests != 0 {
-						t.Fatal("read-only policy contracted")
-					}
-					return
-				}
-				o := x.state().Operation
-				if o == nil || o.Kind != "Scale" || o.To != 2 || len(o.Targets) != 1 {
-					t.Fatal("capacity bypassed strict executor", o)
-				}
-				x.until("Requesting")
-				x.r.launcherCall = func(context.Context, *fleet.CelldFleet, *corev1.Pod, string, string) (launcher.State, error) {
-					return launcher.State{}, errors.New("lost launcher")
-				}
-				for range 3 {
-					x.step()
-				}
+
+// Every capacity entry point contracts a PersistentFleet one member at a time,
+// and only while celld reports the fleet settled.
+func TestCapacityEntriesContractOneSettledMember(t *testing.T) {
+	for _, mode := range []string{"Automatic", "External", "Shadow", "ScaleOut"} {
+		t.Run(mode, func(t *testing.T) {
+			x := newOperationFixture(t, "PersistentFleet")
+			x.f = enableCapacity(t, x.r, x.f, mode)
+			if mode == "External" {
+				x.desired(2)
+			}
+			x.unrecovered = []controlplane.UnrecoveredLog{{Session: "alpha-9/g", State: "open"}}
+			for range 20 {
+				x.step()
+				x.clock = x.clock.Add(15 * time.Second)
+			}
+			if replicas(x.workload()) != 3 {
+				t.Fatal("contracted while celld reports an unrecovered session")
+			}
+			x.unrecovered = nil
+			for range 50 {
+				x.step()
 				if replicas(x.workload()) != 3 {
-					t.Fatal("automatic removal accepted missing launcher proof")
+					break
 				}
-			})
-		}
+				x.clock = x.clock.Add(15 * time.Second)
+			}
+			if mode == "Shadow" || mode == "ScaleOut" {
+				if replicas(x.workload()) != 3 {
+					t.Fatal("read-only policy contracted")
+				}
+				return
+			}
+			if replicas(x.workload()) != 2 || x.state().LastDisruption.IsZero() {
+				t.Fatalf("capacity did not remove one member: %d", replicas(x.workload()))
+			}
+		})
 	}
 }
 func TestCapacityCollectionEditAndRevalidation(t *testing.T) {
@@ -94,18 +91,8 @@ func TestCapacityCollectionEditAndRevalidation(t *testing.T) {
 		}
 		x.clock = x.clock.Add(15 * time.Second)
 	}
-	if x.state().Operation != nil || x.requests != 0 || replicas(x.workload()) != 3 {
-		t.Fatal("request changed during collection but was issued")
-	}
-	y := newOperationFixture(t, "PersistentFleet")
-	y.desired(2)
-	y.until("Intent")
-	y.cpu = 10000
-	for range 3 {
-		y.step()
-	}
-	if y.requests != 0 || y.state().Operation.Phase != "Intent" {
-		t.Fatal("unsafe survivor capacity issued")
+	if replicas(x.workload()) != 3 {
+		t.Fatal("request changed during collection but was applied")
 	}
 }
 

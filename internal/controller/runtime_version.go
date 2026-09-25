@@ -16,8 +16,3 @@ func runtimeNode(f *fleet.CelldFleet, p *corev1.Pod) string {
 	}
 	return p.Name
 }
-func appliedRuntime(f *fleet.CelldFleet, s *fleetState) *fleet.CelldFleet {
-	out := f.DeepCopy()
-	out.Spec.RuntimeImage = s.RuntimeImage
-	return out
-}

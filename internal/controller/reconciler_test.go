@@ -72,7 +72,7 @@ func setup(t *testing.T, objects ...client.Object) *Reconciler {
 			}
 			return c.Create(ctx, obj, opts...)
 		}}).Build(),
-		Options:               Options{OperatorNamespace: "celld-system", LauncherImage: fixtureLauncher},
+		Options:               Options{OperatorNamespace: "celld-system"},
 		NetworkPolicyEnforced: true,
 	}
 }
@@ -109,12 +109,7 @@ func TestProvisionProfilesAndIsolation(t *testing.T) {
 		if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), p); err != nil {
 			t.Fatal(err)
 		}
-		// Only PersistentFleet exposes the launcher port to the operator.
-		rules := 2
-		if f.Spec.Profile == "PersistentFleet" {
-			rules = 3
-		}
-		if len(p.Spec.Ingress) != rules || len(p.Spec.Ingress[0].From) != 2 || p.Spec.Ingress[0].From[0].PodSelector.MatchLabels[FleetLabel] != string(f.UID) || p.Spec.Ingress[0].From[1].NamespaceSelector == nil {
+		if len(p.Spec.Ingress) != 2 || len(p.Spec.Ingress[0].From) != 2 || p.Spec.Ingress[0].From[0].PodSelector.MatchLabels[FleetLabel] != string(f.UID) || p.Spec.Ingress[0].From[1].NamespaceSelector == nil {
 			t.Fatal("peer isolation is not constrained")
 		}
 		w := workload(f, r.Options)
@@ -133,8 +128,10 @@ func TestProvisionProfilesAndIsolation(t *testing.T) {
 		t.Fatal("unsafe persistent lifecycle")
 	}
 	container := sts.Spec.Template.Spec.Containers[0]
-	if container.LivenessProbe == nil || container.LivenessProbe.HTTPGet.Path != "/livez" || container.LivenessProbe.HTTPGet.Port.IntVal != 8083 || container.StartupProbe != nil || container.ReadinessProbe.HTTPGet.Path != "/.well-known/celld/health" || len(container.Command) != 1 || container.Command[0] != "/launcher/celld-launcher" {
-		t.Fatal("runtime startup/readiness contract bypassed")
+	// celld runs directly. It exits on a self-fence and kubelet restarts it;
+	// health is readiness only, because a draining node reports unhealthy.
+	if container.LivenessProbe != nil || container.StartupProbe != nil || container.ReadinessProbe.HTTPGet.Path != "/.well-known/celld/health" || container.Command != nil || len(sts.Spec.Template.Spec.InitContainers) != 0 || len(sts.Spec.Template.Spec.SchedulingGates) != 0 {
+		t.Fatal("runtime startup/readiness contract changed")
 	}
 	spread := sts.Spec.Template.Spec.TopologySpreadConstraints[0]
 	if spread.MinDomains == nil || *spread.MinDomains != 2 || spread.WhenUnsatisfiable != corev1.DoNotSchedule {
@@ -184,54 +181,32 @@ func TestConcurrentReservation(t *testing.T) {
 	}
 }
 
-// PersistentFleet workloads fail closed on unapproved change; Bucket
-// convergence is covered in bucket_test.go.
-func TestNoUnsafeMutationsOrRecreation(t *testing.T) {
-	for _, change := range []string{"profile", "missing", "drift"} {
-		t.Run(change, func(t *testing.T) {
-			f := fixture("alpha", "bucket-alpha", "PersistentFleet")
-			r := setup(t, f)
-			f = reconcile(t, r, f)
-			switch change {
-			case "profile":
-				f.Spec.Profile = "Bucket"
-				if err := r.Update(t.Context(), f); err != nil {
-					t.Fatal(err)
-				}
-			case "missing":
-				if err := r.Delete(t.Context(), &appsv1.StatefulSet{Name: f.Name, Namespace: f.Namespace}); err != nil {
-					t.Fatal(err)
-				}
-			case "drift":
-				sts := &appsv1.StatefulSet{}
-				if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), sts); err != nil {
-					t.Fatal(err)
-				}
-				sts.Spec.Template.Spec.Containers[0].Image = "unexpected"
-				if err := r.Update(t.Context(), sts); err != nil {
-					t.Fatal(err)
-				}
-			}
-			got := reconcile(t, r, f)
-			c := meta.FindStatusCondition(got.Status.Conditions, "Blocked")
-			if c == nil || c.Status != metav1.ConditionTrue {
-				t.Fatal("unsafe operation not blocked")
-			}
-			list := &appsv1.StatefulSetList{}
-			if err := r.List(t.Context(), list); err != nil {
-				t.Fatal(err)
-			}
-			if change == "missing" {
-				if len(list.Items) != 0 {
-					t.Fatal("missing workload recreated")
-				}
-			} else if len(list.Items) != 1 || *list.Items[0].Spec.Replicas != 3 || (change == "drift" && list.Items[0].Spec.Template.Spec.Containers[0].Image != "unexpected") {
-				t.Fatal("workload disrupted")
-			}
-		})
+// A profile change is refused: the reservation binds the fleet's immutable
+// storage configuration.
+func TestProfileChangeIsRefused(t *testing.T) {
+	f := fixture("alpha", "bucket-alpha", "PersistentFleet")
+	r := setup(t, f)
+	f = reconcile(t, r, f)
+	f.Spec.Profile = "Bucket"
+	if err := r.Update(t.Context(), f); err != nil {
+		t.Fatal(err)
+	}
+	got := reconcile(t, r, f)
+	if c := meta.FindStatusCondition(got.Status.Conditions, "Blocked"); c == nil || c.Status != metav1.ConditionTrue {
+		t.Fatal("profile change not blocked")
+	}
+	list := &appsv1.StatefulSetList{}
+	if err := r.List(t.Context(), list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Items) != 1 || *list.Items[0].Spec.Replicas != 3 {
+		t.Fatal("workload disrupted")
 	}
 }
-func TestCreationCrashFailsClosed(t *testing.T) {
+
+// A failed workload create leaves nothing to recover: the next reconcile
+// creates it, reusing any claims that already belong to the fleet.
+func TestCreationFailureRetries(t *testing.T) {
 	f := fixture("alpha", "bucket-alpha", "PersistentFleet")
 	r := setup(t, f)
 	base := r.Client
@@ -247,7 +222,10 @@ func TestCreationCrashFailsClosed(t *testing.T) {
 		t.Fatal("failure not injected")
 	}
 	r.Client = base
-	reason(t, reconcile(t, r, f), "LifecycleBlocked")
+	reason(t, reconcile(t, r, f), "Provisioning")
+	if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), &appsv1.StatefulSet{}); err != nil {
+		t.Fatal("workload not created on retry", err)
+	}
 }
 func TestMissingPrerequisitesAndIsolationDrift(t *testing.T) {
 	f := fixture("alpha", "bucket-alpha", "PersistentFleet")
@@ -261,6 +239,17 @@ func TestMissingPrerequisitesAndIsolationDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.Spec.Ingress = append(p.Spec.Ingress, networkingv1.NetworkPolicyIngressRule{})
+	if err := r.Update(t.Context(), p); err != nil {
+		t.Fatal(err)
+	}
+	reconcile(t, r, f)
+	if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), p); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Spec.Ingress) != 2 {
+		t.Fatal("isolation drift not corrected")
+	}
+	p.Labels[FleetLabel] = "other"
 	if err := r.Update(t.Context(), p); err != nil {
 		t.Fatal(err)
 	}
@@ -320,34 +309,28 @@ func TestReservationCannotBeReclaimedByNewUID(t *testing.T) {
 	reason(t, reconcile(t, other, replacement), "StorageScopeConflict")
 }
 
-// Current operation state that cannot be read is reported as unreadable, with the load error,
-// not as a storage scope conflict: the reservation still binds exactly this
-// fleet, and the reason an operator sees has to name the actual failure.
-func TestUnreadableOperationReportsInvalidState(t *testing.T) {
-	r, f := lifecycleSetup(t, "PersistentFleet")
-	res := &fleet.CelldStorageReservation{}
-	if err := r.Get(t.Context(), types.NamespacedName{Name: reservationName(f)}, res); err != nil {
-		t.Fatal(err)
-	}
-	res.Annotations[stateKey] = `{"Version":99,"Initial":3,"Applied":3}`
-	if err := r.Update(t.Context(), res); err != nil {
-		t.Fatal(err)
-	}
-	_, want := readState(res)
-	if want == nil {
-		t.Fatal("fixture operation state is still readable")
-	}
-	got := reconcile(t, r, f)
-	reason(t, got, "OperationInvalid")
-	if c := meta.FindStatusCondition(got.Status.Conditions, "Ready"); c.Message != want.Error() {
-		t.Fatalf("message %q does not carry the load error %q", c.Message, want)
-	}
-	after := &fleet.CelldStorageReservation{}
-	if err := r.Get(t.Context(), types.NamespacedName{Name: reservationName(f)}, after); err != nil {
-		t.Fatal(err)
-	}
-	if after.Annotations[stateKey] != res.Annotations[stateKey] || after.ResourceVersion != res.ResourceVersion {
-		t.Fatal("unreadable operation state was rewritten; evidence must be retained for review")
+// State that cannot be read carries no authority any current path needs, so it
+// is rebuilt from the cluster instead of blocking the fleet.
+func TestUnreadableStateIsRebuilt(t *testing.T) {
+	for _, profile := range []string{"Bucket", "PersistentFleet"} {
+		t.Run(profile, func(t *testing.T) {
+			r, f := lifecycleSetup(t, profile)
+			res := &fleet.CelldStorageReservation{}
+			if err := r.Get(t.Context(), types.NamespacedName{Name: reservationName(f)}, res); err != nil {
+				t.Fatal(err)
+			}
+			res.Annotations[stateKey] = `{"Version":99,"Initial":3,"Applied":3}`
+			if err := r.Update(t.Context(), res); err != nil {
+				t.Fatal(err)
+			}
+			got := reconcile(t, r, f)
+			if meta.IsStatusConditionTrue(got.Status.Conditions, "Blocked") {
+				t.Fatal("unreadable state blocked the fleet")
+			}
+			if s := getCurrentState(t, r, f); s == nil || s.Applied != 3 {
+				t.Fatalf("state not rebuilt: %+v", s)
+			}
+		})
 	}
 }
 
@@ -391,17 +374,26 @@ func TestReadinessRequiresObservedWorkload(t *testing.T) {
 
 func TestAPIDefaultedProbeIsNotDrift(t *testing.T) {
 	f := fixture("alpha", "bucket-alpha", "PersistentFleet")
-	want := workload(f, Options{LauncherImage: fixtureLauncher}).(*appsv1.StatefulSet)
+	want := workload(f, Options{}).(*appsv1.StatefulSet)
 	got := want.DeepCopy()
 	got.Spec.Template.Spec.Containers[0].ReadinessProbe.SuccessThreshold = 1
-	got.Spec.Template.Spec.Containers[0].LivenessProbe.HTTPGet.Scheme = corev1.URISchemeHTTP
+	got.Spec.Template.Spec.Containers[0].ReadinessProbe.HTTPGet.Scheme = corev1.URISchemeHTTP
 	if !matches(want, got) {
 		t.Fatal("Kubernetes defaulted readiness successThreshold must not block infrastructure")
 	}
 }
 
+// A claim that belongs to the fleet is its retained disk and is reused; any
+// other claim at a member's name blocks provisioning.
 func TestExistingPVCBlocksInitialProvisioning(t *testing.T) {
-	for _, owner := range []string{"previous-fleet-uid", "alpha-uid", ""} {
+	f := fixture("alpha", "new-bucket", "PersistentFleet")
+	own := &corev1.PersistentVolumeClaim{Name: "data-alpha-0", Namespace: f.Namespace, Labels: map[string]string{FleetLabel: string(f.UID)}}
+	r := setup(t, f, own)
+	reason(t, reconcile(t, r, f), "Provisioning")
+	if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), &appsv1.StatefulSet{}); err != nil {
+		t.Fatal("fleet's own retained claim blocked provisioning", err)
+	}
+	for _, owner := range []string{"previous-fleet-uid", ""} {
 		t.Run(owner, func(t *testing.T) {
 			f := fixture("alpha", "new-bucket", "PersistentFleet")
 			pvc := &corev1.PersistentVolumeClaim{Name: "data-alpha-0", Namespace: f.Namespace, Labels: map[string]string{FleetLabel: owner}}
@@ -421,7 +413,9 @@ func TestExistingPVCBlocksInitialProvisioning(t *testing.T) {
 	}
 }
 
-func TestRejectAdditionalWorkloadConfiguration(t *testing.T) {
+// Operator-owned template fields are corrected, not blocked. Admission
+// mutates Pods, not this template.
+func TestTemplateDriftIsCorrected(t *testing.T) {
 	mutations := map[string]func(*corev1.PodSpec){
 		"liveness": func(p *corev1.PodSpec) {
 			p.Containers[0].LivenessProbe = &corev1.Probe{Exec: &corev1.ExecAction{Command: []string{"false"}}}
@@ -450,7 +444,13 @@ func TestRejectAdditionalWorkloadConfiguration(t *testing.T) {
 			if err := r.Update(t.Context(), d); err != nil {
 				t.Fatal(err)
 			}
-			reason(t, reconcile(t, r, f), "LifecycleBlocked")
+			reconcile(t, r, f)
+			if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), d); err != nil {
+				t.Fatal(err)
+			}
+			if !matches(workload(f, r.Options), d) {
+				t.Fatal("drifted template not corrected")
+			}
 		})
 	}
 }
@@ -480,46 +480,6 @@ func TestConcurrentFinalizerIsPreserved(t *testing.T) {
 	got := reconcile(t, r, f)
 	if !slices.Contains(got.Finalizers, "another.example.com/protect") || !slices.Contains(got.Finalizers, Finalizer) {
 		t.Fatalf("lost a finalizer: %v", got.Finalizers)
-	}
-}
-
-func TestPVCClaimCreationRaceAndPartialFailure(t *testing.T) {
-	for _, mode := range []string{"race", "partial failure"} {
-		t.Run(mode, func(t *testing.T) {
-			f := fixture("alpha", "new-bucket", "PersistentFleet")
-			r := setup(t, f)
-			base := r.Client
-			r.Client = interceptor.NewClient(base.(client.WithWatch), interceptor.Funcs{Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
-				if pvc, ok := obj.(*corev1.PersistentVolumeClaim); ok && pvc.Name == "data-alpha-1" {
-					if mode == "partial failure" {
-						return errors.New("injected storage failure")
-					}
-					foreign := pvc.DeepCopy()
-					foreign.Labels = map[string]string{FleetLabel: "other-fleet"}
-					if err := c.Create(ctx, foreign); err != nil {
-						return err
-					}
-				}
-				return c.Create(ctx, obj, opts...)
-			}})
-			reason(t, reconcile(t, r, f), "StorageIdentityConflict")
-			r.Client = base
-			reason(t, reconcile(t, r, f), "LifecycleBlocked")
-			sts := &appsv1.StatefulSetList{}
-			if err := r.List(t.Context(), sts); err != nil {
-				t.Fatal(err)
-			}
-			if len(sts.Items) != 0 {
-				t.Fatal("workload created after incomplete exclusive PVC allocation")
-			}
-			claim := &corev1.PersistentVolumeClaim{}
-			if err := r.Get(t.Context(), types.NamespacedName{Namespace: f.Namespace, Name: "data-alpha-0"}, claim); err != nil {
-				t.Fatal(err)
-			}
-			if len(claim.OwnerReferences) != 0 || claim.Labels[FleetLabel] != string(f.UID) || claim.Annotations["celld.eric.dev/storage-reservation"] != reservationName(f) {
-				t.Fatal("initial PVC is not independently retained and bound to fleet reservation")
-			}
-		})
 	}
 }
 
@@ -553,7 +513,7 @@ func TestComparisonAllowsOnlyKnownDefaults(t *testing.T) {
 	if matches(want, got) {
 		t.Fatal("nondefault scheduler accepted")
 	}
-	for _, obj := range prerequisites(f, Options{OperatorNamespace: "celld-system", LauncherImage: fixtureLauncher}) {
+	for _, obj := range prerequisites(f, Options{OperatorNamespace: "celld-system"}) {
 		s, ok := obj.(*corev1.Service)
 		if !ok {
 			continue

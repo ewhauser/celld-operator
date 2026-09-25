@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -117,4 +118,13 @@ func (s State) NodeLog() (NodeLog, error) {
 		out.Fleet = view
 	}
 	return out, nil
+}
+
+// NodeLog reads one node's `/state.node_log`.
+func (c *Client) NodeLog(ctx context.Context, target Target) (NodeLog, error) {
+	state, err := c.State(ctx, target)
+	if err != nil {
+		return NodeLog{}, err
+	}
+	return state.NodeLog()
 }

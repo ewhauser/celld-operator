@@ -11,7 +11,6 @@ import (
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	"github.com/ewhauser/celld-operator/internal/capacity"
-	"github.com/ewhauser/celld-operator/internal/launcher"
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/types"
@@ -19,55 +18,46 @@ import (
 )
 
 const stateKey = "celld.eric.dev/current-operation"
-const creationClaimsKey = "celld.eric.dev/creation-claim-uids"
-const operationKey = "celld.eric.dev/infrastructure-effect"
-const operationBudget = 30 * time.Minute
 const maxStateBytes = 180 * 1024
 
-// fleetState contains current Kubernetes ownership and bounded policy state.
-// Runtime proof exists only inside Operation, and is discarded at completion.
+// fleetState is the operator's bounded bookkeeping on the storage reservation:
+// current workload identity, the applied count and image, the last restart
+// token and disruption, and capacity-policy history. It holds no runtime proof.
 // The reservation's immutable Spec independently owns the bucket forever.
 type fleetState struct {
 	Version               int
 	FleetUID, WorkloadUID types.UID
 	Initial, Applied      int32
 	RuntimeImage          string
-	Claims                map[string]types.UID
-	Operation             *currentOperation    `json:",omitempty"`
-	RestartToken          string               `json:",omitempty"`
-	Completion            *operationCompletion `json:",omitempty"`
-	Capacity              *capacity.State      `json:",omitempty"`
+	// Claims is retained so state written by earlier releases decodes; it is
+	// always empty now.
+	Claims map[string]types.UID
+	// Operation is an earlier release's strict operation, kept only until
+	// loadedCurrent records it as Superseded.
+	Operation      *legacyOperation     `json:",omitempty"`
+	RestartToken   string               `json:",omitempty"`
+	Completion     *operationCompletion `json:",omitempty"`
+	Capacity       *capacity.State      `json:",omitempty"`
+	LastDisruption time.Time            `json:",omitzero"`
 }
 type operationCompletion struct {
 	ID, Kind, Outcome string
 	At                time.Time
 }
-type currentOperation struct {
-	ID, Kind, Phase                        string
-	StartedAt, Deadline                    time.Time
-	FleetUID, WorkloadUID                  types.UID
-	From, To                               int32
-	SourceImage, TargetImage, RestartToken string
-	ManualBaseline                         int32
-	Automatic                              bool
-	PolicyHash                             string
-	PreviousEffect, EffectVersion          string
-	Targets                                []operationTarget `json:",omitempty"`
-	Blocker                                string            `json:",omitempty"`
+
+// legacyOperation reads the identity of a strict operation written before
+// ADR 0023 and ignores the rest of its fields.
+type legacyOperation struct{ ID, Kind string }
+
+func (o *legacyOperation) UnmarshalJSON(b []byte) error {
+	var v struct{ ID, Kind string }
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	*o = legacyOperation(v)
+	return nil
 }
-type operationTarget struct {
-	Pod, IP, Container, HostUID string
-	PodUID                      types.UID
-	Identity                    processIdentity
-	Storage                     *volumeIdentity `json:",omitempty"`
-	Proof                       *operationProof `json:",omitempty"`
-}
-type volumeIdentity struct {
-	Claim, ClaimVersion, Volume, Handle string
-	ClaimUID, VolumeUID                 types.UID
-	DeletionProtected                   bool
-	CleanupStarted                      bool `json:",omitempty"`
-}
+
 type loadedState struct {
 	res *fleet.CelldStorageReservation
 	j   *fleetState
@@ -112,92 +102,9 @@ func validateState(s *fleetState) error {
 	if s.Capacity != nil && (len(s.Capacity.Load) > 100 || len(s.Capacity.Stamps) > 100 || (s.Capacity.Addition != nil && len(s.Capacity.Addition.Before) > 100)) {
 		return errors.New("capacity working set exceeds fleet bound")
 	}
-	if o := s.Operation; o != nil {
-		if o.ID == "" || o.FleetUID != s.FleetUID || o.WorkloadUID != s.WorkloadUID || o.From != s.Applied || o.From < 0 || o.From > 100 || o.To < 0 || o.To > 100 || o.StartedAt.IsZero() || !o.Deadline.After(o.StartedAt) || o.Deadline.Sub(o.StartedAt) > operationBudget || o.SourceImage != s.RuntimeImage || len(o.Targets) > 100 {
-			return errors.New("invalid current operation")
-		}
-		if o.From < 1 || (o.Kind == "Scale" && (o.To < 1 || o.To == o.From)) || (o.Kind == "Delete" && o.To != 0) || ((o.Kind == "Restart" || o.Kind == "Upgrade") && o.To != o.From) {
-			return errors.New("invalid infrastructure transition")
-		}
-		if (o.Kind == "Scale" || o.Kind == "Restart") && o.TargetImage != o.SourceImage {
-			return errors.New("replica transition changed runtime")
-		}
-		if !knownRuntime(o.TargetImage) {
-			return errors.New("operation target is not a fork pin")
-		}
-		switch o.Kind {
-		case "Scale", "Restart", "Upgrade", "Delete":
-		default:
-			return errors.New("invalid operation kind")
-		}
-		switch o.Phase {
-		case "Intent", "Requesting", "ProofCaptured", "Apply", "Observing", "DeleteClaims", "Resume", "ApplyResume", "Joining", "Blocked":
-		default:
-			return errors.New("invalid operation phase")
-		}
-		if o.Kind == "Scale" && o.To < o.From && o.To != o.From-1 {
-			return errors.New("scale contraction must remove one member")
-		}
-		needed := 0
-		if o.Kind != "Scale" {
-			needed = int(o.From)
-		} else if o.To < o.From {
-			needed = 1
-		}
-		if len(o.Targets) != needed {
-			return errors.New("incomplete operation working set")
-		}
-		seen := map[types.UID]bool{}
-		for _, t := range o.Targets {
-			if t.Pod == "" || t.PodUID == "" || seen[t.PodUID] || t.Identity.Node == "" || t.Identity.Host == "" || t.Identity.PID <= 0 || t.Identity.Generation == "" || t.Identity.Invocation == "" || t.Identity.DiskID == "" || t.Identity.BootID == "" || t.HostUID == "" || t.Container == "" {
-				return errors.New("invalid operation target")
-			}
-			seen[t.PodUID] = true
-			if t.Storage != nil && (!t.Storage.DeletionProtected || t.Storage.ClaimVersion == "" || t.Storage.ClaimUID == "" || t.Storage.VolumeUID == "" || t.Storage.Handle == "" || t.Storage.Claim == "" || t.Storage.Volume == "") {
-				return errors.New("invalid target storage")
-			}
-			if t.Storage != nil && t.Storage.CleanupStarted && (t.Proof == nil || (o.Phase != "DeleteClaims" && o.Phase != "Resume" && o.Phase != "ApplyResume" && o.Phase != "Joining")) {
-				return errors.New("cleanup intent precedes proof or compute removal")
-			}
-			if t.Proof != nil && !validProof(o, t, *t.Proof) {
-				return errors.New("invalid captured proof")
-			}
-			if o.Phase != "Intent" && o.Phase != "Requesting" && o.Phase != "Blocked" && t.Proof == nil {
-				return errors.New("effect lacks captured proof")
-			}
-		}
-	}
 	return nil
 }
 
-// Each proof is captured atomically under the target identity after validating
-// every response identity and the first-operation deadline. Do not duplicate a
-// second full process identity (or its empty discovery result) per member.
-type processIdentity struct {
-	Node, Host, BootID, Invocation, Generation, DiskID string
-	PID                                                int
-}
-type operationProof struct {
-	Removal                                           launcher.RemovalResult
-	ChildExited, InheritedLockReleased, RestartDenied bool
-}
-
-func processFrom(s launcher.State) processIdentity {
-	return processIdentity{Node: s.Node, Host: s.Host, BootID: s.BootID, Invocation: s.Invocation, Generation: s.Generation, DiskID: s.DiskID, PID: s.PID}
-}
-func proofFrom(s launcher.State) *operationProof {
-	return &operationProof{Removal: s.Removal, ChildExited: s.ChildExited, InheritedLockReleased: s.InheritedLockReleased, RestartDenied: s.RestartDenied}
-}
-func validProof(o *currentOperation, t operationTarget, p operationProof) bool {
-	r := p.Removal
-	return p.ChildExited && p.InheritedLockReleased && p.RestartDenied && r.Operation == o.ID && r.Generation == t.Identity.Generation && r.Mode == "remove-disk" && r.Phase == "data_safe" && r.ControlOnly && r.DataSafe && r.Blocker == ""
-}
-func validLauncherProof(o *currentOperation, t operationTarget, p launcher.State) bool {
-	return p.RemovalReady() && p.Operation == o.ID && p.DeadlineMS == o.Deadline.UnixMilli() && sameProcess(t, p)
-}
-func sameProcess(t operationTarget, s launcher.State) bool {
-	return t.PodUID == types.UID(s.PodUID) && t.Identity == processFrom(s)
-}
 func (r *Reconciler) saveState(ctx context.Context, res *fleet.CelldStorageReservation, s *fleetState) error {
 	if err := ctx.Err(); err != nil {
 		return err

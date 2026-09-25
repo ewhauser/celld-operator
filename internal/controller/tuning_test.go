@@ -20,7 +20,7 @@ func envValue(env []corev1.EnvVar, name string) (string, bool) {
 // fleets are compared against it and a change would read as drift.
 func TestTuningDefaultsPreserveHistoricalTemplate(t *testing.T) {
 	f := fixture("alpha", "bucket-alpha", "PersistentFleet")
-	opts := Options{OperatorNamespace: "celld-system", LauncherImage: "launcher@sha256:" + "a"}
+	opts := Options{OperatorNamespace: "celld-system"}
 	pod := podTemplate(f, opts).Spec
 	c := pod.Containers[0]
 	if c.Resources.Requests.Cpu().String() != "250m" || c.Resources.Requests.Memory().String() != "512Mi" || c.Resources.Limits.Memory().String() != "1Gi" {
@@ -75,13 +75,13 @@ func TestTuningIsAppliedToTheTemplate(t *testing.T) {
 	if err := f.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	opts := Options{OperatorNamespace: "celld-system", LauncherImage: "launcher@sha256:" + "a"}
+	opts := Options{OperatorNamespace: "celld-system"}
 	pod := podTemplate(f, opts).Spec
 	c := pod.Containers[0]
 	if c.Resources.Requests.Cpu().String() != "2" || c.Resources.Limits.Cpu().String() != "2" || c.Resources.Requests.Memory().String() != "4Gi" || c.Resources.Limits.Memory().String() != "4Gi" {
 		t.Fatalf("resources not applied: %+v", c.Resources)
 	}
-	want := map[string]string{"CELLD_MAX_RESIDENT_CELLS": "400", "CELLD_IDLE_EVICT_S": "60", "CELLD_SHUTDOWN_TOTAL_MS": "120000", "LAUNCHER_TERMINATION_GRACE_SECONDS": "180"}
+	want := map[string]string{"CELLD_MAX_RESIDENT_CELLS": "400", "CELLD_IDLE_EVICT_S": "60", "CELLD_SHUTDOWN_TOTAL_MS": "120000"}
 	for name, value := range want {
 		if got, _ := envValue(c.Env, name); got != value {
 			t.Fatalf("%s=%q, want %q", name, got, value)

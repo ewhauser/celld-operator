@@ -110,8 +110,8 @@ func TestBucketScalesOneMemberAtATime(t *testing.T) {
 			}
 			x.syncWorkload()
 			x.step()
-			if replicas(x.workload()) != 1 || x.requests != 0 || x.state().Applied != 1 {
-				t.Fatalf("contraction incomplete or used the launcher: %d requests", x.requests)
+			if replicas(x.workload()) != 1 || x.state().Applied != 1 {
+				t.Fatal("contraction incomplete")
 			}
 			x.syncWorkload()
 			x.desired(4)
@@ -139,8 +139,8 @@ func TestBucketRestartAndUpgradeRollWithoutDowntimePermission(t *testing.T) {
 	if d.Spec.Template.Spec.Containers[0].Image != fixtureRuntimeUpgrade || replicas(d) != 3 || x.state().RuntimeImage != fixtureRuntimeUpgrade {
 		t.Fatal("upgrade did not roll the template")
 	}
-	if x.requests != 0 || x.state().Operation != nil {
-		t.Fatal("bucket maintenance used the strict executor")
+	if x.state().Operation != nil {
+		t.Fatal("bucket maintenance recorded an operation")
 	}
 }
 
@@ -261,7 +261,7 @@ func TestBucketMigratesStrictFleet(t *testing.T) {
 func TestBucketDropsStrictOperationState(t *testing.T) {
 	r := &Reconciler{now: func() time.Time { return time.Unix(100, 0) }}
 	f := fixture("alpha", "bucket-alpha", "Bucket")
-	s := &fleetState{Version: 1, FleetUID: f.UID, Operation: &currentOperation{ID: "op", Kind: "Restart", Phase: "Requesting"}}
+	s := &fleetState{Version: 1, FleetUID: f.UID, Operation: &legacyOperation{ID: "op", Kind: "Restart"}}
 	got := r.bucketLoaded(f, &loadedState{j: s})
 	if got.j.Operation != nil || got.j.Completion == nil || got.j.Completion.Outcome != "Superseded" || got.j.Completion.ID != "op" {
 		t.Fatalf("in-flight strict operation not superseded: %+v", got.j)
@@ -320,7 +320,7 @@ func TestBucketAutomaticContraction(t *testing.T) {
 		}
 		x.clock = x.clock.Add(15 * time.Second)
 	}
-	if replicas(x.workload()) != 2 || x.requests != 0 {
+	if replicas(x.workload()) != 2 {
 		t.Fatalf("low demand did not contract a Deployment by one member: %d", replicas(x.workload()))
 	}
 }
