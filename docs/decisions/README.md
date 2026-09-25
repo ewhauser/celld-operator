@@ -7,3 +7,7 @@ fencing, version-specific offline adapters and storage-reuse migrations.
 
 Earlier records and their evidence remain in Git history. The current operator
 has no compatibility path for fleets created with those implementations.
+
+[0023: Node loss is routine](0023-node-loss-is-routine.md) (proposed) replaces
+per-removal proof with a one-disruption-at-a-time health gate, removes the
+launcher, and keeps PersistentFleet disks across restart and upgrade.
