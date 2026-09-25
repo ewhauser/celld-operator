@@ -37,19 +37,30 @@ block. Adjust the admission policy that caused it; see
 
 `InfrastructureBlocked` means a generated Service, NetworkPolicy or
 PodDisruptionBudget differs from the operator's spec, has an owner, belongs to
-another fleet or is being deleted. The operator does not adopt or repair it. The
-one exception is a field a newer release declares that the live object leaves
+another fleet or is being deleted. For PersistentFleet the operator does not
+adopt or repair it. The one exception is a field a newer release declares that the live object leaves
 unset, such as the peer port's `appProtocol`; the operator fills only that field,
 pinned to the resourceVersion it verified. A value someone else set, including a
 different `appProtocol`, still blocks until the generated spec is restored.
 
-`DiskRetired` and `LauncherBlocked` replace `Provisioning` when an unready
-replica's launcher reports that it will never start the runtime. The message
+Bucket fleets converge drift in the workload, NetworkPolicy and
+PodDisruptionBudget back to the operator's spec; Services stay verify-only.
+Objects without this fleet's UID label, or with owner references, are refused:
+`LifecycleBlocked` for the workload, `InfrastructureBlocked` for prerequisites.
+Bucket status uses `Provisioning` while one member at a time rolls out,
+`Provisioned`, `CapacityUncertain`, `SchedulingBlocked`, `MaintenancePaused`,
+`LifecycleProgress` during deletion and `UnsupportedTransition` for a runtime
+that is not a digest-pinned fork pin. Bucket fleets have no current operation;
+`status.lifecycle` may show a `Superseded` outcome for an operation dropped on
+upgrade from an earlier release.
+
+`DiskRetired` and `LauncherBlocked` (PersistentFleet only) replace
+`Provisioning` when an unready replica's launcher reports that it will never start the runtime. The message
 names the Pod. `DiskRetired` means the Pod's disk was retired after an earlier
 Pod on it stopped without an operator request; see
 [recovery](../../troubleshoot/recovery/).
 
-Operational blockers identify unsupported layout contraction, incomplete runtime
+PersistentFleet operational blockers identify incomplete runtime
 or launcher proof, changed workload/storage identity, pending CSI cleanup and
 expired operations. An expired deadline never proves a shutdown was unissued or
 safe. Failed or ambiguous completion preserves disks and the current operation.

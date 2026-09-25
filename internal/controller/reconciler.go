@@ -173,6 +173,9 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 	}
 	// Load the one bounded current operation once; status is a projection.
 	h := r.hydrate(ctx, reservation)
+	if f.Spec.Profile == "Bucket" {
+		h = r.bucketLoaded(f, h)
+	}
 	if h.err != nil {
 		return r.report(ctx, f, h, "OperationInvalid", h.err.Error(), false)
 	}
@@ -186,6 +189,9 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 			message = err.Error()
 		}
 		return r.report(ctx, f, h, "SeedInitializing", message, false)
+	}
+	if f.Spec.Profile == "Bucket" {
+		return r.reconcileBucket(ctx, f, h)
 	}
 	for _, obj := range prerequisites(f, r.Options) {
 		if err := r.ensure(ctx, obj); err != nil {

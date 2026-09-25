@@ -37,7 +37,7 @@ func run() error {
 	localTest := fs.Bool("local-test", false, "Use disposable local MinIO test configuration; never enable on EKS")
 	localRWOP := fs.Bool("local-rwop", false, "Disposable harness only: request ReadWriteOncePod claims served by the per-node hostpath CSI driver; requires --local-test")
 	faultPoint := fs.String("local-fault-point", "", "Disposable harness only: exit the manager at a named lifecycle boundary (before-effect, after-effect); requires --local-test")
-	launcherImage := fs.String("launcher-image", "", "Digest-pinned operator image containing /celld-launcher; required for strict supervision in both storage profiles")
+	launcherImage := fs.String("launcher-image", "", "Digest-pinned operator image containing /celld-launcher; required for PersistentFleet strict supervision (Bucket fleets run celld directly)")
 	metrics := fs.String("metrics-bind-address", "0", "Optional metrics listener (0 disables)")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {

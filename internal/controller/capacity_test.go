@@ -30,7 +30,7 @@ func enableCapacity(t *testing.T, r *Reconciler, f *fleet.CelldFleet, mode strin
 	return got
 }
 func TestCapacityEntriesUseStrictCurrentOperation(t *testing.T) {
-	for _, profile := range []string{"Bucket", "PersistentFleet"} {
+	for _, profile := range []string{"PersistentFleet"} {
 		for _, mode := range []string{"Automatic", "External", "Shadow", "ScaleOut"} {
 			t.Run(profile+"/"+mode, func(t *testing.T) {
 				x := newOperationFixture(t, profile)

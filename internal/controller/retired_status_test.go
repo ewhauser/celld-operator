@@ -41,7 +41,7 @@ func (x *operationFixture) unready(name string) {
 }
 
 func TestUnreadyReplicaReportsBlockedLauncher(t *testing.T) {
-	for _, profile := range []string{"Bucket", "PersistentFleet"} {
+	for _, profile := range []string{"PersistentFleet"} {
 		for _, c := range []struct {
 			name, reason, message string
 			launcher              func(launcher.State) (launcher.State, error)

@@ -19,7 +19,7 @@ spec:
 
 Point that client's application configuration at my-fleet:8080 in the fleet namespace. If clients run in another namespace, use an ingress or proxy Pod in the fleet namespace with the label; the generated policy does not grant cross-namespace client ingress. A separate policy may be needed to allow the client's **egress**.
 
-Peer traffic on 8081 is limited to same-fleet Pods and operator Pods in the operator namespace. The launcher port 8083 in both profiles admits only operator Pods and is not exposed by a Service. Fleet egress includes peers, kube-dns, HTTPS for S3/STS and the EKS Pod Identity Agent endpoint. The policy assumes the kube-dns Pod label k8s-app: kube-dns; check your CNI and DNS deployment.
+Peer traffic on 8081 is limited to same-fleet Pods and operator Pods in the operator namespace. The PersistentFleet launcher port 8083 admits only operator Pods and is not exposed by a Service. Fleet egress includes peers, kube-dns, HTTPS for S3/STS and the EKS Pod Identity Agent endpoint. The policy assumes the kube-dns Pod label k8s-app: kube-dns; check your CNI and DNS deployment.
 
 PersistentFleet advertises `POD.FLEET-peers.NAMESPACE.svc:8081`, so predecessor
 recovery can resolve the retained peer after its Pod IP changes. The headless

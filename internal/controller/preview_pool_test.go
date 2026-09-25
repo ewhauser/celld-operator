@@ -228,8 +228,8 @@ func TestPreviewPoolRendersSmallRuntimeAndSharedStore(t *testing.T) {
 	}
 	found := false
 	for _, o := range prerequisites(f, Options{}) {
-		if pdb, ok := o.(*policyv1.PodDisruptionBudget); ok && pdb.Spec.MaxUnavailable.IntValue() != 0 {
-			t.Fatal("preview bypasses disruption safeguards")
+		if pdb, ok := o.(*policyv1.PodDisruptionBudget); ok && pdb.Spec.MaxUnavailable.IntValue() != 1 {
+			t.Fatal("preview budget must allow one voluntary disruption at a time")
 		}
 		if policy, ok := o.(*networkingv1.NetworkPolicy); ok {
 			rule := policy.Spec.Egress[len(policy.Spec.Egress)-1]

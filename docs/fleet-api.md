@@ -6,20 +6,23 @@ is the field and admission reference.
 
 A fleet supplies an explicit compatible runtime digest, an existing runtime
 ServiceAccount, a dedicated bucket, region and zone allowlist. The operator
-requires a digest-pinned launcher image for both profiles. The operator creates
-workloads, private Services, NetworkPolicies, a PodDisruptionBudget and a launcher
-credential. PersistentFleet also uses CSI claims.
+creates workloads, private Services, NetworkPolicies and a PodDisruptionBudget.
+PersistentFleet also uses CSI claims, a digest-pinned launcher image and a
+launcher credential. Bucket Pods run celld directly with
+`CELLD_DURABILITY=bucket`.
 
-Bucket has immutable `Deployment` or `Ordered` layout; Ordered provides exact
-highest-ordinal contraction. PersistentFleet uses a StatefulSet. Neither layout
+Bucket has immutable `Deployment` or `Ordered` layout; both contract one member
+at a time, and Ordered removes the highest ordinal. PersistentFleet uses a
+StatefulSet. Neither layout
 is converted in place. Infrastructure outside Kubernetes, including bucket,
 IAM roles, worker nodes and EBS CSI, remains administrator-owned.
 
 The mutable request fields are `replicas`, `capacity`, `runtimeImage` and
 `maintenance` and `routing`. Storage, layout, placement, execution sizing, lifecycle budgets,
 `env`, and `telemetry` are fixed at creation. `maintenance.paused` stops new and unissued work;
-`allowCoordinatedDowntime` permits a whole-fleet restart or upgrade. A new
-`restartToken` requests a same-version restart.
+`allowCoordinatedDowntime` permits a PersistentFleet whole-fleet restart or
+upgrade. A new `restartToken` requests a same-version restart. Bucket restarts
+and upgrades are one-member rolling updates and need no downtime permission.
 
 `spec.env` adds up to 32 `CELLD_` variables with either a literal `value` or a
 same-namespace `secretKeyRef` (`name` and `key`). Operator-owned identity,
@@ -28,7 +31,7 @@ OpenTelemetry namespace is reserved for its dedicated API. Environment entries
 cannot be edited after fleet creation because the operator does not roll out
 ordinary pod-template changes. Secret values never enter the fleet API, status,
 or operator logs; Kubernetes resolves references when a Pod starts. Rotating a
-Secret does not update running processes: schedule coordinated maintenance to
+Secret does not update running processes: change `maintenance.restartToken` to
 restart the fleet after a rotation.
 
 `spec.telemetry` enables OTLP export to `collectorURL`; omission leaves it
@@ -43,7 +46,7 @@ port 443 destinations; NetworkPolicy alone does not make HTTPS collector traffic
 exclusive to the telemetry egress selector. A collector using a different port
 receives only its scoped rule. Telemetry is immutable after creation because
 ordinary pod-template changes are not rolled out. Rotate the headers Secret
-with coordinated maintenance so new Pods read it.
+with a restart so new Pods read it.
 
 A bucket reservation permanently binds the bucket to the fleet UID. Recreating
 a fleet with the same name does not transfer ownership. Its current-operation
@@ -83,7 +86,7 @@ existing route, it checks the selected API, Service, isolation setting and
 resource ownership; a failed preflight preserves the existing route and policy.
 Removed managed annotations are pruned; unrelated controller annotations are preserved. Removing
 `routing` deletes the owned route, then its ingress policy. Routing also closes
-when fleet deletion starts; it does not delay strict runtime recovery.
+when fleet deletion starts; it does not delay runtime shutdown.
 
 Reserved or oversized Ingress annotations are rejected at admission. Invalid
 routing stored by older schemas or admission bypasses reports `RoutingReady=False`
