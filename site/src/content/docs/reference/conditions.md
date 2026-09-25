@@ -43,6 +43,12 @@ unset, such as the peer port's `appProtocol`; the operator fills only that field
 pinned to the resourceVersion it verified. A value someone else set, including a
 different `appProtocol`, still blocks until the generated spec is restored.
 
+`DiskRetired` and `LauncherBlocked` replace `Provisioning` when an unready
+replica's launcher reports that it will never start the runtime. The message
+names the Pod. `DiskRetired` means the Pod's disk was retired after an earlier
+Pod on it stopped without an operator request; see
+[recovery](../../troubleshoot/recovery/).
+
 Operational blockers identify unsupported layout contraction, incomplete runtime
 or launcher proof, changed workload/storage identity, pending CSI cleanup and
 expired operations. An expired deadline never proves a shutdown was unissued or
