@@ -5,6 +5,10 @@ replication, tiering and recovery safety. The launcher consumes the typed client
 in `internal/runtime/controlplane`; it neither reads S3 nor interprets load,
 leases, cell counts or replication metadata.
 
+Only `PersistentFleet` Pods run under the launcher. `Bucket` Pods run celld
+directly with `CELLD_DURABILITY=bucket` and have no launcher container, key,
+port or scheduling gate.
+
 It requires celld's schema 1 strict disk-removal contract. Stock v0.5.1 cannot
 satisfy it. A homogeneous fork
 release, including recovery readers that understand `bucket_complete`, and a

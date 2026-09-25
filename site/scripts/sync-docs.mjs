@@ -385,7 +385,7 @@ const sampleNotes = {
 	'preview.yaml': 'A developer preview referencing a shared pool, with a unique URL and 24-hour lifetime.',
 	'fleet-previews.yaml': 'Platform-owned shared storage and routing configuration with small independent preview runtimes.',
 	'preview-store.yaml': 'Optional disposable shared MinIO store; replacing its Pod loses all preview data.',
-	'capacity-external.yaml': 'Ordered Bucket with an HPA targeting the CelldFleet /scale subresource; exact scale-in uses the strict executor.',
+	'capacity-external.yaml': 'Ordered Bucket with an HPA targeting the CelldFleet /scale subresource; scale-in removes one member per step after survivor-capacity checks.',
 	'tuned.yaml': 'Immutable execution sizing and lifecycle budgets selected before creation.',
 	'persistent.yaml': 'Three-replica PersistentFleet on a Delete-policy CSI StorageClass with strict placement.',
 };

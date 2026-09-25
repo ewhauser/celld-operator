@@ -3,7 +3,11 @@ title: How operations resume
 description: One bounded current operation survives controller restarts and guards each Kubernetes effect.
 ---
 
-The storage reservation holds one current operation, its fixed deadline and
+This applies to PersistentFleet. Bucket fleets have no current operation: the
+workload controller rolls one member at a time, and the reservation keeps only
+applied count, image, restart token and capacity-policy state.
+
+For PersistentFleet, the storage reservation holds one current operation, its fixed deadline and
 exact target identities. It also holds current workload and claim bindings,
 bounded capacity-policy state and one last completion projection. It keeps no
 append-only session or completion archive.

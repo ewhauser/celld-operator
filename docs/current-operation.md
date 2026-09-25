@@ -1,6 +1,10 @@
 # Bounded current operation
 
-The operator now has one lifecycle executor. celld decides data safety through
+This executor applies to `PersistentFleet` only. `Bucket` fleets run
+`CELLD_DURABILITY=bucket` without the launcher, strict proof or a current
+operation; see [Bucket fleets](#bucket-fleets).
+
+The operator has one strict lifecycle executor. celld decides data safety through
 its strict `remove-disk` control plane. The launcher binds that result to one
 child, waits for its exit, independently reacquires the inherited lock and
 persists restart denial. The operator serializes the resulting Kubernetes
@@ -9,18 +13,23 @@ inventories or leases, and cannot substitute EC2 termination for celld completio
 
 This is a breaking replacement. There is no journal migration, old runtime
 adapter fallback, archive hydration, retained-member replay or second executor.
-The Bucket layout is immutable. Ordered Bucket supports single-member
-contraction; Deployment victim selection cannot establish an exact target, so
-Deployment contraction is blocked. Deployment restart/deletion can stop its
-entire bounded current working set before changing replicas.
+Shutdown proofs describe the captured invocations. Persistent replacements use
+the existing PVC and cannot reopen a disk with the launcher's permanent
+retirement marker, so a new invocation is never covered by an old proof.
 
-Shutdown proofs describe the captured invocations. A concurrent ordinary
-Kubernetes replacement can create a new ephemeral Bucket invocation that later
-receives ordinary termination. Bucket mode requires object-store durability
-before acknowledging writes; this is the same crash boundary as an unexpected
-Pod loss. Persistent replacements use the existing PVC and cannot reopen a disk
-with the launcher's permanent retirement marker. Neither case turns a new
-invocation into one covered by an old proof.
+## Bucket fleets
+
+Bucket celld acknowledges no write before the object store holds it, so a
+member's temporary disk is a cache and losing any one member loses no
+acknowledged write. The Deployment or Ordered StatefulSet runs celld directly.
+The operator renders the workload, NetworkPolicy and PodDisruptionBudget
+(`maxUnavailable: 1`), converges drift in them and refuses objects it does not
+own. The workload controller performs one-member rolling restart and upgrade;
+the operator lowers replicas one member at a time after each rollout completes.
+SIGTERM runs celld's own drain. The reservation keeps only applied count,
+runtime image, restart token and capacity-policy state. An in-flight operation
+from an earlier release is dropped with completion outcome `Superseded`, and
+unreadable operation state is discarded instead of blocking.
 
 ## Durable state
 
@@ -142,9 +151,10 @@ replaced at their active behavior boundaries:
 | PVC/PV/workload/runtime replacement | `TestIdentityDriftBlocksProofAndEffect`, `TestStateRejectsUnboundOrOversizedAuthority` |
 | Retained-disk reactivation | `TestCurrentAuthorityBoundedAndStatusRebuildable` (fresh claims), strict launcher cross-host/boot tests |
 | Capacity/manual/external entry points | `TestCapacityEntriesUseStrictCurrentOperation`, `TestCapacityCollectionEditAndRevalidation` |
-| Multi-member restart/upgrade/delete | `TestMaintenanceUsesCurrentWorkingSet`, `TestDeleteUsesStrictWorkingSetAndDisposesDisks`, `TestDeploymentBucketMaintenanceAndContractionBoundary` |
+| Multi-member restart/upgrade/delete | `TestMaintenanceUsesCurrentWorkingSet`, `TestDeleteUsesStrictWorkingSetAndDisposesDisks` |
+| Bucket scaling, rolling restart/upgrade, drift, migration and deletion | `TestBucketScalesOneMemberAtATime`, `TestBucketAutomaticContraction`, `TestBucketRestartAndUpgradeRollWithoutDowntimePermission`, `TestBucketDriftIsCorrected`, `TestBucketRefusesForeignObjects`, `TestBucketMigratesStrictFleet`, `TestBucketDropsStrictOperationState`, `TestBucketDeletionRemovesComputeOnly`, `TestEnvtestBucketConvergenceIsStable` |
 | Archive growth and editable status | `TestCurrentAuthorityBoundedAndStatusRebuildable`, `TestHundredMemberMaintenanceFitsBound` |
-| Storage cleanup and stale deletion | `TestStrictRemovalBothProfiles`, `TestEnvtestCleanupPreconditionsRejectReplacement`, manifest RBAC audit |
+| Storage cleanup and stale deletion | `TestStrictRemovalBothProfiles` (PersistentFleet), `TestEnvtestCleanupPreconditionsRejectReplacement`, manifest RBAC audit |
 | No private recovery reads | `TestNoRecoveryMetadataDependencies`; production manager no longer constructs S3 evidence or fencing clients |
 
 The opt-in local integration runs the real fork binary, typed control-plane

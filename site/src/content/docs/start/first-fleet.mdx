@@ -39,9 +39,10 @@ kubectl --context YOUR_CONTEXT -n fleets get statefulset/my-fleet,service/my-fle
 kubectl --context YOUR_CONTEXT -n fleets get celldfleet my-fleet -o yaml
 ```
 
-This Ordered Bucket fleet has temporary disks and exact highest-ordinal
-contraction. The default Deployment layout cannot safely choose a single scale-in
-victim. Layout is immutable after creation.
+This Ordered Bucket fleet has temporary disks and runs celld directly; it
+contracts by highest ordinal and restarts one member at a time. The default
+Deployment layout lets Kubernetes choose each scale-in victim. Layout is
+immutable after creation.
 
 Look for three ready replicas, `Ready=True` and `Blocked=False`.
 `InfrastructureReady=True` alone does not mean Pods have scheduled.
@@ -49,5 +50,5 @@ See [verification](../verify/) if the workload does not become ready.
 
 The application Service uses port 8080. In-cluster clients need the label
 `celld.eric.dev/client-of: my-fleet` in the fleet namespace. Internal port 8081
-and launcher port 8083 stay private. Continue with
+stays private. Continue with
 [your first application](../first-application/).

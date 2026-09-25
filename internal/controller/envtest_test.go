@@ -98,6 +98,11 @@ type envtestFixture struct {
 // reconciler wired exactly as production is (uncached client, no fake seams).
 func envtestSetup(t *testing.T, profile string) (*Reconciler, *envtestFixture) {
 	t.Helper()
+	return envtestSetupWith(t, profile, nil)
+}
+
+func envtestSetupWith(t *testing.T, profile string, edit func(*fleet.CelldFleet)) (*Reconciler, *envtestFixture) {
+	t.Helper()
 	c := envtestClient(t)
 	ctx := t.Context()
 	n := envtestSeq.Add(1)
@@ -122,6 +127,9 @@ func envtestSetup(t *testing.T, profile string) (*Reconciler, *envtestFixture) {
 	f.UID = "" // The API server assigns identity; the fake fixture's UID is not accepted.
 	f.Spec.Placement.AZCount = 1
 	f.Spec.Placement.Zones = []string{"us-east-1a"}
+	if edit != nil {
+		edit(f)
+	}
 	if err := c.Create(ctx, f); err != nil {
 		t.Fatal(err)
 	}
@@ -434,7 +442,7 @@ func TestEnvtestScaleSubresource(t *testing.T) {
 // A real apiserver, rather than fake-client counters, arbitrates cancellation,
 // persisted issuance and the independently guarded workload effect.
 func TestEnvtestBoundedOperationCASAndLostResponse(t *testing.T) {
-	r, x := envtestSetup(t, "Bucket")
+	r, x := envtestSetup(t, "PersistentFleet")
 	x.provision(t, r)
 	f := desiredCount(t, r, x.fleet, 4)
 	reconcile(t, r, f)
@@ -460,7 +468,7 @@ func TestEnvtestBoundedOperationCASAndLostResponse(t *testing.T) {
 	base := r.Client
 	lost := false
 	r.Client = interceptor.NewClient(base.(client.WithWatch), interceptor.Funcs{Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
-		if _, ok := obj.(*appsv1.Deployment); ok && replicas(obj) == 4 && !lost {
+		if _, ok := obj.(*appsv1.StatefulSet); ok && replicas(obj) == 4 && !lost {
 			if err := c.Update(ctx, obj, opts...); err != nil {
 				return err
 			}
@@ -547,5 +555,62 @@ func TestEnvtestCleanupPreconditionsRejectReplacement(t *testing.T) {
 	}
 	if err := r.Delete(t.Context(), replacement, client.Preconditions{UID: &uid, ResourceVersion: &rv}); !apierrors.IsConflict(err) {
 		t.Fatalf("old cleanup deleted replacement: %v", err)
+	}
+}
+
+// Bucket objects converge to the rendered spec. Against a real API server the
+// server's defaulting must not make every reconcile rewrite the workload, and
+// a template written by an earlier release migrates in place.
+func TestEnvtestBucketConvergenceIsStable(t *testing.T) {
+	for _, layout := range []string{"Deployment", "Ordered"} {
+		t.Run(layout, func(t *testing.T) {
+			r, x := envtestSetupWith(t, "Bucket", func(f *fleet.CelldFleet) { f.Spec.BucketWorkload = layout })
+			reconcile(t, r, x.fleet)
+			f := reconcile(t, r, x.fleet)
+			w := emptyObject(workload(f, r.Options))
+			if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), w); err != nil {
+				t.Fatal(err)
+			}
+			if !matches(workload(f, r.Options), w) {
+				t.Fatal("defaulted workload does not match its rendering")
+			}
+			// Simulate an 0022 template: launcher init container and command.
+			legacy := f.DeepCopy()
+			legacy.Spec.Profile = "PersistentFleet"
+			strict := podTemplate(legacy, r.Options).Spec
+			switch w := w.(type) {
+			case *appsv1.Deployment:
+				w.Spec.Template.Spec.InitContainers = strict.InitContainers
+				w.Spec.Template.Spec.Containers[0].Command = strict.Containers[0].Command
+				w.Spec.Template.Spec.Volumes = append(w.Spec.Template.Spec.Volumes, strict.Volumes...)
+				w.Spec.Strategy = appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}
+			case *appsv1.StatefulSet:
+				w.Spec.Template.Spec.InitContainers = strict.InitContainers
+				w.Spec.Template.Spec.Containers[0].Command = strict.Containers[0].Command
+				w.Spec.Template.Spec.Volumes = append(w.Spec.Template.Spec.Volumes, strict.Volumes...)
+				w.Spec.UpdateStrategy = appsv1.StatefulSetUpdateStrategy{Type: appsv1.OnDeleteStatefulSetStrategyType}
+			}
+			if err := r.Update(t.Context(), w); err != nil {
+				t.Fatal(err)
+			}
+			reconcile(t, r, f)
+			migrated := emptyObject(w)
+			if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), migrated); err != nil {
+				t.Fatal(err)
+			}
+			if !matches(workload(f, r.Options), migrated) {
+				t.Fatal("legacy template not migrated")
+			}
+			version := migrated.GetResourceVersion()
+			for range 3 {
+				reconcile(t, r, f)
+			}
+			if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), migrated); err != nil {
+				t.Fatal(err)
+			}
+			if migrated.GetResourceVersion() != version {
+				t.Fatal("steady-state reconcile rewrote the workload")
+			}
+		})
 	}
 }

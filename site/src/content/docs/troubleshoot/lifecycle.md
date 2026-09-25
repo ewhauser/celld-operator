@@ -3,7 +3,15 @@ title: Blocked operations
 description: Find the missing proof or infrastructure observation without bypassing authority.
 ---
 
-Inspect the requested operation and its target:
+Bucket fleets have no current operation. Their blocking reasons are
+`CapacityUncertain` (survivor metrics missing or insufficient for an automatic
+contraction), `SchedulingBlocked`, `InfrastructureBlocked` or `LifecycleBlocked`
+(an object lacks this fleet's UID label or carries owner references; the
+operator refuses to adopt it), `MaintenancePaused` and `UnsupportedTransition`
+(runtime is not a digest-pinned fork pin). `Provisioning` while rolling out is
+normal; check the workload's rollout status and Pod events.
+
+For PersistentFleet, inspect the requested operation and its target:
 
 ```bash
 kubectl --context YOUR_CONTEXT -n fleets get celldfleet my-fleet   -o json | jq '.status | {conditions, lifecycle, desiredReplicas, appliedReplicas, readyReplicas}'
@@ -30,8 +38,7 @@ Missing Pods and exit codes cannot repair lost proof.
 
 Paused or changed requests cancel only before issuance. After issuance, finish
 or diagnose the recorded operation before expecting another token, image or
-replica target to apply. Bucket Deployment contraction is unsupported; use
-Ordered for a new fleet when deterministic removal is needed.
+replica target to apply.
 
 Preserve current authority and affected storage while investigating. Do not edit
 reservation annotations, manufacture replacement claims, remove finalizers or

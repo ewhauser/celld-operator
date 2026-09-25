@@ -6,6 +6,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -40,6 +41,11 @@ func matches(want, got client.Object) bool {
 			}
 			if o.Spec.Ordinals != nil && o.Spec.Ordinals.Start == 0 {
 				o.Spec.Ordinals = nil
+			}
+			// MaxUnavailableStatefulSet clusters default the rolling bound to one,
+			// which is also the behavior without that feature gate.
+			if u := o.Spec.UpdateStrategy.RollingUpdate; u != nil && u.MaxUnavailable != nil && *u.MaxUnavailable == intstr.FromInt32(1) {
+				u.MaxUnavailable = nil
 			}
 			normalizePod(&o.Spec.Template.Spec)
 			for i := range o.Spec.VolumeClaimTemplates {

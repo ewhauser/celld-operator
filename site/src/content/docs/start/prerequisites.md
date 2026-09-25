@@ -10,8 +10,8 @@ The example is an Ordered Bucket fleet named `my-fleet` in namespace `fleets`.
   CNI. Independently verify policy enforcement before attesting it.
 - Enough eligible worker nodes in the fleet's explicit zones. Three strictly
   placed replicas need three distinct hosts.
-- A compatible fork runtime image and matching launcher/operator image, pinned
-  by verified registry digests. All runtime/recovery nodes must use the fork.
+- A compatible fork runtime image and operator image, pinned by verified
+  registry digests. PersistentFleet also needs the matching launcher image. All runtime/recovery nodes must use the fork.
   Stock upstream v0.5.1 is insufficient; see [compatibility](../../reference/compatibility/).
 - `kubectl`, Helm, Docker/Buildx, AWS CLI, curl and jq. Use the fork's native CLI
   and esbuild for [application deployment](../first-application/).
@@ -33,5 +33,5 @@ it again. Attach the runtime identity using your EKS Pod Identity or IRSA setup.
 Keep the bucket exclusive to this fleet, including its runtime metadata.
 
 PersistentFleet additionally needs [supported CSI storage](../../configure/storage/).
-Ordered Bucket uses temporary disks and does not require EBS. Both require the
-launcher. Continue with [installation](../install/).
+Ordered Bucket uses temporary disks and requires neither EBS nor the launcher.
+Continue with [installation](../install/).

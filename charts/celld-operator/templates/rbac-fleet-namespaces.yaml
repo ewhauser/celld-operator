@@ -46,9 +46,11 @@ rules:
   - apiGroups: [gateway.networking.k8s.io]
     resources: [httproutes]
     verbs: [get, create, update, delete]
+  # Update converges Bucket fleet budgets (ADR 0023); PersistentFleet budgets
+  # remain verify-only.
   - apiGroups: [policy]
     resources: [poddisruptionbudgets]
-    verbs: [get, create]
+    verbs: [get, create, update]
   - apiGroups: [events.k8s.io]
     resources: [events]
     verbs: [create, patch]

@@ -52,6 +52,11 @@ func resetMaintenanceCapacity(s *fleetState) {
 	}
 }
 func (r *Reconciler) pauseFleet(ctx context.Context, f *fleet.CelldFleet) (ctrl.Result, error) {
+	if f.Spec.Profile == "Bucket" {
+		// Nothing is in flight outside the workload controller; pausing only
+		// stops new workload changes.
+		return r.report(ctx, f, nil, "MaintenancePaused", "Workload changes suspended", false)
+	}
 	return r.maintenanceFleet(ctx, f)
 }
 func (r *Reconciler) deleteFleet(ctx context.Context, f *fleet.CelldFleet) (ctrl.Result, error) {
@@ -70,6 +75,9 @@ func (r *Reconciler) deleteFleet(ctx context.Context, f *fleet.CelldFleet) (ctrl
 				return ctrl.Result{}, nil
 			}
 		}
+	}
+	if f.Spec.Profile == "Bucket" {
+		return r.deleteBucket(ctx, f)
 	}
 	return r.maintenanceFleet(ctx, f)
 }

@@ -3,7 +3,11 @@ title: How removal is checked
 description: Data safety, process exclusion and disk cleanup are separate proofs.
 ---
 
-Removal passes three independent boundaries:
+A Bucket fleet acknowledges no write before S3 holds it, so removing any one
+member is data-safe without proof: members drain on SIGTERM, and the operator
+only paces changes one member at a time.
+
+PersistentFleet removal passes three independent boundaries:
 
 | Boundary | Required proof |
 | --- | --- |

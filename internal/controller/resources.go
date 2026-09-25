@@ -226,10 +226,8 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 		pod.Containers[0].Resources.Requests[corev1.ResourceEphemeralStorage] = request
 		pod.Containers[0].Resources.Limits[corev1.ResourceEphemeralStorage] = size
 	}
-	if opts.LauncherImage != "" {
-		if s.Profile == "PersistentFleet" {
-			pod.SchedulingGates = []corev1.PodSchedulingGate{{Name: launcherGate}}
-		}
+	if usesLauncher(f, opts) {
+		pod.SchedulingGates = []corev1.PodSchedulingGate{{Name: launcherGate}}
 		pod.InitContainers = []corev1.Container{{Name: "install-launcher", Image: opts.LauncherImage, ImagePullPolicy: corev1.PullIfNotPresent, Command: []string{"/celld-launcher", "install", "/launcher/celld-launcher"}, VolumeMounts: []corev1.VolumeMount{{Name: "launcher", MountPath: "/launcher"}}, SecurityContext: pod.Containers[0].SecurityContext.DeepCopy()}}
 		pod.Volumes = append(pod.Volumes, corev1.Volume{Name: "launcher", EmptyDir: &corev1.EmptyDirVolumeSource{}}, corev1.Volume{Name: "launcher-key", Secret: &corev1.SecretVolumeSource{SecretName: launcherSecretName(f), DefaultMode: new(int32(0o440))}})
 		c := &pod.Containers[0]
@@ -259,7 +257,29 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 			pod.TopologySpreadConstraints = nil
 		}
 	}
-	return corev1.PodTemplateSpec{Labels: labels(f), Spec: pod}
+	template := corev1.PodTemplateSpec{Labels: labels(f), Spec: pod}
+	if token := bucketRestartToken(f); token != "" {
+		// A changed token rolls the template; the workload controller replaces
+		// one member at a time.
+		template.Annotations = map[string]string{restartTokenAnnotation: token}
+	}
+	return template
+}
+
+const restartTokenAnnotation = "celld.eric.dev/restart-token"
+
+// usesLauncher reports whether the fleet's pods run under the strict launcher.
+// Only PersistentFleet does: Bucket fleets acknowledge no write before the
+// object store holds it, so their disks are caches (ADR 0023).
+func usesLauncher(f *fleet.CelldFleet, opts Options) bool {
+	return f.Spec.Profile == "PersistentFleet" && opts.LauncherImage != ""
+}
+
+func bucketRestartToken(f *fleet.CelldFleet) string {
+	if f.Spec.Profile != "Bucket" || f.Spec.Maintenance == nil {
+		return ""
+	}
+	return f.Spec.Maintenance.RestartToken
 }
 
 func workload(f *fleet.CelldFleet, opts Options) client.Object {
@@ -271,14 +291,20 @@ func workload(f *fleet.CelldFleet, opts Options) client.Object {
 				Replicas: new(f.Spec.Replicas),
 				Selector: selector(f),
 				Template: template,
-				Strategy: appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType},
+				Strategy: appsv1.DeploymentStrategy{
+					Type: appsv1.RollingUpdateDeploymentStrategyType,
+					// One member at a time and no surge Pod, which required host
+					// anti-affinity may be unable to place.
+					RollingUpdate: &appsv1.RollingUpdateDeployment{MaxUnavailable: new(intstr.FromInt32(1)), MaxSurge: new(intstr.FromInt32(0))},
+				},
 			},
 		}
 	}
 	if orderedBucket(f) {
-		// Ordinal identity determines contraction targets. Parallel management
-		// lets coordinated maintenance remove every already-stopped, unready pod.
-		return &appsv1.StatefulSet{ObjectMeta: metadata(f, f.Name), Spec: appsv1.StatefulSetSpec{Replicas: new(f.Spec.Replicas), Selector: selector(f), ServiceName: f.Name + "-peers", PodManagementPolicy: appsv1.ParallelPodManagement, PersistentVolumeClaimRetentionPolicy: &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{WhenDeleted: appsv1.RetainPersistentVolumeClaimRetentionPolicyType, WhenScaled: appsv1.RetainPersistentVolumeClaimRetentionPolicyType}, Template: template, UpdateStrategy: appsv1.StatefulSetUpdateStrategy{Type: appsv1.OnDeleteStatefulSetStrategyType}}}
+		// Ordinal identity keeps zone assignment deterministic. Pod management
+		// policy is immutable, so fleets keep Parallel; rolling updates still
+		// replace one ordinal at a time.
+		return &appsv1.StatefulSet{ObjectMeta: metadata(f, f.Name), Spec: appsv1.StatefulSetSpec{Replicas: new(f.Spec.Replicas), Selector: selector(f), ServiceName: f.Name + "-peers", PodManagementPolicy: appsv1.ParallelPodManagement, PersistentVolumeClaimRetentionPolicy: &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{WhenDeleted: appsv1.RetainPersistentVolumeClaimRetentionPolicyType, WhenScaled: appsv1.RetainPersistentVolumeClaimRetentionPolicyType}, Template: template, UpdateStrategy: appsv1.StatefulSetUpdateStrategy{Type: appsv1.RollingUpdateStatefulSetStrategyType, RollingUpdate: &appsv1.RollingUpdateStatefulSetStrategy{Partition: new(int32(0))}}}}
 	}
 	return &appsv1.StatefulSet{
 		ObjectMeta: metadata(f, f.Name),
@@ -366,7 +392,7 @@ func prerequisites(f *fleet.CelldFleet, opts Options) []client.Object {
 			},
 		},
 	}
-	if opts.LauncherImage != "" {
+	if usesLauncher(f, opts) {
 		policy.Spec.Ingress = append(policy.Spec.Ingress, networkingv1.NetworkPolicyIngressRule{From: []networkingv1.NetworkPolicyPeer{operator}, Ports: []networkingv1.NetworkPolicyPort{port(8083)}})
 	}
 	if opts.LocalTest {
@@ -386,9 +412,16 @@ func prerequisites(f *fleet.CelldFleet, opts Options) []client.Object {
 	if t := f.Spec.Telemetry; t != nil {
 		policy.Spec.Egress = append(policy.Spec.Egress, destinationRule(t.CollectorURL, t.Egress))
 	}
+	// A Bucket fleet tolerates losing any one member, so voluntary evictions
+	// such as node drains proceed one at a time. PersistentFleet removal still
+	// requires strict proof and blocks eviction.
+	unavailable := intstr.FromInt32(0)
+	if f.Spec.Profile == "Bucket" {
+		unavailable = intstr.FromInt32(1)
+	}
 	pdb := &policyv1.PodDisruptionBudget{
 		ObjectMeta: metadata(f, f.Name),
-		Spec:       policyv1.PodDisruptionBudgetSpec{MaxUnavailable: new(intstr.FromInt32(0)), Selector: selector(f)},
+		Spec:       policyv1.PodDisruptionBudgetSpec{MaxUnavailable: &unavailable, Selector: selector(f)},
 	}
 	return []client.Object{policy, pdb, app, peers}
 }

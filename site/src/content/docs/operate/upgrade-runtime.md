@@ -1,6 +1,6 @@
 ---
 title: Upgrade the runtime
-description: Qualify the exact fork image and change it through coordinated maintenance.
+description: Qualify the exact fork image, then roll it out (Bucket) or change it through coordinated maintenance (PersistentFleet).
 ---
 
 Use a compatible digest-pinned fork and qualify its recovery/storage-format
@@ -14,7 +14,17 @@ That is graceful maintenance evidence, not permission to use `.2` for crash
 recovery or proof that other source/target pairs are compatible. Use the
 [current artifact](../../reference/compatibility/) for new fleets.
 
-Request the new image and allow whole-fleet downtime:
+For a Bucket fleet, change only the image:
+
+```bash
+kubectl --context YOUR_CONTEXT -n fleets patch celldfleet my-fleet   --type merge -p '{"spec":{"runtimeImage":"ghcr.io/ewhauser/celld@sha256:YOUR_VERIFIED_DIGEST"}}'
+```
+
+The workload controller replaces one member at a time, so old and new versions
+run together until the rollout completes; qualify that mix. No downtime
+permission is needed.
+
+For PersistentFleet, request the new image and allow whole-fleet downtime:
 
 ```bash
 kubectl --context YOUR_CONTEXT -n fleets patch celldfleet my-fleet   --type merge -p '{"spec":{"runtimeImage":"ghcr.io/ewhauser/celld@sha256:YOUR_VERIFIED_DIGEST","maintenance":{"allowCoordinatedDowntime":true}}}'
@@ -25,7 +35,7 @@ before running the command. The executor strictly stops the current working set,
 completes disk cleanup, then starts fresh disks with the recorded new image. It
 waits for readiness before reporting completion.
 
-This is coordinated maintenance for either profile. There is no rolling image
-update, old release adapter or automatic rollback. A changed image request cannot
+PersistentFleet has no rolling image update. Neither profile has an old release
+adapter or automatic rollback. A changed image request cannot
 retarget an operation that has already reached Requesting. Watch
 `status.lifecycle` and [troubleshoot blockers](../../troubleshoot/lifecycle/).

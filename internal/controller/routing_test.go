@@ -240,7 +240,7 @@ func TestRoutingDeletionCannotRemoveConcurrentReplacement(t *testing.T) {
 }
 
 func TestInvalidRoutingDoesNotBlockIssuedOperation(t *testing.T) {
-	for _, profile := range []string{"Bucket", "PersistentFleet"} {
+	for _, profile := range []string{"PersistentFleet"} {
 		t.Run(profile, func(t *testing.T) {
 			x := newOperationFixture(t, profile)
 			x.desired(2)
