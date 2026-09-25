@@ -95,6 +95,44 @@ func matches(want, got client.Object) bool {
 	}
 }
 
+// introducedFields lists operator-owned prerequisite fields that a release added
+// after earlier releases had already created the object. Each entry copies one
+// field from want into got only where got still holds the field's API zero
+// value; it never overwrites a value, so anything set by another writer stays a
+// conflict. Entries are keyed by field, not by release, and apply to every
+// matching object; retire one only when no supported upgrade path can create
+// the object without it.
+var introducedFields = []func(want, got client.Object){
+	// Declared ServicePort.appProtocol (#59). Ports are paired by position and
+	// name; a renamed, added or reordered port leaves the conflict in place.
+	func(want, got client.Object) {
+		w, ok := want.(*corev1.Service)
+		g, gok := got.(*corev1.Service)
+		if !ok || !gok || len(w.Spec.Ports) != len(g.Spec.Ports) {
+			return
+		}
+		for i := range g.Spec.Ports {
+			if g.Spec.Ports[i].AppProtocol == nil && g.Spec.Ports[i].Name == w.Spec.Ports[i].Name && w.Spec.Ports[i].AppProtocol != nil {
+				g.Spec.Ports[i].AppProtocol = new(*w.Spec.Ports[i].AppProtocol)
+			}
+		}
+	},
+}
+
+// backfill returns got with only introducedFields filled from want, or nil when
+// that is not enough to make it match. A nil result is a conflict: the object
+// differs in something other than a field this release newly declares.
+func backfill(want, got client.Object) client.Object {
+	upgraded := got.DeepCopyObject().(client.Object)
+	for _, fill := range introducedFields {
+		fill(want, upgraded)
+	}
+	if !matches(want, upgraded) {
+		return nil
+	}
+	return upgraded
+}
+
 func normalizePod(p *corev1.PodSpec) {
 	if p.RestartPolicy == "" {
 		p.RestartPolicy = corev1.RestartPolicyAlways
