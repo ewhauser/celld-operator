@@ -190,6 +190,10 @@ func openLock(root string, create bool) (*os.File, error) {
 
 var errLockReplaced = errors.New("lock file was unlinked or replaced while held")
 
+// ErrDiskRetired is the Blocked error of a launcher whose disk carries the
+// retirement marker. The controller matches its text to report the ordinal.
+var ErrDiskRetired = errors.New("disk was durably retired")
+
 // lockToken returns the random identity stored in the lock file, writing one
 // on first use. A recreated file has a different token, which no inode
 // comparison can promise on filesystems that recycle inode numbers.
@@ -281,7 +285,7 @@ func Run(ctx context.Context, c Config) error {
 			return err
 		}
 		lock = nil
-		s.phase("Blocked", errors.New("disk was durably retired"))
+		s.phase("Blocked", ErrDiskRetired)
 		<-ctx.Done()
 		return ctx.Err()
 	}
