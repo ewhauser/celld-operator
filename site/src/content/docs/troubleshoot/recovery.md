@@ -1,17 +1,11 @@
 ---
 title: Runtime exit and recovery
-description: Diagnose a stopped child or delayed retained witness without discarding recovery data or removal authority.
+description: Diagnose an unready member, a delayed retained witness or a lost disk without discarding recovery data.
 ---
 
-This page mostly concerns PersistentFleet, whose Pods run under the launcher.
-Bucket Pods run celld directly: an exited container restarts normally, and a
-lost member loses no acknowledged write because the bucket already holds it.
-
-In PersistentFleet, a running Pod does not imply that its celld child is running. The launcher starts
-one child and deliberately does not restart it after an unsolicited exit. There
-is no liveness or startup probe that resets this state; the application readiness
-probe becomes unhealthy. Lease expiry during an S3 outage can therefore leave a
-Pod `Running` but unready, with launcher state `ExitedUnrequested`.
+Both profiles run celld directly. An exited container restarts under kubelet;
+a PersistentFleet member restarts on the same disk. Bucket members lose no
+acknowledged write because the bucket already holds it.
 
 ## Collect evidence before replacing anything
 
@@ -27,53 +21,53 @@ kubectl --context YOUR_CONTEXT -n fleets get endpointslices \
 ```
 
 Replace `POD_NAME` with the affected Pod. Save the logs before deleting a Pod;
-`--previous` only reads a previous container in the same Pod. Record the fleet's
-`status.reservation` and inspect that `CelldStorageReservation`, including its
-current-operation annotation, without editing it. PersistentFleet investigations
-also need the PVC/PV UIDs, CSI handle, Node UID and host boot identity. The
-[storage contract](../../contracts/disposable-disks/) explains those bindings.
+`--previous` only reads a previous container in the same Pod.
 
 | Observation | Meaning and next step |
 | --- | --- |
-| S3 errors followed by runtime exit | Restore the runtime's bucket access and inspect logs. Restored access does not automatically restart the child or authorize disk deletion. |
-| `.3` predecessor recovery reports an undecided witness | Check the named retained peer, stable peer DNS, network policy, scheduling and volume access. The first node may need the peer's early follower listener before either becomes ready. |
-| Bounded startup retries exhausted | The child stops with recovery evidence retained. Resolve peer availability and investigate a coordinated administrative restart; do not erase data to make it healthy. |
-| Strict removal is `Failed`, unknown, or its positive proof was lost | Follow [blocked operations](../lifecycle/). A new token or Pod cannot reconstruct a missing `data_safe` result. |
-| Fleet reason `DiskRetired` (PersistentFleet) | A previous Pod on this disk was stopped without an operator request (for example `kubectl delete pod`, node-pressure eviction, node shutdown or preemption), so its launcher retired the disk and the replacement will not start. Acknowledged data is retained in the bucket. There is no automatic disk replacement yet ([#60](https://github.com/ewhauser/celld-operator/issues/60)); preserve the claim and marker. |
-| Fleet reason `LauncherBlocked` (PersistentFleet), or a lock, host or boot mismatch | The message carries the launcher's reason. Preserve the disk and binding files. Never clear them to permit a replacement writer. |
+| S3 errors followed by runtime exit | Restore the runtime's bucket access. The container restarts and recovers from its disk and peers. |
+| Predecessor recovery reports an undecided witness | Check the named retained peer, stable peer DNS, network policy, scheduling and volume access. The first node may need the peer's early follower listener before either becomes ready. |
+| Bounded startup retries exhausted | The container exits with recovery data retained and restarts. Resolve peer availability; do not erase data to make it healthy. |
+| Fleet stays unsettled on an unrecovered session | See [waiting changes](../lifecycle/#persistentfleet-waits). |
+| Fleet reason `DiskRetired` or `LauncherBlocked` | Reported only by releases that ran the launcher. Upgrade the operator: current releases release the launcher gate, ignore retirement markers and roll the member onto a plain template on the same disk. |
 
 ## Retained-peer startup
 
-The required `.3` fork treats an unreachable witness as undecided regardless of
-lease age. While its bounded startup retries run, it serves retained follower
-data but does not declare the predecessor lost merely because a peer has not
-started. An expired lease fences a writer; it does not prove the peer's disk is
-gone. Stable per-ordinal DNS and `publishNotReadyAddresses` are required for this
-path. `.2` can lose acknowledged writes under ordinary startup skew; use the
+The fork treats an unreachable witness as undecided regardless of lease age.
+While its bounded startup retries run, it serves retained follower data but does
+not declare the predecessor lost merely because a peer has not started. An
+expired lease fences a writer; it does not prove the peer's disk is gone. Stable
+per-ordinal DNS and `publishNotReadyAddresses` are required for this path. `.2`
+can lose acknowledged writes under ordinary startup skew; use the
 [current artifact](../../reference/compatibility/).
 
-The runtime still has its explicit-loss policy for reachable peers that
-conclusively report missing or incomplete fragments when no complete witness
-remains. The correction cannot repair loss already recorded by an older build
-and is not a guarantee for permanently lost disks.
+## Lost disks
 
-## Administrative recovery boundary
+A PersistentFleet member's disk is **lost** when its PVC is in phase `Lost`, the
+PV it was bound to no longer exists, or its Pod has stayed Pending for a minute
+with no PVC. The operator replaces that member's Pod and PVC at once, without
+waiting for the fleet to settle, and emits a `MemberDiskLost` Warning Event. The
+message lists sessions that needed the disk:
 
-The [Kind fault test](../../qualification/native-peer-startup/) restores S3,
-verifies that the exact failed children remain stopped without strict removal
-proof, then explicitly replaces those Pods with UID preconditions and ordinary
-deletion grace. PersistentFleet retains the same PVC/PV/CSI identity, Node UID
-and boot; the replacement has a fresh Pod UID and runtime generation. It leaves
-one witness stopped to test delayed startup, then restores it and verifies all
-acknowledged values. The test never resets retirement markers or host bindings.
+```text
+Replacing member my-fleet-2: its disk no longer exists; celld records a loss for any of these sessions without another copy: ...
+```
 
-That is a qualified local scenario, not an automatic operator recovery service
-or a general `kubectl delete pod` runbook. Before attempting an equivalent
-intervention, establish that no issued removal is being bypassed, the disks have
-not been retired, and the exact same-host/boot/storage constraints can be met.
-Cross-host or cross-boot reuse remains blocked even if Kubernetes attaches the
-volume. Permanent host loss requires separate recovery planning.
+celld recovers each listed session from another complete follower copy, or
+seals it with a bounded loss record if none remains. A fleet never waits on a
+disk that is gone.
 
-Planned PersistentFleet [restart](../../operate/restart/) and [runtime upgrade](../../operate/upgrade-runtime/)
-are different: they require positive strict proof, dispose of the old disks,
-and resume on fresh disks. They cannot be used to bypass a missing removal proof.
+For a disk that still exists but is unusable (corrupt, or stuck in an
+unavailable zone), declare it gone yourself:
+
+```bash
+kubectl --context YOUR_CONTEXT -n fleets annotate celldfleet my-fleet \
+  celld.eric.dev/replace-member=2
+```
+
+The value is an ordinal or Pod name. The operator replaces that member's Pod and
+PVC when the fleet is settled, or at once if that member is the only one down,
+then removes the annotation and emits `MemberReplaced`. The operator never
+deletes an existing disk with outstanding obligations on its own; this
+annotation is the explicit request, and its sessions follow the same recovery or
+loss rule. Use it only when the disk cannot come back.

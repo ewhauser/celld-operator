@@ -8,10 +8,9 @@ Use an explicit compatible fork image; the operator supplies no default runtime 
 | Component | Requirement |
 | --- | --- |
 | Kubernetes | 1.31 or newer, IPv4 Pod networking and enforced NetworkPolicy. |
-| Runtime | Registry-pinned OCI `@sha256:...` reference to the compatible celld fork, strict shutdown schema 1. |
+| Runtime | Registry-pinned OCI `@sha256:...` reference to the compatible celld fork. PersistentFleet settlement, disk release and scale-in need `/state.node_log` (`0.5.1-ewhauser.5` or later). |
 | Recovery fleet | Homogeneous compatible fork including native `bucket_complete` readers. |
-| Launcher | Digest-pinned image built from the matching operator source; required for PersistentFleet. Bucket fleets run celld directly. |
-| Persistent storage | Supported dynamic CSI, RWOP, `Delete`, `WaitForFirstConsumer` and external-provisioner deletion finalizer. |
+| Persistent storage | EBS CSI (hostpath CSI in local tests), RWOP, `Delete` reclaim policy and `WaitForFirstConsumer`. |
 | Capacity policy | Metrics Server for built-in observations; Prometheus is optional. |
 
 The [fork release](https://github.com/ewhauser/celld/releases/tag/v0.5.1-ewhauser.3)
@@ -36,9 +35,9 @@ The [.2 → .3 upgrade](../../qualification/runtime-upgrade/) and the
 passed for the recorded artifacts. An image pin or schema number alone does not
 establish the same behavior for another build.
 
-Runtime image changes use [coordinated maintenance](../../operate/upgrade-runtime/).
-They are not rolling updates and do not provide automatic format migration or
-rollback compatibility. The caller must qualify the source/target pair.
+Runtime image changes [roll one member at a time](../../operate/upgrade-runtime/).
+They do not provide automatic format migration or rollback compatibility. The
+caller must qualify the source/target pair, including the mixed-version fleet.
 
 There is no migration from the former lifecycle journal, no stock-version
 adapter fallback, no layout conversion and no reuse of historical retained

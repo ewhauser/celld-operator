@@ -1,6 +1,6 @@
 ---
 title: Contribute
-description: Build the operator and maintain its strict lifecycle contracts and documentation.
+description: Build the operator and maintain its lifecycle contracts and documentation.
 ---
 
 Use the Go version in `go.mod`, a C compiler and Docker, then run:
@@ -17,9 +17,9 @@ for generated manifests, lint and integration commands. Read
 
 ## Contracts
 
-- [Architecture](../concepts/architecture/) and [current operations](../contracts/current-operation/).
-- [celld wire protocol](../contracts/runtime-control-plane/) and [launcher supervision](../contracts/launcher-supervision/).
-- [Disposable disks](../contracts/disposable-disks/) and [capacity policy](../contracts/capacity-policy/).
+- [Architecture](../concepts/architecture/) and [one disruption at a time](../contracts/current-operation/).
+- [celld wire protocol](../contracts/runtime-control-plane/); [launcher supervision](../contracts/launcher-supervision/) is obsolete.
+- [Retained disks](../contracts/disposable-disks/) and [capacity policy](../contracts/capacity-policy/).
 - [Current decision](../decisions/0022-celld-control-plane/).
 
 The old private-S3 adapters, journal archive, EC2 fencing and disk-reuse harness

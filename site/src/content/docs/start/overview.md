@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-celld operator runs a [celld](https://github.com/denoland/celld) fleet on Kubernetes. You provide an EKS cluster, a dedicated S3 bucket, a runtime AWS identity and digest-pinned fork and operator images (plus a launcher image for PersistentFleet). A `CelldFleet` names the runtime ServiceAccount, bucket and zones. The operator creates the workload, internal Services and network policy. Your application then talks to the fleet's port 8080.
+celld operator runs a [celld](https://github.com/denoland/celld) fleet on Kubernetes. You provide an EKS cluster, a dedicated S3 bucket, a runtime AWS identity and digest-pinned fork and operator images. A `CelldFleet` names the runtime ServiceAccount, bucket and zones. The operator creates the workload, internal Services and network policy. Your application then talks to the fleet's port 8080.
 
 The path to a first request is:
 
@@ -15,4 +15,4 @@ The path to a first request is:
 4. [Deploy an application and send a request](../first-application/).
 5. [Verify and troubleshoot](../verify/) the fleet when a condition stays false.
 
-Start with a **Bucket** fleet; it runs celld directly and needs no launcher. A PersistentFleet adds the strict launcher and CSI volumes using the disposable-disk policy; see [fleet profiles](../../concepts/profiles/) before selecting persistent local disks. Each fleet runs one application from its own bucket. The operator does not create the bucket, IAM roles, worker nodes or public ingress.
+Start with a **Bucket** fleet; it needs no CSI storage. A PersistentFleet adds retained CSI volumes and changes one member at a time; see [fleet profiles](../../concepts/profiles/) before selecting persistent local disks. Each fleet runs one application from its own bucket. The operator does not create the bucket, IAM roles, worker nodes or public ingress.

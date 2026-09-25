@@ -1,180 +1,85 @@
-# Bounded current operation
+# One disruption at a time
 
-This executor applies to `PersistentFleet` only. `Bucket` fleets run
-`CELLD_DURABILITY=bucket` without the launcher, strict proof or a current
-operation; see [Bucket fleets](#bucket-fleets).
+Earlier releases drove PersistentFleet changes through a bounded current
+operation: strict `remove-disk` proof, launcher exit and restart-denial proof,
+a ten-phase executor and coordinated whole-fleet downtime for restart and
+upgrade. That executor is removed. This page describes what replaced it.
 
-The operator has one strict lifecycle executor. celld decides data safety through
-its strict `remove-disk` control plane. The launcher binds that result to one
-child, waits for its exit, independently reacquires the inherited lock and
-persists restart denial. The operator serializes the resulting Kubernetes
-changes. It does not inspect private S3 keys, runtime logs, epochs, follower
-inventories or leases, and cannot substitute EC2 termination for celld completion.
+celld tolerates the loss of any one member. In `fleet` durability a write is
+acknowledged only after every follower in the leader's ensemble has fsynced it,
+and a dead leader is recovered from one complete follower copy. The operator's
+only safety job is therefore to disrupt one member at a time, wait until celld
+reports that the fleet has absorbed it, and never delete an existing disk that a
+session still needs. A disk that is already gone is replaced without waiting.
 
-This is a breaking replacement. There is no journal migration, old runtime
-adapter fallback, archive hydration, retained-member replay or second executor.
-Shutdown proofs describe the captured invocations. Persistent replacements use
-the existing PVC and cannot reopen a disk with the launcher's permanent
-retirement marker, so a new invocation is never covered by an old proof.
+## Settlement
 
-## Bucket fleets
+The operator reads celld's `/state.node_log` from every expected member (celld
+`0.5.1-ewhauser.5` or later). The fleet is **settled** when:
 
-Bucket celld acknowledges no write before the object store holds it, so a
-member's temporary disk is a cache and losing any one member loses no
-acknowledged write. The Deployment or Ordered StatefulSet runs celld directly.
-The operator renders the workload, NetworkPolicy and PodDisruptionBudget
-(`maxUnavailable: 1`), converges drift in them and refuses objects it does not
-own. The workload controller performs one-member rolling restart and upgrade;
-the operator lowers replicas one member at a time after each rollout completes.
-SIGTERM runs celld's own drain. The reservation keeps only applied count,
-runtime image, restart token and capacity-policy state. An in-flight operation
-from an earlier release is dropped with completion outcome `Superseded`, and
-unreadable operation state is discarded instead of blocking.
+- every expected member is Ready and reports `fleet` durability;
+- every member has a follower ensemble (not required for a one-member fleet);
+- a complete dead-leader sweep observed after the last disruption plus one
+  lease TTL (10 seconds) lists no unrecovered session.
 
-## Durable state
+The last disruption is the later of the operator's own last change and any
+member's latest Pod creation or container start. A member's disk is
+**releasable** when a fresh complete sweep exists and none lists a session that
+still needs that member. Anything unknown, including an unreadable member,
+answers no. Waiting delays only the next voluntary step, never the running fleet.
 
-The storage reservation's immutable spec still owns the bucket and fleet UID.
-Its `celld.eric.dev/current-operation` annotation contains:
+## Lifecycle
 
-- Current fleet/workload UIDs, applied replica count and runtime image, plus the
-  current PVC UID bindings (at most 100).
-- One operation ID, kind, phase and absolute deadline (30 minutes from intent); source/target replica
-  counts and images; the captured desired-request and capacity-policy identity.
-- The current target, or at most 100 targets for coordinated maintenance. Each
-  binds Pod UID, container incarnation, endpoint, host UID/boot, launcher
-  invocation, runtime generation and disk nonce. Persistent targets also bind
-  PVC/PV UIDs, names and the CSI volume handle.
-- Only captured celld completion and launcher child-exit, inherited-lock-release
-  and durable restart-denial evidence for those targets.
-- The workload effect predecessor and resource version; exact-resource cleanup
-  preconditions; bounded capacity-policy stabilization state.
-- One current completed restart token and one last completion projection.
-
-There is no append-only completion or session history. A normal completed
-three-member PersistentFleet retains roughly 518 bytes in the fixture; the
-100-member regression uses realistic UUIDs, 64-hex container/runtime identities,
-PVC/PV UIDs and CSI handles and exercises all captured proofs plus the retained
-capacity baseline (163,128 of 184,320 bytes). Maintenance clears pre-disruption
-load samples while preserving the ineffective-addition hold. Encoded state has
-a hard 180 KiB cap and rejects unknown fields and invalid operation shapes.
-Oversized authority fails closed instead of creating an archive.
-
-Status is rebuilt from these Kubernetes objects. Editing or erasing status
-cannot create a proof, change an operation or authorize an effect.
-
-## Issuance and effect protocol
-
-1. Discover and recheck the exact target. Validate current storage ownership,
-   workload configuration, placement and survivor capacity. Persist `Intent`
-   and a fixed deadline without contacting the launcher to remove anything.
-2. A reservation resource-version CAS advances to `Requesting`. Only this
-   transition authorizes a strict launcher request. A competing cancellation
-   can win only while the operation is still `Intent`.
-3. Issue/retry the exact operation and generation with the original deadline.
-   Shorter reconcile/HTTP timeouts do not replace that recorded deadline.
-   After expiry, observe only. HTTP acceptance, readiness, elapsed time, absent
-   Pods and exit codes cannot become completion. A failed launcher result is
-   terminal; a later exit cannot repair it.
-4. Validate the entire authenticated launcher response, including the exact
-   operation, deadline, Pod, invocation, generation, host/boot and disk identity.
-   Require both celld's terminal control-only `data_safe` result and every
-   independent launcher proof. Recheck Kubernetes identity before saving it.
-   Each current target's proof is persisted before moving on; completed proof
-   survives controller or launcher restart without re-reading runtime logs.
-5. Record an effect resource version only after validating the original workload
-   UID, exact predecessor effect marker, source count/template and target disks.
-   Apply that exact CAS with the operation's `/stop` marker. A conflict requires
-   full revalidation and another reservation CAS; no blind fresh-version retry
-   is allowed. The exact marker and resulting count reconstruct a lost response.
-6. Observe the specified replica and Pod effects. Only then enter PVC cleanup.
-   Each PVC deletion uses its recorded UID and resource version, with current
-   claim/PV/driver/handle and deletion-finalizer checks. Persist cleanup intent
-   before deletion, then wait for PVC/PV absence and no matching attachment. A
-   replacement claim, changed identity, existing Pod reference or pending CSI
-   deletion blocks progress. The controller never removes storage finalizers.
-7. For restart/upgrade, wait at zero replicas until captured disk cleanup completes, then use
-   the same guarded effect protocol with `/resume`, the recorded image and fresh
-   claim names. Admit new claim UIDs before releasing their scheduling gates.
-   Complete only after the specified Pod count and workload readiness are
-   observed. Discard the operation and its runtime proof at completion.
-
-Once `Requesting` wins, pause, desired-count reversal, a new restart token and a
-new upgrade request cannot cancel or retarget it. The existing operation must
-finish first. Expiry never establishes that a shutdown was unissued. A missing
-or ambiguous launcher result preserves the operation and disk indefinitely.
-An old issuer cannot refresh itself onto a new effect: the reservation CAS and
-the independently checked workload predecessor/UID/resource-version fence both
-boundaries. Delayed cleanup carries the old PVC UID and cannot delete a new
-claim that reuses its name.
-
-## Storage and rollout boundaries
-
-PersistentFleet uses fresh dynamically provisioned RWOP disks under a supported
-CSI class with `Delete` reclaim policy and `WaitForFirstConsumer`. StatefulSet
-PVC retention stays `Retain` so only the controller initiates claim deletion.
-Strict proof and observed compute removal precede UID/resource-version guarded
-PVC deletion. Current cleanup binds the exact claim, PV, CSI driver and handle
-and captures the external-provisioner deletion finalizer. Completion waits for
-PVC/PV absence and no matching VolumeAttachment.
-
-CSI's deletion finalizer supplies the backend-deletion guarantee; the operator
-never removes finalizers, force-detaches disks or calls cloud APIs. It keeps
-current proof while cleanup is pending and discards it only after completion.
-There is no historical cleanup flag or deletion authority. Historical retained
-PVs cannot be adopted or retroactively disposed. See
-[disposable disks](disposable-disks.md) for the exact contract and validation.
-
-Growth and coordinated maintenance use fresh claims. A disk-scoped launcher
-marker permanently denies any later launch on a strictly stopped disk. A host or
-boot change is refused before startup because local locks cannot prove exclusion
-across kernels. There is no handoff grant or fencing override.
-
-Provisioning requires an explicit `ghcr.io/ewhauser/celld@sha256:...` pin and a
-digest-pinned launcher image. Pin syntax is not artifact qualification. All
-recovery participants need the compatible fork's native `bucket_complete`
-reader. Stock upstream v0.5.1 cannot satisfy the protocol. Native binary hashes
-are not container digests; test pins are explicitly fixtures.
-
-## Regression and qualification coverage
-
-The old journal-layout, S3-session, archive and infrastructure-fencing tests were
-replaced at their active behavior boundaries:
-
-| Former concern | Current regression |
+| Change | Behavior |
 | --- | --- |
-| Crash before/after intent, issuance, proof and effects | `TestLostResponsesAndControllerRestarts` |
-| Stale issuer and cancellation/workload CAS | `TestStaleReservationAndWorkloadWriters`, `TestEnvtestBoundedOperationCASAndLostResponse` |
-| Acceptance, exit status, readiness or absence mistaken for safety | `TestRemovalRejectsIncompleteAndWrongProof`, `TestNoRuntimeProofFromAbsentPodOrReadiness` |
-| Failed capture later promoted by exit | `TestRemovalRejectsIncompleteAndWrongProof/failed` |
-| Launcher crash before/after Kubernetes capture | `TestLauncherCrashCaptureBoundary` |
-| Pause, reversal, concurrent restart or upgrade | `TestCancellationReversalPauseAndNewRequests`, `TestDeadlineNeverMakesIssuanceUnissued` |
-| PVC/PV/workload/runtime replacement | `TestIdentityDriftBlocksProofAndEffect`, `TestStateRejectsUnboundOrOversizedAuthority` |
-| Retained-disk reactivation | `TestCurrentAuthorityBoundedAndStatusRebuildable` (fresh claims), strict launcher cross-host/boot tests |
-| Capacity/manual/external entry points | `TestCapacityEntriesUseStrictCurrentOperation`, `TestCapacityCollectionEditAndRevalidation` |
-| Multi-member restart/upgrade/delete | `TestMaintenanceUsesCurrentWorkingSet`, `TestDeleteUsesStrictWorkingSetAndDisposesDisks` |
-| Bucket scaling, rolling restart/upgrade, drift, migration and deletion | `TestBucketScalesOneMemberAtATime`, `TestBucketAutomaticContraction`, `TestBucketRestartAndUpgradeRollWithoutDowntimePermission`, `TestBucketDriftIsCorrected`, `TestBucketRefusesForeignObjects`, `TestBucketMigratesStrictFleet`, `TestBucketDropsStrictOperationState`, `TestBucketDeletionRemovesComputeOnly`, `TestEnvtestBucketConvergenceIsStable` |
-| Archive growth and editable status | `TestCurrentAuthorityBoundedAndStatusRebuildable`, `TestHundredMemberMaintenanceFitsBound` |
-| Storage cleanup and stale deletion | `TestStrictRemovalBothProfiles` (PersistentFleet), `TestEnvtestCleanupPreconditionsRejectReplacement`, manifest RBAC audit |
-| No private recovery reads | `TestNoRecoveryMetadataDependencies`; production manager no longer constructs S3 evidence or fencing clients |
+| Restart, upgrade | `maintenance.restartToken` (Pod template annotation `celld.eric.dev/restart-token`) or `runtimeImage` rolls the template. The StatefulSet keeps `OnDelete`; the operator deletes outdated Pods one at a time: a member already down at once, running members highest ordinal first and only when settled. Disks are retained. |
+| Scale-in | When settled, replicas drop by one (highest ordinal). Its PVC is deleted only once releasable; until then status names the sessions that still need it. Automatic and External contraction also require survivor-capacity evidence (`CapacityUncertain`). |
+| Growth | New members get new claims. Growth waits until any removed member's retained PVC is deleted; it never reuses one. |
+| Lost disk | A PVC in phase `Lost`, a bound PV that no longer exists, or a Pending Pod whose PVC is gone: the member's Pod and PVC are replaced at once. The status message and a `MemberDiskLost` Warning event name sessions celld may record as lost. |
+| `celld.eric.dev/replace-member` | Annotation on the CelldFleet naming an ordinal or Pod name whose existing disk the administrator declares gone. The operator replaces Pod and PVC when settled, or at once if that member is the only one down, then removes the annotation and emits `MemberReplaced`. An unknown member reports `ReplaceMemberInvalid`. |
+| Node drain | The PodDisruptionBudget allows `maxUnavailable: 1` while settled and `0` while recovering. |
+| Deletion | Foreground StatefulSet deletion (members drain on SIGTERM), then every fleet PVC, then the finalizer. The bucket reservation is permanent. |
 
-The opt-in local integration runs the real fork binary, typed control-plane
-client and launcher HTTP protocol against isolated MinIO. It persists proof in
-the controller, stops the launcher, recreates the controller, then verifies the
-guarded workload effect and simulated Kubernetes storage cleanup:
+celld seals a session whose only complete copy was on a lost disk with a bounded
+loss record, so the fleet never waits on a disk that is gone. The operator never
+deletes an existing disk with outstanding obligations on its own; only a lost
+disk or an explicit `replace-member` request does that.
 
-```sh
-CELLD_STRICT_TEST_BINARY=/absolute/path/to/strict/celld \
-CELLD_STRICT_TEST_ESBUILD=/absolute/path/to/esbuild \
-go test -race ./internal/controller -run '^TestStrictRuntimeCurrentOperation$' -v -count=1
-```
+Runtimes without node-log state (for example `0.5.1-ewhauser.4`) report
+settlement as unknown. Restarts and upgrades may still roll on readiness plus a
+one-minute stabilization after the last disruption, so an upgrade from `.4` to
+`.5` works. Such runtimes never authorize disk deletion: scale-in needs `.5`.
 
-The September 20 run passed with the verified `0.5.1-ewhauser.2` macOS ARM64
-binary, SHA256 `f9b68e9e9608d74c40a9d8e9dab1846c3532f4f51762dc25e863c0986f2146db`.
-It uses an empty runtime disk and simulated Kubernetes/CSI resources. Envtest
-separately exercises a real API server and etcd. Neither qualifies replicated
-workload recovery, Kind's full workload controllers, EKS/EBS or real disk cleanup.
+## Kubernetes objects
 
-The [September 21 `.3` qualification](qualification/native-peer-startup/README.md)
-repeats both real-binary handshakes and adds populated native recovery, hosted
-Kind faults and a [real version upgrade](qualification/runtime-upgrade/README.md).
-The earlier `.2` handshake is historical evidence, not a runtime recommendation.
+The operator converges drift in the StatefulSet template and replica count,
+NetworkPolicy and PodDisruptionBudget it owns; Services stay verify-only. Objects
+without the fleet's UID label, or with owner references, are refused. A missing
+StatefulSet is recreated on the fleet's own claims: claims labeled with the fleet
+UID are reused, and a foreign claim at a member's name reports
+`StorageIdentityConflict`. StatefulSet PVC retention is `Retain` for scale and
+deletion, so only the operator deletes claims.
+
+The storage reservation's `celld.eric.dev/current-operation` annotation now
+holds bookkeeping only: workload UID, applied count and image, last restart
+token, last disruption time and capacity-policy state. It holds no runtime proof.
+
+## Upgrading from the strict executor
+
+An in-flight operation recorded by an earlier release is dropped with
+`status.lifecycle.lastOutcome: Superseded`, and unreadable state is rebuilt
+instead of blocking. Pods held by the launcher scheduling gate are released, and
+members roll onto the new template one at a time under the rules above.
+Launcher retirement markers on existing disks are ignored because no launcher
+runs. The `DiskCleanupPending` condition is removed, and `status.lifecycle` no
+longer shows operation phases.
+
+## Regression coverage
+
+`internal/fleethealth` covers settlement, stale sweeps, single-member fleets and
+releasability. `internal/controller/persistent_test.go` covers provisioning
+without the launcher, the budget, rolling restart on retained disks, down-member
+updates, legacy runtimes, scale-in release, lost disks, `replace-member`,
+workload recreation, deletion and migration from strict fleets. These are unit
+tests with a fake client; see [qualification](qualification/README.md) for
+cluster evidence.
