@@ -43,7 +43,7 @@ func main() {
 func realMain() (code int) {
 	var opts options
 	fs := flag.NewFlagSet("integration", flag.ContinueOnError)
-	fs.StringVar(&opts.suite, "suite", "all", "suite: all, lifecycle, maintenance, faults, external, previews")
+	fs.StringVar(&opts.suite, "suite", "all", "suite: all, lifecycle, maintenance, faults, external, previews, disruption")
 	fs.StringVar(&opts.runtimeImage, "runtime-image", os.Getenv("CELLD_RUNTIME_IMAGE"), "required immutable ghcr.io/ewhauser/celld@sha256:... fork image")
 	fs.StringVar(&opts.upgradeImage, "upgrade-image", os.Getenv("CELLD_UPGRADE_IMAGE"), "optional second fork digest for live upgrade qualification")
 	fs.StringVar(&opts.operatorImage, "operator-image", "", "published controller/launcher image to qualify instead of building source")
@@ -71,7 +71,7 @@ func realMain() (code int) {
 		return 2
 	}
 	switch opts.suite {
-	case "all", "lifecycle", "maintenance", "faults", "external", "previews":
+	case "all", "lifecycle", "maintenance", "faults", "external", "previews", "disruption":
 	default:
 		fmt.Fprintln(os.Stderr, "unknown suite:", opts.suite)
 		return 2
@@ -162,6 +162,8 @@ func (h *harness) exercise() {
 		h.exerciseFaults()
 	case "external":
 		h.exerciseExternal()
+	case "disruption":
+		h.exerciseDisruption()
 	}
 	fmt.Println("PASS: strict control-plane integration suite", h.opts.suite, "runtime", h.opts.runtimeImage)
 }
