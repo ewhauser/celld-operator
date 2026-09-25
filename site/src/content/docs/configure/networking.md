@@ -5,7 +5,7 @@ sidebar:
   order: 4
 ---
 
-Each fleet gets a ClusterIP application Service named after the fleet on TCP 8080 and a headless peer Service named FLEET-peers on TCP 8081. The operator creates both Services and a NetworkPolicy for fleet Pods. Your platform supplies the Gateway or Ingress controller, TLS, DNS and any client-side egress policy. Optional `spec.routing` lets the operator manage the application route and a narrowly scoped ingress policy.
+Each fleet gets a ClusterIP application Service named after the fleet on TCP 8080 and a headless peer Service named FLEET-peers on TCP 8081. The peer port declares `appProtocol: tcp` because peer RPC is an opaque byte stream; service meshes that honor the standard field, such as Istio, then proxy it as TCP instead of sniffing it as HTTP. No mesh-specific configuration is required. The operator creates both Services and a NetworkPolicy for fleet Pods. Your platform supplies the Gateway or Ingress controller, TLS, DNS and any client-side egress policy. Optional `spec.routing` lets the operator manage the application route and a narrowly scoped ingress policy.
 
 By default, the generated policy admits application traffic only from Pods **in the same namespace** labelled celld.eric.dev/client-of: FLEET. For example, add this label to a client Deployment's Pod template:
 

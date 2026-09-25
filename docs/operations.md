@@ -9,7 +9,9 @@ Both Bucket and PersistentFleet need a compatible digest-pinned fork runtime and
 launcher. The operator has Kubernetes credentials only; celld receives the runtime
 bucket identity. The manager does not read S3 recovery metadata or terminate EC2
 instances. The fleet namespace Role includes guarded PVC deletion; storage
-finalizers remain under Kubernetes and CSI control.
+finalizers remain under Kubernetes and CSI control. Its Service `update` verb only
+fills fields a newer release declares on an otherwise exactly matching
+operator-created Service; any other difference remains `InfrastructureBlocked`.
 
 For implementation details use [current operations](current-operation.md),
 [launcher supervision](launcher-supervision.md) and [typed control plane](runtime-control-plane.md).

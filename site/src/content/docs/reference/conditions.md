@@ -35,6 +35,14 @@ still serve (`Ready` is unchanged), but a restart, upgrade or scale-in would
 block. Adjust the admission policy that caused it; see
 [admission mutations](../security-boundaries/#admission-mutations).
 
+`InfrastructureBlocked` means a generated Service, NetworkPolicy or
+PodDisruptionBudget differs from the operator's spec, has an owner, belongs to
+another fleet or is being deleted. The operator does not adopt or repair it. The
+one exception is a field a newer release declares that the live object leaves
+unset, such as the peer port's `appProtocol`; the operator fills only that field,
+pinned to the resourceVersion it verified. A value someone else set, including a
+different `appProtocol`, still blocks until the generated spec is restored.
+
 Operational blockers identify unsupported layout contraction, incomplete runtime
 or launcher proof, changed workload/storage identity, pending CSI cleanup and
 expired operations. An expired deadline never proves a shutdown was unissued or
