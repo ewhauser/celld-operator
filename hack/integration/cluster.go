@@ -35,7 +35,6 @@ const (
 	minioImage    = "celld-integration/minio:RELEASE.2025-09-07T16-13-09Z"
 	curlImage     = "curlimages/curl:8.12.1"
 	mcImage       = "celld-integration/mc:RELEASE.2025-08-13T08-35-41Z"
-	toxiproxy     = "ghcr.io/shopify/toxiproxy:2.12.0"
 	metricsServer = "registry.k8s.io/metrics-server/metrics-server:v0.8.0"
 	metricsURL    = "https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.8.0/components.yaml"
 	metricsSHA    = "ff64d1a13b9ac3b0635f0dd985815fb44c23eed4706c04e5db1daadf6bc0a83b"
@@ -126,9 +125,9 @@ func (h *harness) createCluster() {
 }
 
 func (h *harness) loadImages() {
-	images := []string{h.opts.runtimeImage, minioImage, mcImage, curlImage, metricsServer, toxiproxy}
-	if h.opts.upgradeImage != "" {
-		images = append(images, h.opts.upgradeImage)
+	images := []string{h.opts.runtimeImage, minioImage, mcImage, curlImage, metricsServer}
+	if h.opts.upgradeFrom != "" && (h.opts.suite == "all" || h.opts.suite == "maintenance") {
+		images = append(images, h.opts.upgradeFrom)
 	}
 	if h.opts.operatorImage != "" {
 		images = append(images, h.opts.operatorImage)
@@ -227,9 +226,7 @@ func (h *harness) storeService(name, role string, ports ...int32) {
 }
 
 func (h *harness) deployStore() {
-	// Runtime egress admits store-namespace pods labeled app=minio. In
-	// faults mode the fixed `minio` name resolves to toxiproxy, which
-	// forwards to the real server under `minio-backend`.
+	// Runtime egress admits store-namespace pods labeled app=minio.
 	h.apply(&corev1.Pod{
 		APIVersion: "v1", Kind: "Pod",
 		Name: "minio", Namespace: storeNS, Labels: map[string]string{"app": "minio", "role": "backend"},
@@ -241,39 +238,10 @@ func (h *harness) deployStore() {
 		}}, Volumes: []corev1.Volume{{Name: "data", EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory, SizeLimit: new(resource.MustParse("2Gi"))}}}},
 	})
 	h.k("-n", storeNS, "wait", "--for=condition=Ready", "pod/minio", "--timeout=120s")
-	if h.opts.suite == "all" || h.opts.suite == "faults" {
-		h.storeService("minio-backend", "backend", 9000)
-		h.apply(&corev1.ConfigMap{
-			APIVersion: "v1", Kind: "ConfigMap",
-			Name: "toxiproxy", Namespace: storeNS,
-			Data: map[string]string{"toxiproxy.json": encode([]object{{
-				"name": "minio", "listen": "0.0.0.0:9000", "upstream": "minio-backend." + storeNS + ".svc:9000", "enabled": true,
-			}})},
-		})
-		h.apply(&corev1.Pod{
-			APIVersion: "v1", Kind: "Pod",
-			Name: "toxiproxy", Namespace: storeNS, Labels: map[string]string{"app": "minio", "role": "proxy"},
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{{
-					Name: "toxiproxy", Image: toxiproxy, Args: []string{"-config", "/config/toxiproxy.json", "-host", "0.0.0.0"},
-					VolumeMounts: []corev1.VolumeMount{{Name: "config", MountPath: "/config", ReadOnly: true}},
-				}},
-				Volumes: []corev1.Volume{{Name: "config", ConfigMap: &corev1.ConfigMapVolumeSource{Name: "toxiproxy"}}},
-			},
-		})
-		h.storeService("minio", "proxy", 9000)
-		h.storeService("toxiproxy-api", "proxy", 8474)
-		ctl := sleepPod("toxi-ctl", storeNS, nil)
-		ctl.Spec.Containers[0].Name = "ctl"
-		ctl.Spec.Containers[0].Command = []string{"/bin/sh", "-c", "sleep 7200"}
-		h.apply(ctl)
-		h.k("-n", storeNS, "wait", "--for=condition=Ready", "pod/toxiproxy", "pod/toxi-ctl", "--timeout=120s")
-	} else {
-		h.storeService("minio", "backend", 9000)
-	}
+	h.storeService("minio", "backend", 9000)
 	h.k("-n", storeNS, "run", "seed", "--restart=Never", "--image="+mcImage, "--command", "--", "/bin/sh", "-c",
-		`attempt=0; until mc alias set local http://minio:9000 qualification qualification-only; do attempt=$((attempt+1)); test "$attempt" -lt 30 || exit 1; sleep 2; done; mc mb local/bucket-alpha local/bucket-beta`)
-	h.wait("create two isolated test buckets", func() bool { return h.succeeded(storeNS, "seed") })
+		`attempt=0; until mc alias set local http://minio:9000 qualification qualification-only; do attempt=$((attempt+1)); test "$attempt" -lt 30 || exit 1; sleep 2; done; mc mb local/bucket-alpha local/bucket-beta local/bucket-gamma local/bucket-legacy`)
+	h.wait("create isolated test buckets", func() bool { return h.succeeded(storeNS, "seed") })
 }
 
 // deployApplication publishes the qualification app into both buckets with a
@@ -292,7 +260,13 @@ func (h *harness) deployApplication() {
 	must(os.Chmod(esbuild, 0o755))
 	h.sh(30*time.Second, "docker", "cp", esbuild, h.nodes[0]+":/opt/celld-test-esbuild")
 	h.sh(30*time.Second, "docker", "cp", filepath.Join(h.root, "hack", "integration", "app"), h.nodes[0]+":/opt/celld-test-app")
-	for _, bucket := range []string{"bucket-alpha", "bucket-beta"} {
+	deployments := [][2]string{{"bucket-alpha", h.opts.runtimeImage}, {"bucket-beta", h.opts.runtimeImage}, {"bucket-gamma", h.opts.runtimeImage}}
+	if h.opts.upgradeFrom != "" && (h.opts.suite == "all" || h.opts.suite == "maintenance") {
+		// The upgrade source deploys its own bucket, as its operator would have.
+		deployments = append(deployments, [2]string{"bucket-legacy", h.opts.upgradeFrom})
+	}
+	for _, d := range deployments {
+		bucket, image := d[0], d[1]
 		deployName := "deploy-" + bucket
 		h.apply(&corev1.Pod{
 			APIVersion: "v1", Kind: "Pod",
@@ -300,7 +274,7 @@ func (h *harness) deployApplication() {
 			Spec: corev1.PodSpec{
 				NodeName: h.nodes[0], RestartPolicy: corev1.RestartPolicyNever,
 				Containers: []corev1.Container{{
-					Name: "deploy", Image: h.opts.runtimeImage, Args: []string{"deploy", "/app"},
+					Name: "deploy", Image: image, Args: []string{"deploy", "/app"},
 					Env: []corev1.EnvVar{
 						{Name: "CELLD_BUCKET", Value: "s3://" + bucket}, {Name: "AWS_REGION", Value: "us-east-1"},
 						{Name: "AWS_ALLOW_HTTP", Value: "true"}, {Name: "S3_ENDPOINT", Value: "http://minio:9000"},
@@ -362,32 +336,22 @@ func (h *harness) goBuild(output, pkg string) {
 
 func (h *harness) startOperator() {
 	args := []string{"--operator-namespace=" + operatorNS, "--network-policy-enforced", "--local-test", "--local-rwop"}
-	container := object{"name": "operator"}
+	container := object{"name": "operator", "args": args}
 	var volumes []object
 	if h.opts.operatorImage != "" {
 		container["image"] = h.opts.operatorImage
-		h.launcherImage = h.opts.operatorImage
 	} else {
+		// The runtime image only hosts the natively built manager binary.
 		h.goBuild(h.path("operator"), "./cmd/celld-operator")
 		h.sh(30*time.Second, "docker", "cp", h.path("operator"), h.nodes[0]+":/opt/celld-test-operator")
 		container["image"] = h.opts.runtimeImage
+		if h.opts.runtimeLocalImage != "" {
+			container["image"] = h.opts.runtimeLocalImage
+		}
 		container["command"] = []string{"/operator"}
 		container["volumeMounts"] = []object{{"name": "operator-binary", "mountPath": "/operator", "readOnly": true}}
 		volumes = []object{{"name": "operator-binary", "hostPath": object{"path": "/opt/celld-test-operator", "type": "File"}}}
-		h.goBuild(h.path("celld-launcher"), "./cmd/celld-launcher")
-		h.launcherImage = "celld-launcher-test:" + h.name
-		h.builtLauncher = true
-		base := h.opts.runtimeImage
-		if h.opts.runtimeLocalImage != "" {
-			base = h.opts.runtimeLocalImage
-		}
-		h.writeFile("Dockerfile", []byte("FROM "+base+"\nCOPY celld-launcher /celld-launcher\n"))
-		h.sh(3*time.Minute, "docker", "build", "-t", h.launcherImage, h.tmp)
-		h.sh(3*time.Minute, "kind", "load", "docker-image", "--name", h.name, h.launcherImage)
 	}
-	args = append(args, "--launcher-image="+h.launcherImage)
-	container["args"] = args
-	h.operatorArgs = args
 	spec := object{"nodeName": h.nodes[0], "securityContext": object{"runAsUser": 65532}, "containers": []object{container}}
 	if volumes != nil {
 		spec["volumes"] = volumes
@@ -401,45 +365,6 @@ func (h *harness) startOperator() {
 	h.k("apply", "-f", metrics)
 	h.k("-n", "kube-system", "patch", "deployment", "metrics-server", "--type=json", "-p", `[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]`)
 	h.k("-n", "kube-system", "rollout", "status", "deployment/metrics-server", "--timeout=300s")
-
-}
-
-// setOperatorFault rolls the in-cluster manager with an explicit --local-test
-// crash point; an empty point withdraws it and replaces the crash-looping pod.
-func (h *harness) setOperatorFault(point string) string {
-	args := append([]string{}, h.operatorArgs...)
-	if point != "" {
-		args = append(args, "--local-fault-point="+point)
-	}
-	h.k("-n", operatorNS, "patch", "deployment", "celld-operator", "--type=json", "-p",
-		encode([]object{{"op": "replace", "path": "/spec/template/spec/containers/0/args", "value": args}}))
-	h.k("-n", operatorNS, "rollout", "status", "deployment/celld-operator", "--timeout=180s")
-	// Bind crash evidence to the new manager Pod, not kubectl's choice of a
-	// matching Pod while a rollout or process restart changes readiness.
-	var selected string
-	h.wait("one manager Pod with the requested fault configuration", func() bool {
-		selected = ""
-		for _, pod := range items(decode(h.k("-n", operatorNS, "get", "pods", "-l", "app.kubernetes.io/name=celld-operator,pod-template-hash", "-o", "json"))) {
-			if str(pod, "metadata", "deletionTimestamp") != "" {
-				continue
-			}
-			for _, container := range list(pod, "spec", "containers") {
-				if str(container, "name") == "operator" && same(strs(container, "args"), args) {
-					if selected != "" {
-						return false
-					}
-					selected = nameOf(pod)
-				}
-			}
-		}
-		return selected != ""
-	})
-	return selected
-}
-
-func (h *harness) restartOperator() {
-	h.k("-n", operatorNS, "rollout", "restart", "deployment/celld-operator")
-	h.k("-n", operatorNS, "rollout", "status", "deployment/celld-operator", "--timeout=120s")
 }
 
 func (h *harness) newFleet(name, bucket, profile, namespace string) *v1alpha1.CelldFleet {
@@ -464,8 +389,9 @@ func (h *harness) bucketFleet(name, bucket string) *v1alpha1.CelldFleet {
 	return f
 }
 
-// probe starts a curl pod. A fleet-uid label also sets an owner reference so the
-// ReplicaSet cannot adopt it and it stays out of ready Service endpoints.
+// probe starts a curl pod. A fleet-uid label also sets an owner reference so a
+// workload controller cannot adopt it, and a never-true readiness gate keeps it
+// out of ready Service endpoints.
 func (h *harness) probe(name, ns string, labels map[string]string) {
 	pod := sleepPod(name, ns, labels)
 	pod.Spec.Containers[0].Name = "probe"

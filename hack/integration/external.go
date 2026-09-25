@@ -15,9 +15,8 @@ import (
 //     through it lands in spec.replicas without the operator ever writing it back.
 //  2. An HPA targeting the CelldFleet raises the fleet to its maximum through the
 //     operator's bounded addition path.
-//  3. A lowered HPA maximum contracts the fleet through the same gated executor
-//     the disposable fixture uses for automatic contraction; the acknowledged
-//     write stays readable.
+//  3. A lowered HPA maximum contracts the fleet one member at a time, after a
+//     survivor-capacity check; every acknowledged write stays readable.
 //  4. Deleting the HPA and switching the policy off returns ownership to the user.
 func (h *harness) exerciseExternal() {
 	scale := func() object {
@@ -32,6 +31,8 @@ func (h *harness) exerciseExternal() {
 		view := scale()
 		return specReplicas(view) == count && num(view, "status", "replicas") == count
 	}
+	h.scale("alpha", 2)
+	h.writeLedger("alpha")
 	h.merge("alpha", `{"spec":{"capacity":{"mode":"External"}}}`)
 	h.wait("External mode names the /scale writer as owner", func() bool {
 		return str(h.get("celldfleet", "alpha"), "status", "capacity", "reason") == "ExternalOwner"
@@ -87,21 +88,21 @@ func (h *harness) exerciseExternal() {
 	h.waitFor("HPA raises spec.replicas to its maximum", 300*time.Second, func() bool {
 		return specReplicas(h.get("celldfleet", "alpha")) == 3
 	})
-	h.waitFor("operator applies the HPA addition through current-operation state", 300*time.Second, func() bool { return settled(3) })
+	h.waitFor("operator applies the HPA addition", 300*time.Second, func() bool { return settled(3) })
 	gen := generation(h.get("celldfleet", "alpha"))
 	h.sleep(20 * time.Second)
 	assert(generation(h.get("celldfleet", "alpha")) == gen, "operator or HPA kept rewriting spec.replicas")
 	fmt.Println("PASS: External mode never fights the HPA; desired 3 applied 3")
 
 	// Stop the load and lower the ceiling. The HPA requests contraction, and the
-	// operator executes it through the strict control plane.
+	// operator removes one member once the survivors can carry its load.
 	h.stopFleetLoad()
 	h.k("-n", "fleets", "patch", "hpa", "alpha", "--type=merge", "-p", `{"spec":{"minReplicas":2,"maxReplicas":2}}`)
 	h.waitFor("HPA lowers spec.replicas", 300*time.Second, func() bool {
 		return specReplicas(h.get("celldfleet", "alpha")) == 2
 	})
-	h.waitFor("HPA-requested contraction completes through the strict control plane and /scale catches up", 600*time.Second, func() bool { return settled(2) })
-	assert(h.ackStored("client", "alpha"), "acknowledged write unreadable after HPA-driven shrink")
+	h.waitFor("HPA-requested contraction completes and /scale catches up", 600*time.Second, func() bool { return settled(2) })
+	h.readLedger("alpha")
 	view = scale()
 	assert(specReplicas(view) == 2 && num(view, "status", "replicas") == 2, "%v", view)
 	fmt.Println("PASS: acknowledged write readable after HPA-driven shrink; /scale consistent")
@@ -109,12 +110,12 @@ func (h *harness) exerciseExternal() {
 	// kubectl scale is an ordinary /scale writer once the HPA is gone.
 	h.k("-n", "fleets", "delete", "hpa", "alpha", "--wait=true")
 	h.k("-n", "fleets", "scale", "celldfleet/alpha", "--replicas=3")
-	h.waitFor("kubectl scale through /scale adds a replica via current-operation state", 300*time.Second, func() bool { return settled(3) })
+	h.waitFor("kubectl scale through /scale adds a replica", 300*time.Second, func() bool { return settled(3) })
 
 	// Return ownership: drop the policy; spec.replicas is a manual field again.
 	h.merge("alpha", `{"spec":{"capacity":null,"replicas":2}}`)
 	h.waitFor("manual ownership restored after External mode", 600*time.Second, func() bool { return settled(2) })
-	fmt.Println(h.k("get", "celldstoragereservations", "-o", "json"))
+	h.readLedger("alpha")
 }
 
 // hpaCPUUtilization reports the CPU utilization percentage the HPA last measured,

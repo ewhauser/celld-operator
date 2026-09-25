@@ -2,115 +2,169 @@ package main
 
 import (
 	"fmt"
-	"slices"
+	"strings"
 	"time"
 )
 
-type claimIdentity struct{ UID, Volume, VolumeUID, Handle string }
-type ledgerEntry struct{ path, id string }
-
-func (h *harness) settled(fleetName string, count int64) bool {
-	return h.ready(fleetName) && specReplicas(h.get(h.workloadKind(fleetName), fleetName)) == count && len(sub(h.currentState(fleetName), "Operation")) == 0 && num(h.currentState(fleetName), "Applied") == count
-}
-
-func (h *harness) scale(fleetName string, count int) {
-	h.setReplicas(fleetName, count)
-	h.waitFor(fmt.Sprintf("%s strict scale to %d", fleetName, count), 8*time.Minute, func() bool { return h.settled(fleetName, int64(count)) })
-}
-
-func (h *harness) claims(fleetName string) map[string]claimIdentity {
-	out := map[string]claimIdentity{}
-	for _, claim := range h.listIn("pvc", "-l", "celld.eric.dev/fleet-uid="+uidOf(h.get("celldfleet", fleetName))) {
-		pv := h.cluster("pv", str(claim, "spec", "volumeName"))
-		assert(str(pv, "spec", "persistentVolumeReclaimPolicy") == "Delete", "PV does not use Delete")
-		assert(str(pv, "spec", "csi", "driver") == "hostpath.csi.k8s.io", "PV has no hostpath CSI identity")
-		assert(slices.Contains(strs(pv, "metadata", "finalizers"), "external-provisioner.volume.kubernetes.io/finalizer"), "PV lacks backend deletion finalizer")
-		assert(same(strs(claim, "spec", "accessModes"), []string{"ReadWriteOncePod"}), "claim is not RWOP")
-		out[nameOf(claim)] = claimIdentity{uidOf(claim), nameOf(pv), uidOf(pv), str(pv, "spec", "csi", "volumeHandle")}
-	}
-	return out
-}
-
-func (h *harness) goneVolumes(claims map[string]claimIdentity) {
-	for name, old := range claims {
-		assert(h.k("get", "pv", old.Volume, "--ignore-not-found", "-o", "name") == "", "old PV still exists for %s", name)
-		for _, va := range items(decode(h.k("get", "volumeattachments", "-o", "json"))) {
-			assert(str(va, "spec", "source", "persistentVolumeName") != old.Volume, "old attachment remains for %s", name)
-		}
-	}
-}
-
-func (h *harness) writeLedger(probe, fleetName string) {
-	if h.ledgers == nil {
-		h.ledgers = map[string][]ledgerEntry{}
-	}
-	batch := fmt.Sprintf("ack-%d", time.Now().UnixNano())
-	for i := range 12 {
-		id := fmt.Sprintf("%s-%d", batch, i)
-		path := fmt.Sprintf("/?cell=integration-%d&id=%s", i, id)
-		assert(stored(h.app(probe, fleetName, "PUT", path), id), "write %s not acknowledged", path)
-		h.ledgers[fleetName] = append(h.ledgers[fleetName], ledgerEntry{path: path, id: id})
-	}
-}
-func (h *harness) readLedger(probe, fleetName string) {
-	entries := h.ledgers[fleetName]
-	assert(len(entries) > 0, "no acknowledged ledger writes for %s", fleetName)
-	for _, entry := range entries {
-		assert(stored(h.app(probe, fleetName, "GET", entry.path), entry.id), "acknowledged write lost: %s %s", fleetName, entry.path)
-	}
-	fmt.Printf("PASS: %s %d/%d acknowledged writes readable\n", fleetName, len(entries), len(entries))
-}
-
+// exerciseLifecycle qualifies provisioning and scaling for both profiles under
+// continuous write load (ADR 0023): a Bucket Deployment and an Ordered Bucket
+// scale by setting replicas, and a PersistentFleet removes one member at a
+// time, deleting its disk only after release and growing onto fresh claims.
 func (h *harness) exerciseLifecycle() {
-	for _, f := range []struct{ name, probe string }{{"alpha", "client"}, {"beta", "client-beta"}} {
-		h.writeLedger(f.probe, f.name)
-		h.scale(f.name, 3)
-		before := nameUIDs(h.fleetPods(f.name))
-		oldClaims := h.claims(f.name)
-		h.merge(f.name, `{"spec":{"maintenance":{"paused":true},"replicas":2}}`)
-		h.hold(12*time.Second, "pause prevents new removal: "+f.name, func() bool {
-			return specReplicas(h.get("statefulset", f.name)) == 3 && len(sub(h.currentState(f.name), "Operation")) == 0
-		})
-		h.merge(f.name, `{"spec":{"maintenance":null}}`)
-		h.scale(f.name, 2)
-		for _, pod := range h.fleetPods(f.name) {
-			assert(before[nameOf(pod)] == uidOf(pod), "surviving ordinal replaced")
+	h.exerciseBucketDeployment()
+	h.exerciseOrderedBucket()
+	h.exercisePersistentScaling()
+}
+
+func (h *harness) exerciseBucketDeployment() {
+	gamma := h.bucketFleet("gamma", "bucket-gamma")
+	gamma.Spec.BucketWorkload = "Deployment"
+	h.apply(gamma)
+	h.waitSettled("gamma", 2, 5*time.Minute)
+	assert(h.workloadKind("gamma") == "deployment", "Bucket Deployment fleet is not a Deployment")
+	assert(strings.TrimSpace(h.k("-n", "fleets", "get", "statefulset", "gamma", "--ignore-not-found", "-o", "name")) == "", "Bucket Deployment fleet created a StatefulSet")
+	h.assertDirectRuntime("gamma")
+	h.writeLedger("gamma")
+	h.startWriter("gamma")
+	h.scale("gamma", 3)
+	h.scale("gamma", 2)
+	h.stopWriter("gamma")
+	h.readLedger("gamma")
+	h.deleteFleet("gamma")
+	fmt.Println("PASS: Bucket Deployment provisions, scales both ways under write load and deletes")
+}
+
+func (h *harness) exerciseOrderedBucket() {
+	h.scale("alpha", 2)
+	h.writeLedger("alpha")
+	h.startWriter("alpha")
+	h.scale("alpha", 3)
+	before := nameUIDs(h.memberPods("alpha"))
+	h.scale("alpha", 2)
+	after := nameUIDs(h.memberPods("alpha"))
+	assert(len(after) == 2 && after["alpha-0"] == before["alpha-0"] && after["alpha-1"] == before["alpha-1"], "Ordered Bucket contraction did not remove exactly the highest ordinal: %v -> %v", before, after)
+	h.scale("alpha", 1)
+	h.readLedger("alpha")
+	h.scale("alpha", 2)
+	h.stopWriter("alpha")
+	h.readLedger("alpha")
+	h.assertDirectRuntime("alpha")
+	fmt.Println("PASS: Ordered Bucket grows, removes the highest ordinal, reaches 1 and regrows under write load")
+}
+
+func (h *harness) exercisePersistentScaling() {
+	h.scale("beta", 2)
+	h.writeLedger("beta")
+	h.startWriter("beta")
+
+	// Growth onto a fresh claim.
+	h.scale("beta", 3)
+	grown := h.claims("beta")
+	assert(len(grown) == 3, "growth did not create a third claim: %v", grown)
+
+	// Pause stops a contraction before it starts.
+	h.merge("beta", `{"spec":{"maintenance":{"paused":true},"replicas":2}}`)
+	h.hold(12*time.Second, "pause prevents a new removal", func() bool {
+		_, kept := h.claims("beta")["data-beta-2"]
+		return specReplicas(h.get("statefulset", "beta")) == 3 && kept
+	})
+
+	// Contraction on unpause: one member, and its disk only after the
+	// member is gone.
+	h.shrinkWatchingRelease(2, func() { h.merge("beta", `{"spec":{"maintenance":null}}`) }, nil)
+	survivors := h.claims("beta")
+	for name, id := range survivors {
+		assert(grown[name] == id, "contraction changed surviving disk %s", name)
+	}
+	h.goneVolumes(map[string]claimIdentity{"data-beta-2": grown["data-beta-2"]})
+	h.readLedger("beta")
+
+	// Growth after a manager restart never reuses the removed member's disk.
+	h.restartOperator()
+	h.scale("beta", 3)
+	regrown := h.claims("beta")
+	assert(freshDisk(grown["data-beta-2"], regrown["data-beta-2"]), "growth reused the removed member's disk identity")
+
+	// 3 -> 1 with the manager killed between the two steps; the next step is
+	// re-derived from the cluster.
+	h.shrinkWatchingRelease(1, nil, h.killOperator)
+	assert(h.claims("beta")["data-beta-0"] == regrown["data-beta-0"], "contraction to one member changed the survivor's disk")
+	h.readLedger("beta")
+
+	// 1 -> 3 in one growth step, onto fresh claims.
+	h.scale("beta", 3)
+	final := h.claims("beta")
+	for _, name := range []string{"data-beta-1", "data-beta-2"} {
+		assert(freshDisk(regrown[name], final[name]), "regrowth reused disk %s", name)
+	}
+	h.stopWriter("beta")
+	h.readLedger("beta")
+
+	// Automatic contraction through Metrics Server uses the same settled,
+	// one-member removal.
+	h.merge("beta", `{"spec":{"capacity":`+fmt.Sprintf(automaticCapacity, 2)+`}}`)
+	h.waitSettled("beta", 2, 10*time.Minute)
+	h.merge("beta", `{"spec":{"capacity":null,"replicas":2}}`)
+	h.waitSettled("beta", 2, 5*time.Minute)
+	h.readLedger("beta")
+	fmt.Println("PASS: PersistentFleet grows onto fresh disks, removes one member at a time, releases disks after removal, survives a manager kill mid-contraction")
+}
+
+// shrinkWatchingRelease contracts beta to target, through trigger or by
+// setting replicas, and waits for it to settle. Throughout, a removed member's
+// disk must outlive its Pod, and at most one expected member may be down.
+// midway runs once after the first member has been removed.
+func (h *harness) shrinkWatchingRelease(target int, trigger, midway func()) {
+	from := specReplicas(h.get("statefulset", "beta"))
+	assert(from > int64(target), "beta already has %d members; nothing to contract to %d", from, target)
+	d := h.watchDisruptions("beta")
+	if trigger == nil {
+		trigger = func() { h.setReplicas("beta", target) }
+	}
+	trigger()
+	done := midway == nil
+	h.waitWatching(fmt.Sprintf("beta contracts %d -> %d", from, target), 12*time.Minute, d, func() bool {
+		pods := map[string]bool{}
+		for _, pod := range h.memberPods("beta") {
+			pods[nameOf(pod)] = true
 		}
-		if old, ok := oldClaims["data-"+f.name+"-2"]; ok {
-			h.goneVolumes(map[string]claimIdentity{"retired": old})
-			assert(h.k("-n", "fleets", "get", "pvc", "data-"+f.name+"-2", "--ignore-not-found", "-o", "name") == "", "retired claim remains")
+		for _, claim := range h.listIn("pvc", "-l", "celld.eric.dev/fleet-uid="+uidOf(h.get("celldfleet", "beta"))) {
+			member := strings.TrimPrefix(nameOf(claim), "data-")
+			assert(!terminating(claim) || !pods[member], "disk %s was deleted while member %s still existed", nameOf(claim), member)
 		}
-		h.readLedger(f.probe, f.name)
-		h.restartOperator()
-		h.scale(f.name, 3)
-		assert(uidOf(h.get("pod", f.name+"-2")) != before[f.name+"-2"], "growth reused old Pod UID")
-		for name, current := range h.claims(f.name) {
-			if name == "data-"+f.name+"-2" {
-				old := oldClaims[name]
-				assert(current.UID != old.UID && current.VolumeUID != old.VolumeUID && current.Handle != old.Handle, "growth reused retired disk identity")
+		if !done && specReplicas(h.get("statefulset", "beta")) < from {
+			midway()
+			done = true
+		}
+		return h.settled("beta", int64(target))
+	})
+}
+
+// deleteFleet deletes a fleet and requires its compute and disks gone and its
+// bucket reservation retained.
+func (h *harness) deleteFleet(fleetName string) {
+	fleetUID := uidOf(h.get("celldfleet", fleetName))
+	resUID := uidOf(h.reservation(fleetName))
+	claims := h.claims(fleetName)
+	h.k("-n", "fleets", "delete", "celldfleet", fleetName, "--wait=false")
+	h.waitFor("fleet deletion: "+fleetName, 10*time.Minute, func() bool {
+		return h.k("-n", "fleets", "get", "celldfleet", fleetName, "--ignore-not-found", "-o", "name") == ""
+	})
+	assert(len(h.listIn("pods", "-l", "celld.eric.dev/fleet-uid="+fleetUID)) == 0, "runtime Pods survived deletion")
+	assert(len(h.listIn("pvc", "-l", "celld.eric.dev/fleet-uid="+fleetUID)) == 0, "PVCs survived deletion")
+	for _, kind := range []string{"statefulset", "deployment"} {
+		assert(h.k("-n", "fleets", "get", kind, fleetName, "--ignore-not-found", "-o", "name") == "", "%s survived deletion", kind)
+	}
+	h.waitFor("deleted fleet's volumes released: "+fleetName, 3*time.Minute, func() bool {
+		out := h.k("get", "pv", "-o", "json")
+		for _, old := range claims {
+			if strings.Contains(out, `"name":"`+old.Volume+`"`) {
+				return false
 			}
 		}
-		h.scale(f.name, 2)
-		h.scale(f.name, 1)
-		h.readLedger(f.probe, f.name)
-		h.scale(f.name, 2)
-		h.readLedger(f.probe, f.name)
-		h.scale(f.name, 3)
-		h.merge(f.name, `{"spec":{"capacity":`+fmt.Sprintf(automaticCapacity, 2)+`}}`)
-		h.waitFor("Metrics Server automatic contraction: "+f.name, 8*time.Minute, func() bool { return h.settled(f.name, 2) })
-		h.merge(f.name, `{"spec":{"capacity":null,"replicas":2}}`)
-		h.readLedger(f.probe, f.name)
-		s := h.currentState(f.name)
-		assert(s["History"] == nil && s["BucketHistory"] == nil && s["Sessions"] == nil, "historical lifecycle state retained")
-		assert(len(encode(s)) < 4096, "idle state did not remain bounded: %d bytes", len(encode(s)))
-		fmt.Println("PASS:", f.name, "fresh-disk grow, exact-ordinal shrink, 2-to-1, controller restart, bounded idle state")
-	}
-}
-
-func nameUIDs(pods []object) map[string]string {
-	out := map[string]string{}
-	for _, pod := range pods {
-		out[nameOf(pod)] = uidOf(pod)
-	}
-	return out
+		return true
+	})
+	h.goneVolumes(claims)
+	assert(uidOf(h.reservation(fleetName)) == resUID, "bucket reservation lost")
+	fmt.Println("PASS:", fleetName, "compute and disks deleted; bucket reservation retained")
 }
