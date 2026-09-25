@@ -193,7 +193,14 @@ func rolledOut(w client.Object) bool {
 		return st.ObservedGeneration >= w.Generation && st.Replicas == n && st.UpdatedReplicas == n && st.ReadyReplicas == n
 	case *appsv1.StatefulSet:
 		st := w.Status
-		return st.ObservedGeneration >= w.Generation && st.Replicas == n && st.UpdatedReplicas == n && st.ReadyReplicas == n && st.CurrentRevision == st.UpdateRevision
+		done := st.ObservedGeneration >= w.Generation && st.Replicas == n && st.UpdatedReplicas == n && st.ReadyReplicas == n
+		// The StatefulSet controller advances currentRevision only for
+		// RollingUpdate. Under OnDelete it keeps the creation revision forever,
+		// so updated replicas are the only completion signal.
+		if w.Spec.UpdateStrategy.Type == appsv1.OnDeleteStatefulSetStrategyType {
+			return done
+		}
+		return done && st.CurrentRevision == st.UpdateRevision
 	}
 	return false
 }

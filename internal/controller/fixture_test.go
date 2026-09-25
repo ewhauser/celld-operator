@@ -267,8 +267,9 @@ func (x *operationFixture) syncWorkload() {
 		w.Status.Replicas = n
 		w.Status.ObservedGeneration = w.Generation
 		w.Status.UpdatedReplicas = updated
+		// Like the real controller, OnDelete never advances currentRevision.
 		w.Status.UpdateRevision = revision
-		if updated == n {
+		if w.Status.CurrentRevision == "" {
 			w.Status.CurrentRevision = revision
 		}
 	case *appsv1.Deployment:
