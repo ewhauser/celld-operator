@@ -25,13 +25,15 @@ func (h *harness) exerciseFaults() {
 		h.k("-n", "fleets", "delete", "pod", "beta-0", "--force", "--grace-period=0", "--wait=false")
 	}, h.sameDisksAfter(), h.newPod("beta-0"))
 
-	h.fault("SIGKILL of celld", func() { h.sigkill("beta-2") }, h.sameDisksAfter(), h.restarted("beta-2"))
+	h.fault("SIGKILL of celld", func() {
+		h.sigkill("beta-2")
+		h.wait("kubelet restarts the killed celld container", func() bool {
+			h.observe(h.faultWatch)
+			return h.restartCounts("beta")["beta-2"] > h.faultBefore.restarts["beta-2"]
+		})
+	}, h.sameDisksAfter(), h.restarted("beta-2"))
 
 	h.fault("node drain serialized by the PDB", h.drainTwoNodes, h.sameDisksAfter(), h.newPod("beta-1"))
-
-	h.fault("manager killed mid-rollout", func() {
-		h.rollAll("beta", encode(object{"spec": object{"maintenance": object{"restartToken": "faults-rollout"}}}), nil, h.killOperator)
-	})
 
 	h.fault("manager killed mid-contraction", func() {
 		h.shrinkWatchingRelease(2, nil, h.killOperator)
@@ -41,6 +43,7 @@ func (h *harness) exerciseFaults() {
 	h.fault("lost claim", func() {
 		h.k("-n", "fleets", "delete", "pvc", "data-beta-1", "--wait=false")
 		h.k("-n", "fleets", "delete", "pod", "beta-1", "--wait=false")
+		h.waitReplacedDisk("data-beta-1")
 	}, h.freshDiskAfter("data-beta-1"))
 
 	h.fault("lost volume", func() {
@@ -49,6 +52,7 @@ func (h *harness) exerciseFaults() {
 		pv := str(h.get("pvc", "data-beta-0"), "spec", "volumeName")
 		h.k("delete", "pv", pv, "--wait=false")
 		h.k("patch", "pv", pv, "--type=merge", "-p", `{"metadata":{"finalizers":null}}`)
+		h.waitReplacedDisk("data-beta-0")
 	}, h.freshDiskAfter("data-beta-0"))
 
 	h.merge("beta", `{"metadata":{"annotations":{"celld.eric.dev/replace-member":"7"}}}`)
@@ -59,8 +63,13 @@ func (h *harness) exerciseFaults() {
 	h.k("-n", "fleets", "annotate", "celldfleet", "beta", "celld.eric.dev/replace-member-")
 	h.fault("replace-member annotation", func() {
 		h.merge("beta", `{"metadata":{"annotations":{"celld.eric.dev/replace-member":"beta-2"}}}`)
+		h.waitReplacedDisk("data-beta-2")
 	}, h.freshDiskAfter("data-beta-2"), func() {
 		assert(annotation(h.get("celldfleet", "beta"), "celld.eric.dev/replace-member") == "", "replace-member annotation was not cleared")
+	})
+
+	h.fault("manager killed mid-rollout", func() {
+		h.rollAll("beta", encode(object{"spec": object{"maintenance": object{"restartToken": "faults-rollout"}}}), nil, h.killOperator)
 	})
 
 	// A Bucket member is disposable: its disk is a cache.
@@ -85,6 +94,7 @@ func (h *harness) fault(name string, inject func(), checks ...func()) {
 	pods := nameUIDs(h.memberPods("beta"))
 	h.faultBefore = faultSnapshot{claims: before, pods: pods, restarts: h.restartCounts("beta")}
 	d := h.watchDisruptions("beta")
+	h.faultWatch = d
 	inject()
 	h.waitWatching("beta settles after "+name, 15*time.Minute, d, func() bool { return h.settled("beta", 3) })
 	for _, check := range checks {
@@ -129,6 +139,18 @@ func (h *harness) freshDiskAfter(claim string) func() {
 			}
 		}
 	}
+}
+
+// waitReplacedDisk waits for the operator to act on a disk declared or found
+// gone: a new claim of the same name. The fleet has not necessarily noticed
+// the loss when inject returns, so settling alone would prove nothing.
+func (h *harness) waitReplacedDisk(claim string) {
+	old := h.faultBefore.claims[claim].UID
+	h.waitFor("operator replaces "+claim, 10*time.Minute, func() bool {
+		h.observe(h.faultWatch)
+		current, ok := h.claims("beta")[claim]
+		return ok && current.UID != old
+	})
 }
 
 func (h *harness) restartCounts(fleetName string) map[string]int64 {

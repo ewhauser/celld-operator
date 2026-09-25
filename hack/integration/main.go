@@ -40,6 +40,7 @@ type harness struct {
 	previewAlarm                int64
 	ledgers                     map[string][]ledgerEntry
 	faultBefore                 faultSnapshot
+	faultWatch                  *disruptions
 }
 
 func main() {
