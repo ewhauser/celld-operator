@@ -29,6 +29,12 @@ Configuration blockers include `NamespaceAccessDenied`, `ServiceAccountMissing`,
 `StorageClassMissing`, `InvalidStorageClass`, `IsolationUnverified` and
 `StorageScopeConflict`. Fix the named prerequisite; do not bypass identity checks.
 
+`PodCompositionUnsupported` means an admitted Pod could not be maintained
+safely, and the message names the Pod, container and field. The fleet can
+still serve (`Ready` is unchanged), but a restart, upgrade or scale-in would
+block. Adjust the admission policy that caused it; see
+[admission mutations](../security-boundaries/#admission-mutations).
+
 Operational blockers identify unsupported layout contraction, incomplete runtime
 or launcher proof, changed workload/storage identity, pending CSI cleanup and
 expired operations. An expired deadline never proves a shutdown was unissued or

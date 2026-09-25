@@ -256,6 +256,22 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 	if reservation.Annotations[attemptAnnotation] == "" {
 		return r.report(ctx, f, h, "LifecycleBlocked", "Existing workload has no creation intent; refusing adoption", false)
 	}
+	// Maintenance validates each admitted Pod before trusting its proof. Check the
+	// same contract now so an incompatible admission mutation is reported while
+	// the fleet is steady, not first discovered by a maintenance request.
+	if s := h.j; s != nil {
+		pods, err := r.currentPods(ctx, f, s)
+		if err != nil {
+			return r.report(ctx, f, h, "PodCompositionUnsupported", err.Error(), false)
+		}
+		for i := range pods {
+			if p := &pods[i]; p.DeletionTimestamp.IsZero() {
+				if err := validatePersistentPod(appliedRuntime(f, s), p, r.Options); err != nil {
+					return r.report(ctx, f, h, "PodCompositionUnsupported", fmt.Sprintf("Pod %s cannot be maintained: %v", p.Name, err), false)
+				}
+			}
+		}
+	}
 	if readyReplicas(actual) != replicas(actual) {
 		return r.report(ctx, f, h, "Provisioning", "Waiting for ready replicas; inspect Pod scheduling, PVC binding and runtime readiness. Capacity is externally provisioned", true)
 	}

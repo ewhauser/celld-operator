@@ -31,6 +31,8 @@ type operationFixture struct {
 	states   map[string]launcher.State
 	requests int
 	cpu      int64
+	// admit simulates mutating admission on each Pod the workload controller creates.
+	admit func(*corev1.PodSpec)
 }
 type fixtureCollector struct{ x *operationFixture }
 
@@ -215,6 +217,9 @@ func (x *operationFixture) syncWorkload() {
 				t.Fatal(err)
 			}
 			spec.Volumes = append(spec.Volumes, corev1.Volume{Name: "data", PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: claim.Name}})
+		}
+		if x.admit != nil {
+			x.admit(&spec)
 		}
 		uid := types.UID(fmt.Sprintf("%s-%d", name, x.clock.UnixNano()))
 		p = &corev1.Pod{Name: name, Namespace: x.f.Namespace, UID: uid, Labels: labels(x.f), OwnerReferences: []metav1.OwnerReference{owner}, Spec: spec, Status: corev1.PodStatus{PodIP: fmt.Sprintf("10.0.0.%d", i+1), ContainerStatuses: []corev1.ContainerStatus{{Name: "celld", ContainerID: "container-" + string(uid), State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: metav1.NewTime(x.clock.Add(-time.Hour))}}}}, Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}}}

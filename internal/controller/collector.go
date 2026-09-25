@@ -40,7 +40,9 @@ func NewCollector(c client.Client, config *rest.Config) (*Collector, error) {
 	return &Collector{client: c, metrics: k.CoreV1().RESTClient(), now: time.Now, runtime: controlplane.New(nil)}, nil
 }
 func podIdentity(p *corev1.Pod) (string, time.Time) {
-	if len(p.Spec.Containers) != 1 || p.Spec.Containers[0].Name != "celld" || !knownRuntime(p.Spec.Containers[0].Image) || !p.DeletionTimestamp.IsZero() {
+	// Admission may add containers; the runtime is found by name.
+	i := slices.IndexFunc(p.Spec.Containers, func(c corev1.Container) bool { return c.Name == "celld" })
+	if i < 0 || !knownRuntime(p.Spec.Containers[i].Image) || !p.DeletionTimestamp.IsZero() {
 		return "", time.Time{}
 	}
 	for _, s := range p.Status.ContainerStatuses {
@@ -116,21 +118,31 @@ func (c *Collector) sample(ctx context.Context, f *fleet.CelldFleet, p *corev1.P
 	data, err := c.metrics.Get().AbsPath("/apis/metrics.k8s.io/v1beta1/namespaces/" + p.Namespace + "/pods/" + p.Name).Do(metricsCtx).Raw()
 	received := c.now()
 	if err == nil && len(data) <= 1024*1024 {
+		type usage struct {
+			Name  string              `json:"name"`
+			Usage corev1.ResourceList `json:"usage"`
+		}
 		var m struct {
 			metav1.TypeMeta `json:",inline"`
 			Metadata        metav1.ObjectMeta `json:"metadata"`
 			Timestamp       metav1.Time       `json:"timestamp"`
 			Window          metav1.Duration   `json:"window"`
-			Containers      []struct {
-				Name  string              `json:"name"`
-				Usage corev1.ResourceList `json:"usage"`
-			} `json:"containers"`
+			Containers      []usage           `json:"containers"`
 		}
-		if json.Unmarshal(data, &m) == nil && m.APIVersion == "metrics.k8s.io/v1beta1" && m.Kind == "PodMetrics" && m.Metadata.Name == p.Name && m.Metadata.Namespace == p.Namespace && len(m.Containers) == 1 && m.Containers[0].Name == "celld" && m.Window.Duration > 0 && !m.Timestamp.Add(-m.Window.Duration).Before(started) {
-			cpu, cpuOK := m.Containers[0].Usage[corev1.ResourceCPU]
-			memory, memoryOK := m.Containers[0].Usage[corev1.ResourceMemory]
+		// Injected sidecars report their own usage; only one exact runtime entry is a sample.
+		runtime := func() (usage, bool) {
+			i := slices.IndexFunc(m.Containers, func(c usage) bool { return c.Name == "celld" })
+			if i < 0 || slices.ContainsFunc(m.Containers[i+1:], func(c usage) bool { return c.Name == "celld" }) {
+				return usage{}, false
+			}
+			return m.Containers[i], true
+		}
+		if json.Unmarshal(data, &m) == nil && m.APIVersion == "metrics.k8s.io/v1beta1" && m.Kind == "PodMetrics" && m.Metadata.Name == p.Name && m.Metadata.Namespace == p.Namespace && m.Window.Duration > 0 && !m.Timestamp.Add(-m.Window.Duration).Before(started) {
+			c, found := runtime()
+			cpu, cpuOK := c.Usage[corev1.ResourceCPU]
+			memory, memoryOK := c.Usage[corev1.ResourceMemory]
 			// Reject negative and implausibly large quantities before integer conversion.
-			if cpuOK && memoryOK && cpu.Sign() >= 0 && memory.Sign() >= 0 && cpu.AsApproximateFloat64() <= 1000000 && memory.AsApproximateFloat64() <= 1<<50 {
+			if found && cpuOK && memoryOK && cpu.Sign() >= 0 && memory.Sign() >= 0 && cpu.AsApproximateFloat64() <= 1000000 && memory.AsApproximateFloat64() <= 1<<50 {
 				s.CPU = cpu.MilliValue()
 				s.MemoryMiB = (memory.Value() + (1 << 20) - 1) / (1 << 20)
 				s.MetricsAt, s.MetricsReceived, s.Window = m.Timestamp.Time, received, m.Window.Duration
