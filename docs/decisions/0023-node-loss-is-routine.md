@@ -164,8 +164,10 @@ If a pod comes back with an **empty** disk under the same pod name, it answers
 has answered definitively, recovery writes `log/<session>.e<epoch>.loss.json` and
 seals (`celld/node_log.rs:4814-4847`). An empty replacement can therefore turn a
 recovery that would wait into a declared loss. This only matters when the lost
-disk was the last complete copy for some session. Even so, a disk that was only
-temporarily unreachable would have its data declared lost.
+disk was the last complete copy for some session. The problem is not the loss
+declaration itself: if a disk is truly gone, its data is gone and recording that
+is correct. The problem is a disk that still exists, for example on an
+unreachable node, being answered for by an empty stranger.
 
 Changing `CELLD_NODE` for the replacement does not help, because the stable DNS
 name is shared. 0022 avoids the hazard only because strict removal proves no
@@ -175,16 +177,20 @@ obligations remain before it creates a fresh claim under the old name.
 
 The operator does not guarantee safety by proving each removal. celld guarantees
 it by tolerating the loss of one node. The operator's only safety job is to
-avoid removing a disk that some session still depends on, and to avoid
-disrupting a second node before the fleet has absorbed the first.
+avoid destroying a disk that still exists while some session depends on it, and
+to avoid disrupting a second node before the fleet has absorbed the first.
+
+The operator never hangs on a disk that is gone. If a disk no longer exists, its
+data is gone and nothing can bring it back. The member is replaced and celld
+records a bounded loss for any session that had no other complete copy.
 
 ### Invariants
 
 1. **One voluntary disruption at a time.** No planned action removes or restarts
    a member while another member is down or the fleet is not `settled`.
-2. **No disk is destroyed while it carries an obligation.** A PVC is deleted, or
-   a member is started on an empty disk under a reused name, only once celld
-   reports that no session depends on that member.
+2. **No existing disk is destroyed while it carries an obligation.** The
+   operator deletes a PVC only once celld reports that no session depends on
+   that member. A disk that is already gone is not waited for.
 3. **Exclusive bucket ownership.** `CelldStorageReservation` stays as it is.
 4. **Pinned artifacts and network isolation stay as they are.**
 
@@ -240,10 +246,15 @@ empty. `unknown` counts as not settled and not releasable. Waiting never affects
 the running fleet, only the next voluntary step.
 
 celld also carries the expected member in `SealReq` and `TailReq`, and stores a
-random disk-incarnation ID in the follower store, published in the lease. When
-the member or incarnation does not match, the follower answers "undecided", not
-"no fragment". This is defense in depth: the releasable check already prevents
-the hazard in the routine path. It closes the hazard for unplanned replacement.
+random disk-incarnation ID in the follower store, published in the lease.
+Recovery compares against the member's current lease. While that lease still
+names the old disk, a different disk answering at the address is refused and
+counts as undecided, so a stranger cannot speak for a disk that may still exist.
+Once the replacement publishes its own lease, the old disk is gone by
+definition. Its empty answer is then conclusive, and recovery records a bounded
+loss and seals instead of waiting forever. This is intentional: celld does not
+record each member's incarnation at recruitment, because that would make a lost
+disk block recovery indefinitely.
 
 ### Bucket profile
 
@@ -285,16 +296,21 @@ the hazard in the routine path. It closes the hazard for unplanned replacement.
 - **Disruption budget.** The operator manages the PDB: `maxUnavailable: 1` while
   `settled`, `0` otherwise. Node drains and cluster upgrades then proceed one
   member at a time and pause during recovery.
-- **Replace a member** (for #60). An annotation on the fleet,
-  `celld.eric.dev/replace-member: <ordinal>`, asks the operator to delete that
-  pod and PVC and let the StatefulSet recreate both. It runs under the
-  one-disruption rule.
-  - If the member is releasable, the replacement proceeds.
-  - If the member still carries obligations, the operator refuses and reports
-    which sessions depend on it. The administrator can reattach the disk, or set
-    `celld.eric.dev/accept-loss: <ordinal>` to proceed. Accepting may lead celld
-    to write a loss declaration for those sessions.
-  - Retirement markers left by 0022 are ignored once the launcher is gone.
+- **Lost disks are replaced automatically** (for #60). When a member's PVC or
+  its bound PV no longer exists, that disk is gone. The operator deletes the pod
+  and any leftover PVC, and the StatefulSet recreates both with a fresh disk. It
+  does not wait for obligations. celld recovers each dependent session from any
+  other complete copy, or records a bounded loss for it. Status reports the
+  sessions that depended on the lost disk, so the loss is visible, but nothing
+  blocks on it.
+- **Replace a member.** An annotation on the fleet,
+  `celld.eric.dev/replace-member: <ordinal>`, tells the operator that an existing
+  disk should be treated as gone, for example when it is corrupt or stuck in an
+  unavailable zone. The operator proceeds under the one-disruption rule without
+  refusing. If the member still carries obligations, status names the sessions
+  that may be recorded as lost. The annotation is the administrator's decision;
+  the operator never destroys an existing disk with obligations on its own.
+- Retirement markers left by 0022 are ignored once the launcher is gone.
 - **Fleet rebuild** replaces every disk from S3 and remains an explicit
   administrative operation. It is releasable-gated like scale-in, applied to all
   members.
@@ -337,8 +353,9 @@ The launcher is removed.
 
 ## Consequences
 
-- Voluntary steps can wait, but they cannot stop permanently. Blocked states name
-  the sessions responsible.
+- Voluntary steps wait only for recovery that can still happen. A disk that is
+  gone never blocks the fleet: its member is replaced and any loss is recorded
+  and reported. Waiting states name the sessions responsible.
 - Maintenance does not require coordinated downtime.
 - Operator upgrades become ordinary rolling updates, and admission-injected
   sidecars and environment variables work.
@@ -365,8 +382,9 @@ The launcher is removed.
    - **No in-flight operation:** drop the annotation, then roll.
    - **In-flight with proofs for every target:** those members are releasable by
      construction. Delete their PVCs and let fresh members join one at a time.
-   - **Blocked or partially proven:** handle each member through replace-member,
-     so the obligation check decides whether it is safe.
+   - **Blocked or partially proven:** restart each member on its retained disk
+     under the new rolling process; a retirement marker is ignored. Members whose
+     disks are already gone are replaced automatically.
 4. **Deletion.** Remove the launcher binary and image,
    `internal/runtime/controlplane`, the strict-path controller files and their
    tests, and the current-operation and `creation-claim-uids` annotations.
@@ -377,14 +395,17 @@ Replace the proof-boundary regressions with behavior tests. Run them against the
 real fork in Kind, under continuous write load, and check that every acked write
 is readable once the fleet is `settled`:
 
-- Kill one member in each way: pod delete, node drain, `SIGKILL`, and PVC loss
-  followed by replace-member.
+- Kill one member in each way: pod delete, node drain, `SIGKILL`, and PVC loss.
+  After PVC loss the member is replaced without intervention.
 - Rolling restart and runtime upgrade, with retained disks.
 - Scale 5 → 3 and 3 → 5, including a controller restart between steps.
-- Replace-member while a dead session still depends on the member. The operator
-  must refuse until `accept-loss` is set.
+- Lose the last complete copy of a dead session, by deleting the disks of a
+  leader and its only follower. The operator must not hang: the fleet settles
+  with a recorded loss for exactly that session, and every other acked write is
+  readable.
 - A node-group drain running in parallel with a rolling upgrade. The PDB must
   serialize them.
 - Istio sidecar, IRSA and Datadog admission during all of the above.
-- In celld: an empty disk under a reused name answers "undecided" to seal and
-  tail requests for sessions of a previous incarnation.
+- In celld: an empty disk under a reused name answers "undecided" while the
+  member's lease still names the old disk, and "conclusive" once its own lease
+  is published.
