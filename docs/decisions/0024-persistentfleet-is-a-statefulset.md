@@ -110,8 +110,9 @@ reconcile, and records nothing:
   Only one down member is ever replaced this way. When two are down, replacing
   either could lose writes that only their disks hold.
 
-For a replaced disk, celld refuses answers from the empty disk until the new
-member publishes its own lease. After that it records a bounded loss for any
+For a replaced disk, the new member answers recovery for its old disk with a
+conclusive "no fragment" (`0.5.1-ewhauser.7`; earlier builds refuse until the
+new member publishes its own lease). celld then records a bounded loss for any
 session whose only complete copy was on the old disk, and seals it. With the
 rest of the fleet ready, no such session remains unless a second failure
 happened first.
@@ -151,9 +152,8 @@ happened first.
 - The fleet rebuild that 0023 left as an explicit administrative operation is
   not needed. A fleet recovers from any outage on its members' own disks, and a
   rolling restart is the only lever an administrator needs. Replacing every
-  disk at once would deadlock celld: a fresh disk refuses answers until its
-  member publishes a lease, which it does only after recovering its previous
-  session.
+  disk at once would record every session whose writes were only on those
+  disks as lost, and on runtimes before `0.5.1-ewhauser.7` it stalls recovery.
 - The ClusterRole no longer needs PersistentVolume, Node or VolumeAttachment
   reads, and the namespaced Role no longer needs to create claims.
 

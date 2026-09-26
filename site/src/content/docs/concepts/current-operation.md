@@ -72,9 +72,9 @@ soon as the member's next Pod is created.
 
 Leaders stop using a departed member within seconds, and every member sweeps
 dead leaders every 30 seconds. Once the rest of the fleet has been ready for
-five minutes, no session depends on the down member's disk. celld refuses
-answers from a fresh disk until its member publishes its own lease. After that,
-it seals any session whose only complete copy was on the old disk and records a
+five minutes, no session depends on the down member's disk. A member on a
+fresh disk answers recovery for its old disk with a conclusive "no fragment",
+so celld seals any session whose only complete copy was on the old disk and records a
 bounded loss. With the rest of the fleet ready, no such session remains unless
 a second failure happened first.
 

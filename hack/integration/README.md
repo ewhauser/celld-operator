@@ -24,7 +24,7 @@ make integration-upgrade
 cluster.
 
 The Make targets use the verified fork digest in `hack/runtime-image.txt`
-(v0.5.1-ewhauser.6). `CELLD_RUNTIME_IMAGE` or `--runtime-image` selects another
+(v0.5.1-ewhauser.7). `CELLD_RUNTIME_IMAGE` or `--runtime-image` selects another
 immutable fork digest. There is no upstream or
 unpinned fallback. To qualify an already published operator image without
 rebuilding the manager, pass
