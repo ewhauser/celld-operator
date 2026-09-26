@@ -42,7 +42,10 @@ const (
 	// kubernetes-distributed deployment) for ReadWriteOncePod claims on kind.
 	hostpathCSI = "https://raw.githubusercontent.com/kubernetes-csi/csi-driver-host-path/v1.18.0/deploy/kubernetes-distributed/hostpath/"
 	storeNS     = "celld-test-store"
-	operatorNS  = "celld-system"
+	// memberReplacementDelay is the operator's --member-replacement-delay in
+	// this suite, shorter than its ten-minute default.
+	memberReplacementDelay = 5 * time.Minute
+	operatorNS             = "celld-system"
 )
 
 var runtimeImagePin = regexp.MustCompile(`^ghcr.io/ewhauser/celld@sha256:[a-f0-9]{64}$`)
@@ -335,7 +338,10 @@ func (h *harness) goBuild(output, pkg string) {
 }
 
 func (h *harness) startOperator() {
-	args := []string{"--operator-namespace=" + operatorNS, "--network-policy-enforced", "--local-test", "--local-rwop"}
+	// A replacement delay shorter than the default keeps the node-failure
+	// fault within the suite's time budget; every other fault ends well
+	// before it.
+	args := []string{"--operator-namespace=" + operatorNS, "--network-policy-enforced", "--local-test", "--local-rwop", "--member-replacement-delay=" + memberReplacementDelay.String()}
 	container := object{"name": "operator", "args": args}
 	var volumes []object
 	if h.opts.operatorImage != "" {
@@ -394,6 +400,9 @@ func (h *harness) bucketFleet(name, bucket string) *v1alpha1.CelldFleet {
 // out of ready Service endpoints.
 func (h *harness) probe(name, ns string, labels map[string]string) {
 	pod := sleepPod(name, ns, labels)
+	// The operator's node is never drained or failed, so a probe outlives
+	// every fault.
+	pod.Spec.NodeName = h.nodes[0]
 	pod.Spec.Containers[0].Name = "probe"
 	pod.Spec.ReadinessGates = []corev1.PodReadinessGate{{ConditionType: "integration.celld.eric.dev/NotServing"}}
 	if uid, ok := labels["celld.eric.dev/fleet-uid"]; ok {

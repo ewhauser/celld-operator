@@ -27,15 +27,12 @@ func (h *harness) record(fleetName string, entries ...ledgerEntry) {
 }
 
 // client returns a probe Pod admitted to the fleet's application port,
-// creating it on first use.
+// creating it when it does not exist.
 func (h *harness) client(fleetName string) string {
-	switch fleetName {
-	case "alpha":
-		return "client"
-	case "beta":
-		return "client-beta"
-	}
 	name := "client-" + fleetName
+	if fleetName == "alpha" {
+		name = "client"
+	}
 	if _, err := h.tryGet("fleets", "pod", name); err != nil {
 		h.probe(name, "fleets", map[string]string{"celld.eric.dev/client-of": fleetName})
 	}
@@ -133,6 +130,9 @@ func (h *harness) startWriter(fleetName string) {
 	name := "writer-" + fleetName
 	run := fmt.Sprintf("w%d", time.Now().UnixNano())
 	pod := sleepPod(name, "fleets", map[string]string{"celld.eric.dev/client-of": fleetName})
+	// The operator's node is never drained or failed, so writes continue
+	// through every fault.
+	pod.Spec.NodeName = h.nodes[0]
 	pod.Spec.Containers[0].Name = "writer"
 	pod.Spec.Containers[0].Command = []string{"/bin/sh", "-c", strings.NewReplacer("RUN", run, "FLEET", fleetName).Replace(writerScript)}
 	h.apply(pod)

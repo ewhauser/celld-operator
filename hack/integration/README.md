@@ -19,35 +19,38 @@ make integration-faults
 make integration-external
 ```
 
-The Make targets use the verified fork digest in `hack/runtime-image.txt`. It
-must be v0.5.1-ewhauser.6 or later: PersistentFleet settlement is read from
-`/state.node_log`, and idle contraction needs `.6`'s follower-loss detection. `CELLD_RUNTIME_IMAGE` or
-`--runtime-image` selects another immutable fork digest. There is no upstream or
+The Make targets use the verified fork digest in `hack/runtime-image.txt`
+(v0.5.1-ewhauser.6). `CELLD_RUNTIME_IMAGE` or `--runtime-image` selects another
+immutable fork digest. There is no upstream or
 unpinned fallback. To qualify an already published operator image without
 rebuilding the manager, pass
 `--operator-image ghcr.io/ewhauser/celld-operator@sha256:...`.
 
 ## What the suites qualify
 
-The suites qualify [ADR 0023](../../docs/decisions/0023-node-loss-is-routine.md):
-celld tolerates the loss of one member, so the operator disrupts one member at a
-time and waits until celld's node-log state says the fleet has absorbed it.
+The suites qualify [ADR 0024](../../docs/decisions/0024-persistentfleet-is-a-statefulset.md):
+a PersistentFleet is a StatefulSet whose rolling update restarts one member at a
+time on its own disk, celld recovers each member, and the operator replaces a
+member that cannot come back on its own. The suite runs the operator with
+`--member-replacement-delay=5m`, shorter than the ten-minute default, to keep
+the node-failure fault within its time budget.
 
 - **Settled.** The harness counts a change as finished only when the fleet
   reports `Provisioned` for its current generation, the workload has exactly the
   expected updated and ready replicas, and no fleet Pod is still terminating. A
   removed member still draining on SIGTERM is not yet gone. A PersistentFleet
-  must also keep no disk above its replica count and have a PDB that allows one
-  disruption.
+  must also have a PDB that allows one disruption. Disks of removed members
+  remain.
 - **Acknowledged writes.** Each fleet keeps a ledger of acknowledged writes. It
   includes synchronous batches across twelve cells and a continuous writer Pod.
   The writer records only responses that stored the exact requested ID, and it
   runs through every scale, rollout and fault. Each read is retried for up to 60
   seconds, because a cell handed off by a draining member can briefly time out.
   A write that never reads back fails the run.
-- **One disruption at a time.** During PersistentFleet rollouts, contractions
+- **One member down at a time.** During PersistentFleet rollouts, contractions
   and faults, the harness samples the members every two seconds. It fails if
-  more than one expected member is missing, unready or terminating.
+  more than one expected member is missing, unready or terminating. None of the
+  scenarios starts a change while another member is already down.
 
 Every suite first checks isolation and provisioning. It creates an Ordered
 Bucket fleet (`alpha`) and a PersistentFleet (`beta`), and checks:
@@ -56,8 +59,10 @@ Bucket fleet (`alpha`) and a PersistentFleet (`beta`), and checks:
 - storage-scope conflicts and refusal of a foreign PVC;
 - that admission rejects invalid specs;
 - that Pods run celld directly, with no launcher and no scheduling gate;
-- that `/state.node_log` is present;
-- that template drift is converged without replacing members.
+- that `/state.node_log` reports fleet durability, which shows the runtime got
+  the operator's configuration;
+- that template drift is converged. The StatefulSet may start rolling the
+  drifted template first; at most one member rolls, and every disk is kept.
 
 **lifecycle**
 
@@ -65,18 +70,15 @@ Bucket fleet (`alpha`) and a PersistentFleet (`beta`), and checks:
   and is deleted.
 - The Ordered Bucket grows, removes exactly its highest ordinal, reaches one
   member and regrows.
-- The PersistentFleet grows 2 → 3 onto a fresh claim, and a paused fleet does
+- The PersistentFleet grows 2 → 3 onto a new claim, and a paused fleet does
   not contract.
-- It contracts 3 → 2. The removed member's PVC may be deleted only after its Pod
-  is gone and the operator has released it. Surviving disks keep their
-  identities, and the old PV and attachment disappear.
-- After a manager restart, it regrows onto a new disk identity.
+- It contracts 3 → 2 one member at a time. No claim is deleted, and every
+  PVC/PV/CSI identity stays the same.
+- After a manager restart, it regrows and reattaches the removed member's disk.
 - It contracts 3 → 1 with the manager Pod killed between steps, then regrows
-  1 → 3 onto fresh claims.
-- Automatic contraction through Metrics Server uses the same one-member step.
-  The fleet is idle during this step, so an idle leader must still move its
-  ensemble off the removed member before that member's disk can be released.
-  v0.5.1-ewhauser.5 does not do this and fails the step; `.6` does.
+  1 → 3 onto the kept disks.
+- Automatic contraction through Metrics Server uses the same one-member step,
+  with the fleet idle, and keeps the removed member's disk.
 
 **maintenance**
 
@@ -86,9 +88,9 @@ Bucket fleet (`alpha`) and a PersistentFleet (`beta`), and checks:
   the same. After a manager restart the token does not run again.
 - A runtime upgrade on retained disks moves a three-member PersistentFleet from
   the legacy v0.5.1-ewhauser.3 digest to the pinned runtime. The legacy digest
-  lacks `node_log`, so the operator rolls it on readiness plus stabilization,
-  and it never reports `Provisioned`. Pass `--upgrade-from` or
-  `CELLD_UPGRADE_FROM_IMAGE` to use another source digest, or `none` to skip.
+  lacks `node_log`; it provisions and rolls like any other. Pass
+  `--upgrade-from` or `CELLD_UPGRADE_FROM_IMAGE` to use another source digest,
+  or `none` to skip.
 - An Ordered Bucket rolling restart runs with a PDB of one.
 - Deleting both profiles removes compute, then PVCs and PVs, and keeps the
   bucket reservation.
@@ -99,19 +101,27 @@ writes, in each of these ways:
 - graceful Pod delete;
 - `--force --grace-period=0` delete;
 - SIGKILL of celld from the node;
-- a node drain. The drained member cannot return while its node is cordoned, so
-  the operator lowers the PDB to zero and a second drain is refused;
+- a node drain. The drained member cannot return while its node is cordoned,
+  so it stays unready, the PDB allows no further disruption and a second drain
+  is refused;
 - the manager Pod killed mid-rollout;
 - the manager Pod killed mid-contraction;
-- a lost claim (PVC and Pod deleted);
+- a deleted claim (PVC and Pod deleted), which the StatefulSet recreates;
 - a lost volume (the PV removed with its finalizers stripped, as after a
-  backend disk loss);
-- the `celld.eric.dev/replace-member` annotation. An invalid value is reported
-  as `ReplaceMemberInvalid`, and a valid one is cleared after use.
+  backend disk loss). Kubernetes marks the claim `Lost` and the operator
+  replaces the member;
+- a node failure: the kubelet of a node holding a member, but not the store or
+  the operator, is stopped. The member's celld keeps running there as a zombie.
+  After the unreachable-node toleration, its Pod is evicted and stays
+  Terminating. The operator force-deletes it and, after the replacement delay,
+  replaces the member's disk. Only then does the kubelet return, and the member
+  rejoins on a fresh disk.
 
 Each fault must settle without manual repair, with every acknowledged write
-readable. A lost or replaced disk comes back with a fresh identity, and every
-other disk is kept. A forced Bucket Pod delete loses nothing.
+readable. A replaced disk comes back with a fresh identity, and every other disk
+is kept. A forced Bucket Pod delete loses nothing. The continuous writer and the
+probe Pods that read writes back run on the operator's node, which no fault
+disturbs.
 
 **external** uses a real HPA and Metrics Server to write the Bucket fleet's
 `/scale` subresource. It checks that External mode never fights the HPA, that

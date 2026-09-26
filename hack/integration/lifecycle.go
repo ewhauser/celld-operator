@@ -7,9 +7,9 @@ import (
 )
 
 // exerciseLifecycle qualifies provisioning and scaling for both profiles under
-// continuous write load (ADR 0023): a Bucket Deployment and an Ordered Bucket
+// continuous write load (ADR 0024): a Bucket Deployment and an Ordered Bucket
 // scale by setting replicas, and a PersistentFleet removes one member at a
-// time, deleting its disk only after release and growing onto fresh claims.
+// time, keeps every removed member's disk and reattaches it on growth.
 func (h *harness) exerciseLifecycle() {
 	h.exerciseBucketDeployment()
 	h.exerciseOrderedBucket()
@@ -57,7 +57,7 @@ func (h *harness) exercisePersistentScaling() {
 	h.writeLedger("beta")
 	h.startWriter("beta")
 
-	// Growth onto a fresh claim.
+	// Growth adds a member on its own claim.
 	h.scale("beta", 3)
 	grown := h.claims("beta")
 	assert(len(grown) == 3, "growth did not create a third claim: %v", grown)
@@ -65,59 +65,47 @@ func (h *harness) exercisePersistentScaling() {
 	// Pause stops a contraction before it starts.
 	h.merge("beta", `{"spec":{"maintenance":{"paused":true},"replicas":2}}`)
 	h.hold(12*time.Second, "pause prevents a new removal", func() bool {
-		_, kept := h.claims("beta")["data-beta-2"]
-		return specReplicas(h.get("statefulset", "beta")) == 3 && kept
+		return specReplicas(h.get("statefulset", "beta")) == 3
 	})
 
-	// Contraction on unpause: one member, and its disk only after the
-	// member is gone.
-	h.shrinkWatchingRelease(2, func() { h.merge("beta", `{"spec":{"maintenance":null}}`) }, nil)
-	survivors := h.claims("beta")
-	for name, id := range survivors {
-		assert(grown[name] == id, "contraction changed surviving disk %s", name)
-	}
-	h.goneVolumes(map[string]claimIdentity{"data-beta-2": grown["data-beta-2"]})
+	// Contraction on unpause removes one member and keeps its disk.
+	h.shrinkWatching(2, func() { h.merge("beta", `{"spec":{"maintenance":null}}`) }, nil)
+	must(sameDisks(grown, h.claims("beta")))
 	h.readLedger("beta")
 
-	// Growth after a manager restart never reuses the removed member's disk.
+	// Growth after a manager restart reattaches the removed member's disk.
 	h.restartOperator()
 	h.scale("beta", 3)
-	regrown := h.claims("beta")
-	assert(freshDisk(grown["data-beta-2"], regrown["data-beta-2"]), "growth reused the removed member's disk identity")
+	must(sameDisks(grown, h.claims("beta")))
 
 	// 3 -> 1 with the manager killed between the two steps; the next step is
 	// re-derived from the cluster.
-	h.shrinkWatchingRelease(1, nil, h.killOperator)
-	assert(h.claims("beta")["data-beta-0"] == regrown["data-beta-0"], "contraction to one member changed the survivor's disk")
+	h.shrinkWatching(1, nil, h.killOperator)
+	must(sameDisks(grown, h.claims("beta")))
 	h.readLedger("beta")
 
-	// 1 -> 3 in one growth step, onto fresh claims.
+	// 1 -> 3 in one growth step: both members restart on their old disks.
 	h.scale("beta", 3)
-	final := h.claims("beta")
-	for _, name := range []string{"data-beta-1", "data-beta-2"} {
-		assert(freshDisk(regrown[name], final[name]), "regrowth reused disk %s", name)
-	}
+	must(sameDisks(grown, h.claims("beta")))
 	h.stopWriter("beta")
 	h.readLedger("beta")
 
-	// Automatic contraction through Metrics Server uses the same settled,
-	// one-member removal. The fleet is deliberately idle here: an idle
-	// leader must still move its ensemble off a departed follower, or the
-	// removed member's disk is never released (fixed in celld
-	// v0.5.1-ewhauser.6).
+	// Automatic contraction through Metrics Server uses the same one-member
+	// step, with the fleet deliberately idle.
 	h.merge("beta", `{"spec":{"capacity":`+fmt.Sprintf(automaticCapacity, 2)+`}}`)
 	h.waitSettled("beta", 2, 10*time.Minute)
 	h.merge("beta", `{"spec":{"capacity":null,"replicas":2}}`)
 	h.waitSettled("beta", 2, 5*time.Minute)
+	must(sameDisks(grown, h.claims("beta")))
 	h.readLedger("beta")
-	fmt.Println("PASS: PersistentFleet grows onto fresh disks, removes one member at a time, releases disks after removal, survives a manager kill mid-contraction")
+	fmt.Println("PASS: PersistentFleet removes one member at a time, keeps each removed member's disk, reattaches it on growth, and survives a manager kill mid-contraction")
 }
 
-// shrinkWatchingRelease contracts beta to target, through trigger or by
-// setting replicas, and waits for it to settle. Throughout, a removed member's
-// disk must outlive its Pod, and at most one expected member may be down.
-// midway runs once after the first member has been removed.
-func (h *harness) shrinkWatchingRelease(target int, trigger, midway func()) {
+// shrinkWatching contracts beta to target, through trigger or by setting
+// replicas, and waits for it to settle. Throughout, no claim of the fleet may
+// be deleted and at most one expected member may be down. midway runs once
+// after the first member has been removed.
+func (h *harness) shrinkWatching(target int, trigger, midway func()) {
 	from := specReplicas(h.get("statefulset", "beta"))
 	assert(from > int64(target), "beta already has %d members; nothing to contract to %d", from, target)
 	d := h.watchDisruptions("beta")
@@ -127,13 +115,8 @@ func (h *harness) shrinkWatchingRelease(target int, trigger, midway func()) {
 	trigger()
 	done := midway == nil
 	h.waitWatching(fmt.Sprintf("beta contracts %d -> %d", from, target), 12*time.Minute, d, func() bool {
-		pods := map[string]bool{}
-		for _, pod := range h.memberPods("beta") {
-			pods[nameOf(pod)] = true
-		}
 		for _, claim := range h.listIn("pvc", "-l", "celld.eric.dev/fleet-uid="+uidOf(h.get("celldfleet", "beta"))) {
-			member := strings.TrimPrefix(nameOf(claim), "data-")
-			assert(!terminating(claim) || !pods[member], "disk %s was deleted while member %s still existed", nameOf(claim), member)
+			assert(!terminating(claim), "contraction deleted disk %s", nameOf(claim))
 		}
 		if !done && specReplicas(h.get("statefulset", "beta")) < from {
 			midway()
