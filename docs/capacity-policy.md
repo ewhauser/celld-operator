@@ -34,7 +34,7 @@ capacity and lifecycle scenarios exercised.
 | scaleOutCooldownSeconds | 300 | Minimum time from last durable action to another addition |
 | scaleInCooldownSeconds | 900 | Minimum time from last durable action to a removal request |
 | provisioningTimeoutSeconds | 600 | Deadline for useful capacity, after which additions remain blocked |
-| redistributionObservationSeconds | 120 | Continuous complete observation window for judging an addition, 30–3600 seconds |
+| redistributionObservationSeconds | 120 | Continuous complete observation window for judging an addition, 30–3600 seconds; evidence still mixed after twice this counts as ineffective |
 | cpuHighMillicores / cpuLowMillicores | 200 / 80 | Absolute per-container CPU thresholds |
 | memoryHighMiB / memoryLowMiB | 768 / 384 | Absolute per-container memory thresholds |
 
@@ -56,14 +56,20 @@ windows. `ObservingRedistribution` waits for newcomer activity or measured relie
 alone is not evidence of useful redistribution. Explicit minimum capacity and
 manual replica requests retain their documented precedence.
 
-An addition is judged against the members it grew from. If one of them restarts
-or is replaced, or the fleet contracts below the size the addition reached,
-before the addition is judged, it can no longer be judged and is dropped. It
-counts as neither relief nor an ineffective addition. The next addition still
-waits for a new stable window, the cooldown and ready capacity. If two additions
-have been judged ineffective since the last effective one, the next reports
-`LoadNotRedistributed` while it is observed, and the hold resumes if it is
-ineffective too.
+An addition is judged against the members it grew from, once one outcome,
+effective or ineffective, holds for a whole `redistributionObservationSeconds`
+window of at least `minSamples` observations. Evidence that has not settled
+after twice that window and twice `minSamples` of continuous complete
+observation is mixed: the addition counts as ineffective, never as relief.
+Anything that resets stable windows restarts that count.
+
+If one of those members restarts or is replaced, or the fleet contracts below
+the size the addition reached, before the addition is judged, it can no longer
+be judged and is dropped. It counts as neither relief nor an ineffective
+addition. The next addition still waits for a new stable window, the cooldown
+and ready capacity. If two additions have been judged ineffective since the
+last effective one, the next reports `LoadNotRedistributed` while it is
+observed, and the hold resumes if it is ineffective too.
 
 Maintenance pause stops new workload changes and invalidates positive demand
 windows. A membership change, such as a restarted member, restarts stable

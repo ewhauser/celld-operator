@@ -108,11 +108,12 @@ func (f collectorFunc) Collect(ctx context.Context, subject *fleet.CelldFleet) c
 	return f(ctx, subject)
 }
 
-// podIdentities returns the capacity identities of the fleet's first n members.
-func (x *operationFixture) podIdentities(n int) map[string]bool {
+// initialIdentities returns the capacity identities of the three members the
+// fleet starts with.
+func (x *operationFixture) initialIdentities() map[string]bool {
 	x.t.Helper()
 	ids := map[string]bool{}
-	for i := range n {
+	for i := range 3 {
 		id, _ := podIdentity(x.pod(fmt.Sprintf("%s-%d", x.f.Name, i)))
 		ids[id] = true
 	}
@@ -248,7 +249,7 @@ func TestCapacityAdditionObservesRedistribution(t *testing.T) {
 	x := newOperationFixture(t, "PersistentFleet")
 	x.f = enableCapacity(t, x.r, x.f, "ScaleOut")
 	x.cpu = 1000
-	incumbents := x.podIdentities(3)
+	incumbents := x.initialIdentities()
 	for range 10 {
 		x.step()
 		if replicas(x.workload()) == 4 {
@@ -295,7 +296,7 @@ func TestCapacityHoldsIneffectiveAdditions(t *testing.T) {
 	x.f = enableCapacity(t, x.r, x.f, "ScaleOut")
 	x.edit(func(f *fleet.CelldFleet) { f.Spec.Capacity.MaxReplicas = 10 })
 	x.cpu = 1000
-	hot := x.podIdentities(3)
+	hot := x.initialIdentities()
 	collect := x.r.Collector
 	x.r.Collector = collectorFunc(func(ctx context.Context, f *fleet.CelldFleet) capacity.Observation {
 		o := collect.Collect(ctx, f)
@@ -478,7 +479,7 @@ func TestCapacityUnjudgedAdditionKeepsIneffectiveBatches(t *testing.T) {
 	x.edit(func(f *fleet.CelldFleet) { f.Spec.Capacity.MaxReplicas = 10 })
 	x.cpu = 1000
 	// The first three members stay hot; every newcomer idles.
-	hot := x.podIdentities(3)
+	hot := x.initialIdentities()
 	collect := x.r.Collector
 	x.r.Collector = collectorFunc(func(ctx context.Context, f *fleet.CelldFleet) capacity.Observation {
 		o := collect.Collect(ctx, f)
@@ -514,6 +515,60 @@ func TestCapacityUnjudgedAdditionKeepsIneffectiveBatches(t *testing.T) {
 	}
 	if n := replicas(x.workload()); n != 6 || !held(f) {
 		t.Fatalf("an hour after the restart: %d replicas, %+v", n, f.Status.Capacity)
+	}
+}
+
+// Newcomers whose load keeps crossing cpuLowMillicores never give an addition
+// a steady outcome. Once that evidence has stayed mixed for twice
+// redistributionObservationSeconds, each addition counts as ineffective, never
+// as relief, so the fleet stops at LoadNotRedistributed as it does for idle
+// newcomers instead of holding at its first addition for good.
+func TestCapacityHoldsMixedAdditions(t *testing.T) {
+	x := newOperationFixture(t, "PersistentFleet")
+	x.f = enableCapacity(t, x.r, x.f, "ScaleOut")
+	x.edit(func(f *fleet.CelldFleet) { f.Spec.Capacity.MaxReplicas = 10 })
+	x.cpu = 1000
+	hot := x.initialIdentities()
+	start := x.clock
+	low := int64(x.f.Spec.Capacity.CPULowMillicores)
+	collect := x.r.Collector
+	x.r.Collector = collectorFunc(func(ctx context.Context, f *fleet.CelldFleet) capacity.Observation {
+		o := collect.Collect(ctx, f)
+		// Newcomers alternate each minute either side of cpuLowMillicores.
+		cpu := low + 10
+		if x.clock.Sub(start)/time.Minute%2 == 1 {
+			cpu = low - 10
+		}
+		for i := range o.Samples {
+			if !hot[o.Samples[i].Identity] {
+				o.Samples[i].CPU = cpu
+			}
+		}
+		return o
+	})
+	x.awaitReplicas(4)
+	f := x.tick()
+	if f.Status.Capacity.Reason != "ObservingRedistribution" {
+		t.Fatalf("the newcomer is not under observation: %+v", f.Status.Capacity)
+	}
+	observed := x.clock
+	for x.state().Capacity.IneffectiveBatches == 0 {
+		if n := replicas(x.workload()); n != 4 {
+			t.Fatalf("grew to %d before the first addition was judged", n)
+		}
+		if x.clock.Sub(observed) > time.Hour {
+			t.Fatalf("mixed evidence held the fleet for an hour: %+v", f.Status.Capacity)
+		}
+		f = x.tick()
+	}
+	if bound := 2 * capacity.Seconds(x.f.Spec.Capacity.RedistributionObservationSeconds); x.clock.Sub(observed) < bound {
+		t.Fatalf("judged after %v of mixed evidence, within %v", x.clock.Sub(observed), bound)
+	}
+	for range 240 {
+		f = x.tick()
+	}
+	if n := replicas(x.workload()); n != 5 || f.Status.Capacity.Reason != "LoadNotRedistributed" || x.state().Capacity.IneffectiveBatches != 2 {
+		t.Fatalf("mixed additions grew the fleet to %d: %+v", n, f.Status.Capacity)
 	}
 }
 

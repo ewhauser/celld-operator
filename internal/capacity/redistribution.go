@@ -18,11 +18,19 @@ type Addition struct {
 	Target  int32
 	Since   time.Time
 	Samples int32
+	// ObservedSince and ObservedSamples cover the continuous complete
+	// observation of the addition, whatever its outcome; Since and Samples
+	// cover the current outcome.
+	ObservedSince   time.Time
+	ObservedSamples int32
 }
 
 // Positive assessments require complete, fresh, advancing observations; reads
-// between sample intervals can only invalidate a window. A gap resets the window;
-// policy edits and pause do not discard a hold.
+// between sample intervals can only invalidate a window. An addition is judged
+// once one outcome holds for a whole window. Evidence that has not settled
+// after twice the observation a judgment needs is mixed and counts as
+// ineffective, never as relief. Whatever resets stable windows restarts the
+// window and that bound; policy edits and pause do not discard a hold.
 //
 // An addition is judged against the incumbents it grew from, by container
 // identity. An incumbent that restarts or is replaced never returns under its
@@ -73,17 +81,24 @@ func assessAddition(p fleet.CapacityPolicy, s *State, now time.Time, current int
 		a.Since = now
 		a.Samples = 0
 	}
+	if a.ObservedSince.IsZero() {
+		a.ObservedSince = now
+	}
 	if !count {
 		return "ObservingRedistribution"
 	}
 	a.Samples++
-	if a.Samples < p.MinSamples || now.Sub(a.Since) < Seconds(p.RedistributionObservationSeconds) {
+	a.ObservedSamples++
+	window := Seconds(p.RedistributionObservationSeconds)
+	settled := a.Samples >= p.MinSamples && now.Sub(a.Since) >= window
+	mixed := a.ObservedSamples >= 2*p.MinSamples && now.Sub(a.ObservedSince) >= 2*window
+	if !settled && !mixed {
 		if s.IneffectiveBatches >= 2 {
 			return "LoadNotRedistributed"
 		}
 		return "ObservingRedistribution"
 	}
-	if outcome == "improved" {
+	if settled && outcome == "improved" {
 		s.IneffectiveBatches = 0
 		s.Addition = nil
 		return ""
