@@ -1,4 +1,4 @@
-// Package controller provisions experimental fleet infrastructure with durable manual lifecycle intent.
+// Package controller provisions experimental fleet infrastructure.
 package controller
 
 import (
@@ -32,8 +32,9 @@ import (
 
 const attemptAnnotation = "celld.eric.dev/workload-creation-attempted"
 
-// Reconciler uses an uncached client for the durable reservation and creation intent.
-// Kubernetes Create is the cross-controller arbitration point; leader election is not the safety proof.
+// Reconciler uses an uncached client for the durable reservation. Kubernetes
+// Create is the cross-controller arbitration point; leader election is not the
+// safety proof.
 type Reconciler struct {
 	client.Client
 	Options               Options
