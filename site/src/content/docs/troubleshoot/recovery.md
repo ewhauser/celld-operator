@@ -119,3 +119,27 @@ and every other member has been Ready for at least five minutes.
 If a claim was deleted while its volume still existed, the StatefulSet creates
 a fresh claim as soon as it creates the member's next Pod, and celld applies
 the same rule.
+
+## Recovering a fleet
+
+There is no rebuild operation, and none is needed. celld recovers each
+PersistentFleet member from its own disk and its peers. If a fleet is unhealthy
+and nothing above applies, request a [rolling restart](../../operate/restart/)
+with a new `maintenance.restartToken`. Kubernetes restarts one member at a time
+on its own disk.
+
+- **Every member down at once**, because celld was killed everywhere or every
+  Pod was deleted: the StatefulSet restarts them all on their own disks and the
+  fleet recovers without help. No acknowledged write is lost.
+- **A member whose disk is gone or unusable** is replaced by the operator; see
+  [lost disks](#lost-disks).
+- **A fleet stuck under v0.0.5**, with a member down and the reason
+  `DiskRetired` or `LauncherBlocked`: upgrade the operator. The StatefulSet rolls
+  every member onto plain celld on its own disk, and the retired member rejoins
+  on that disk.
+
+Do not edit finalizers, the storage reservation's annotations or claims by
+hand, and do not delete every member's disk. A fresh disk refuses answers until
+its member publishes a lease, and a member publishes its lease only after
+recovering its previous session. With every disk fresh while sessions are
+still open, no member can recover.

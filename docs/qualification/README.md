@@ -25,6 +25,8 @@ with `--member-replacement-delay=5m`. For PersistentFleet the suites exercise:
 - a graceful Pod delete, a forced Pod delete, `SIGKILL` of celld, a node drain
   held by the budget, and an operator restart in the middle of a rollout and of
   a contraction;
+- `SIGKILL` of celld on every member at once, and every member Pod deleted at
+  once: each member returns on its own disk with no manual step;
 - a deleted claim, which the StatefulSet recreates;
 - a lost volume, which the operator replaces with no manual step;
 - a node failure: the kubelet stops while celld keeps running on that node.
@@ -47,7 +49,10 @@ go run ./hack/integration --suite all
 
 The command pins the published `.6` fork artifact, the same digest as
 `hack/runtime-image.txt`, which `make integration` uses. Individual suites are
-`lifecycle`, `maintenance`, `faults` and `external`. The maintenance suite
+`lifecycle`, `maintenance`, `faults`, `external` and `upgrade`. `all` omits
+`upgrade`, which installs the released v0.0.5 operator, lets its launcher
+retire a member's disk, upgrades the operator and requires the member to
+rejoin on that disk with every write readable. The maintenance suite
 upgrades a PersistentFleet from the earlier `.3` digest on retained disks;
 `--upgrade-from` or `CELLD_UPGRADE_FROM_IMAGE` selects another source digest,
 and `none` skips it. Kind uses a real local hostpath CSI driver for RWOP/Delete
