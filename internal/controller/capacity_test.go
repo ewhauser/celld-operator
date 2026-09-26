@@ -2,9 +2,11 @@ package controller
 
 import (
 	"context"
+	"maps"
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
 
@@ -102,4 +104,49 @@ type collectorFunc func(context.Context, *fleet.CelldFleet) capacity.Observation
 
 func (f collectorFunc) Collect(ctx context.Context, subject *fleet.CelldFleet) capacity.Observation {
 	return f(ctx, subject)
+}
+
+// A full-stop runtime upgrade pauses the fleet, scales its StatefulSet to zero
+// by hand, then sets the new image and unpauses in one change. Every member
+// must return on the new image at the declared count, whatever the capacity
+// policy, without the operator deleting a Pod or claim.
+func TestFullStopReturnsAtDeclaredCount(t *testing.T) {
+	for _, mode := range []string{"", "Automatic", "External", "Shadow", "ScaleOut"} {
+		t.Run("mode="+mode, func(t *testing.T) {
+			x := newOperationFixture(t, "PersistentFleet")
+			if mode != "" {
+				x.f = enableCapacity(t, x.r, x.f, mode)
+			}
+			x.settle()
+			want := replicas(x.workload())
+			disks := x.claimUIDs()
+			x.edit(func(f *fleet.CelldFleet) { f.Spec.Maintenance = &fleet.MaintenanceSpec{Paused: true} })
+			x.step()
+			sts := x.workload().(*appsv1.StatefulSet)
+			sts.Spec.Replicas = new(int32(0))
+			if err := x.r.Update(t.Context(), sts); err != nil {
+				t.Fatal(err)
+			}
+			x.syncWorkload()
+			x.step()
+			if replicas(x.workload()) != 0 {
+				t.Fatal("a paused fleet changed its stopped workload")
+			}
+			x.edit(func(f *fleet.CelldFleet) {
+				f.Spec.RuntimeImage = fixtureRuntimeUpgrade
+				f.Spec.Maintenance = &fleet.MaintenanceSpec{Paused: false}
+			})
+			x.settle()
+			w := x.workload().(*appsv1.StatefulSet)
+			if replicas(w) != want {
+				t.Fatalf("fleet returned at %d members, want %d", replicas(w), want)
+			}
+			if got := w.Spec.Template.Spec.Containers[0].Image; got != fixtureRuntimeUpgrade {
+				t.Fatalf("fleet returned on %s", got)
+			}
+			if !maps.Equal(x.claimUIDs(), disks) {
+				t.Fatal("a full stop replaced a disk")
+			}
+		})
+	}
 }
