@@ -19,13 +19,14 @@ import (
 )
 
 type options struct {
-	suite, runtimeImage, upgradeFrom, operatorImage string
-	runtimeLocalImage                               string
+	suite, runtimeImage, upgradeFrom, upgradeMode, operatorImage string
+	runtimeLocalImage                                            string
 }
 
 // legacyRuntimeImage is v0.5.1-ewhauser.3, an earlier pinned fork release
 // that predates `/state.node_log`. The maintenance suite upgrades a
-// PersistentFleet from it on retained disks with an ordinary rolling update.
+// PersistentFleet from it on retained disks. A 0.5.1-based build cannot run
+// beside the pinned 0.6.0-based one, so that upgrade is a full stop.
 const legacyRuntimeImage = "ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29"
 
 type harness struct {
@@ -52,6 +53,7 @@ func realMain() (code int) {
 	fs.StringVar(&opts.suite, "suite", "all", "suite: all, lifecycle, maintenance, faults, external, upgrade, previews")
 	fs.StringVar(&opts.runtimeImage, "runtime-image", os.Getenv("CELLD_RUNTIME_IMAGE"), "required immutable ghcr.io/ewhauser/celld@sha256:... fork image")
 	fs.StringVar(&opts.upgradeFrom, "upgrade-from", envOr("CELLD_UPGRADE_FROM_IMAGE", legacyRuntimeImage), "fork digest the maintenance suite upgrades a PersistentFleet from, on retained disks; \"none\" skips it")
+	fs.StringVar(&opts.upgradeMode, "upgrade-mode", envOr("CELLD_UPGRADE_MODE", "full-stop"), "how the maintenance suite moves a PersistentFleet onto --runtime-image: \"full-stop\", the documented procedure for a pair that cannot run together, or \"rolling\"")
 	fs.StringVar(&opts.operatorImage, "operator-image", "", "published controller image to qualify instead of building source")
 	fs.StringVar(&opts.runtimeLocalImage, "runtime-local-image", os.Getenv("CELLD_PREVIEW_IMAGE"), "locally built preview runtime/CLI image; previews suite only")
 	if err := fs.Parse(os.Args[1:]); err != nil {
@@ -70,6 +72,10 @@ func realMain() (code int) {
 	}
 	if opts.runtimeLocalImage == "" && !runtimeImagePin.MatchString(opts.runtimeImage) {
 		fmt.Fprintln(os.Stderr, "--runtime-image or CELLD_RUNTIME_IMAGE must name the fork by immutable digest")
+		return 2
+	}
+	if opts.upgradeMode != "full-stop" && opts.upgradeMode != "rolling" {
+		fmt.Fprintln(os.Stderr, "--upgrade-mode must be full-stop or rolling")
 		return 2
 	}
 	if opts.upgradeFrom == "none" {

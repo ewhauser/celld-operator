@@ -90,11 +90,15 @@ Bucket fleet (`alpha`) and a PersistentFleet (`beta`), and checks:
   coordinated downtime. A paused fleet holds the restart. Members are replaced
   one at a time, highest ordinal first, and every PVC/PV/CSI identity stays
   the same. After a manager restart the token does not run again.
-- A runtime upgrade on retained disks moves a three-member PersistentFleet from
-  the legacy v0.5.1-ewhauser.3 digest to the pinned runtime. The legacy digest
-  lacks `node_log`; it provisions and rolls like any other. Pass
-  `--upgrade-from` or `CELLD_UPGRADE_FROM_IMAGE` to use another source digest,
-  or `none` to skip.
+- A runtime upgrade on retained disks moves a three-member PersistentFleet
+  under write load from the legacy v0.5.1-ewhauser.3 digest to the pinned
+  runtime. The legacy digest lacks `node_log` and provisions like any other.
+  A 0.5.1-based build cannot run beside the pinned 0.6.0-based one, so the
+  suite runs the documented full-stop procedure: pause, scale the StatefulSet
+  to zero, then set the image and resume in one change. `--upgrade-mode rolling`
+  (or `CELLD_UPGRADE_MODE`) rolls instead, for a pair that can run together.
+  Pass `--upgrade-from` or `CELLD_UPGRADE_FROM_IMAGE` to use another source
+  digest, or `none` to skip.
 - An Ordered Bucket rolling restart runs with a PDB of one.
 - Deleting both profiles removes compute, then PVCs and PVs, and keeps the
   bucket reservation.
