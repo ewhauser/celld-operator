@@ -71,7 +71,7 @@ func (h *harness) exercisePersistentScaling() {
 
 	// Contraction on unpause: one member, and its disk only after the
 	// member is gone.
-	h.shrinkWatchingRelease(2, func() { h.merge("beta", `{"spec":{"maintenance":null}}`) }, nil)
+	h.shrinkWatchingRelease("beta", 2, func() { h.merge("beta", `{"spec":{"maintenance":null}}`) }, nil)
 	survivors := h.claims("beta")
 	for name, id := range survivors {
 		assert(grown[name] == id, "contraction changed surviving disk %s", name)
@@ -87,7 +87,7 @@ func (h *harness) exercisePersistentScaling() {
 
 	// 3 -> 1 with the manager killed between the two steps; the next step is
 	// re-derived from the cluster.
-	h.shrinkWatchingRelease(1, nil, h.killOperator)
+	h.shrinkWatchingRelease("beta", 1, nil, h.killOperator)
 	assert(h.claims("beta")["data-beta-0"] == regrown["data-beta-0"], "contraction to one member changed the survivor's disk")
 	h.readLedger("beta")
 
@@ -113,33 +113,33 @@ func (h *harness) exercisePersistentScaling() {
 	fmt.Println("PASS: PersistentFleet grows onto fresh disks, removes one member at a time, releases disks after removal, survives a manager kill mid-contraction")
 }
 
-// shrinkWatchingRelease contracts beta to target, through trigger or by
+// shrinkWatchingRelease contracts a PersistentFleet to target, through trigger or by
 // setting replicas, and waits for it to settle. Throughout, a removed member's
 // disk must outlive its Pod, and at most one expected member may be down.
 // midway runs once after the first member has been removed.
-func (h *harness) shrinkWatchingRelease(target int, trigger, midway func()) {
-	from := specReplicas(h.get("statefulset", "beta"))
-	assert(from > int64(target), "beta already has %d members; nothing to contract to %d", from, target)
-	d := h.watchDisruptions("beta")
+func (h *harness) shrinkWatchingRelease(fleetName string, target int, trigger, midway func()) {
+	from := specReplicas(h.get("statefulset", fleetName))
+	assert(from > int64(target), "%s already has %d members; nothing to contract to %d", fleetName, from, target)
+	d := h.watchDisruptions(fleetName)
 	if trigger == nil {
-		trigger = func() { h.setReplicas("beta", target) }
+		trigger = func() { h.setReplicas(fleetName, target) }
 	}
 	trigger()
 	done := midway == nil
-	h.waitWatching(fmt.Sprintf("beta contracts %d -> %d", from, target), 12*time.Minute, d, func() bool {
+	h.waitWatching(fmt.Sprintf("%s contracts %d -> %d", fleetName, from, target), 12*time.Minute, d, func() bool {
 		pods := map[string]bool{}
-		for _, pod := range h.memberPods("beta") {
+		for _, pod := range h.memberPods(fleetName) {
 			pods[nameOf(pod)] = true
 		}
-		for _, claim := range h.listIn("pvc", "-l", "celld.eric.dev/fleet-uid="+uidOf(h.get("celldfleet", "beta"))) {
+		for _, claim := range h.listIn("pvc", "-l", "celld.eric.dev/fleet-uid="+uidOf(h.get("celldfleet", fleetName))) {
 			member := strings.TrimPrefix(nameOf(claim), "data-")
 			assert(!terminating(claim) || !pods[member], "disk %s was deleted while member %s still existed", nameOf(claim), member)
 		}
-		if !done && specReplicas(h.get("statefulset", "beta")) < from {
+		if !done && specReplicas(h.get("statefulset", fleetName)) < from {
 			midway()
 			done = true
 		}
-		return h.settled("beta", int64(target))
+		return h.settled(fleetName, int64(target))
 	})
 }
 

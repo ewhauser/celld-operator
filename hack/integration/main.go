@@ -50,9 +50,9 @@ func main() {
 func realMain() (code int) {
 	var opts options
 	fs := flag.NewFlagSet("integration", flag.ContinueOnError)
-	fs.StringVar(&opts.suite, "suite", "all", "suite: all, lifecycle, maintenance, faults, external, previews")
+	fs.StringVar(&opts.suite, "suite", "all", "suite: all, lifecycle, maintenance, faults, external, extended, previews")
 	fs.StringVar(&opts.runtimeImage, "runtime-image", os.Getenv("CELLD_RUNTIME_IMAGE"), "required immutable ghcr.io/ewhauser/celld@sha256:... fork image")
-	fs.StringVar(&opts.upgradeFrom, "upgrade-from", envOr("CELLD_UPGRADE_FROM_IMAGE", legacyRuntimeImage), "fork digest the maintenance suite upgrades a PersistentFleet from, on retained disks; \"none\" skips it")
+	fs.StringVar(&opts.upgradeFrom, "upgrade-from", envOr("CELLD_UPGRADE_FROM_IMAGE", legacyRuntimeImage), "fork digest the maintenance and extended suites upgrade from, on retained disks; \"none\" skips it")
 	fs.StringVar(&opts.operatorImage, "operator-image", "", "published controller image to qualify instead of building source")
 	fs.StringVar(&opts.runtimeLocalImage, "runtime-local-image", os.Getenv("CELLD_PREVIEW_IMAGE"), "locally built preview runtime/CLI image; previews suite only")
 	if err := fs.Parse(os.Args[1:]); err != nil {
@@ -81,7 +81,7 @@ func realMain() (code int) {
 		return 2
 	}
 	switch opts.suite {
-	case "all", "lifecycle", "maintenance", "faults", "external", "previews":
+	case "all", "lifecycle", "maintenance", "faults", "external", "extended", "previews":
 	default:
 		fmt.Fprintln(os.Stderr, "unknown suite:", opts.suite)
 		return 2
@@ -125,6 +125,15 @@ func realMain() (code int) {
 	}()
 	h.exercise()
 	return 0
+}
+
+// upgrades reports whether this suite runs a runtime upgrade from --upgrade-from.
+func (h *harness) upgrades() bool {
+	switch h.opts.suite {
+	case "all", "maintenance", "extended":
+		return h.opts.upgradeFrom != ""
+	}
+	return false
 }
 
 func envOr(key, fallback string) string {
@@ -179,6 +188,8 @@ func (h *harness) exercise() {
 		h.exerciseFaults()
 	case "external":
 		h.exerciseExternal()
+	case "extended":
+		h.exerciseExtended()
 	}
 	fmt.Println("PASS: kind integration suite", h.opts.suite, "runtime", h.opts.runtimeImage)
 }

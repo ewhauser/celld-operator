@@ -17,6 +17,7 @@ make integration-lifecycle
 make integration-maintenance
 make integration-faults
 make integration-external
+make integration-extended
 ```
 
 The Make targets use the verified fork digest in `hack/runtime-image.txt`. It
@@ -118,17 +119,67 @@ other disk is kept. A forced Bucket Pod delete loses nothing.
 a lowered maximum contracts the fleet one member at a time with the ledger
 intact, and that manual ownership returns afterwards.
 
+**extended** covers what the other suites' fixtures cannot. It is heavier, so
+CI runs it only nightly, on dispatch and on pull requests labeled
+`integration`; `--suite all` does not include it. `CELLD_EXTENDED_SCENARIOS`
+(`five,loss,drain,admission`) runs a subset locally.
+
+- **Five members.** A five-member PersistentFleet with `placement.mode:
+  Relaxed` (preferred host separation, so five members fit on three nodes)
+  rolls through `restartToken` one member at a time, highest ordinal first, on
+  the same disks. It then contracts 5 → 4 → 3, releasing each removed disk only
+  after its member is gone, and regrows to five onto fresh claims. Writes run
+  throughout and the ledger is read after every step. After settling, every
+  member's `/state.node_log` reports fleet posture and an own ensemble of two
+  followers.
+- **Last copy of a session.** A two-member PersistentFleet, whose leaders each
+  have the other member as their only follower, loses both disks at once:
+  celld is SIGKILLed, both PVs are removed without finalizers and both Pods
+  are force-deleted right after the writer stops. The operator must replace
+  both members without waiting (a `MemberDiskLost` Warning event) and the
+  fleet must settle within 15 minutes. Acknowledged writes may be lost here,
+  but never silently: if any does not read back within a shared 90-second
+  window, the bucket must hold at least one celld loss record
+  (`log/<session>.e<epoch>.loss.json`). The counts are printed either way. New
+  writes afterwards must all read back.
+- **Drain during a rolling restart.** While a three-member PersistentFleet
+  rolls, `kubectl drain` targets the node of `beta-0`, which is not yet
+  updated. The PDB (zero while a member is down) must refuse the eviction at
+  least once and admit it only when the fleet has settled, and no sample may
+  show two members down. Strict host separation keeps the drained member off
+  the other nodes, so the harness holds for 20 seconds with it down and the
+  PDB closed, uncordons, and requires the rollout to finish: every member on
+  the update revision, every PVC/PV/CSI identity unchanged, the ledger intact.
+- **Admission mutations.** A mutating webhook (`admission/`, built from
+  source onto the operator's digest-pinned distroless base, loaded into kind,
+  never pulled) serves TLS from a CA the harness generates. It fails closed
+  and is scoped to the admission fleets' Pod names. On Pod creation it injects
+  what Istio, EKS IRSA and the Datadog admission controller inject: an
+  `istio-init` init container, an `istio-proxy` sidecar with its own readiness
+  probe, Istio labels, annotations and volumes, `AWS_ROLE_ARN` and
+  `AWS_WEB_IDENTITY_TOKEN_FILE` with a projected `sts.amazonaws.com`
+  service-account token mounted into every container, and `DD_AGENT_HOST`
+  (host IP), `DD_ENTITY_ID` and `DD_ENV` on every container. The proxy
+  intercepts no traffic. A three-member PersistentFleet and a three-member
+  Ordered Bucket start on the `--upgrade-from` runtime. Under continuous writes
+  they upgrade to the pinned runtime, roll through `restartToken` and scale
+  3 → 2 → 3, and every Pod is checked for the injected shapes. Their Ready
+  reason is sampled throughout and may only ever be `Provisioning`,
+  `LifecycleProgress` or `Provisioned`.
+
 ## Limits
 
 These suites establish local Kubernetes, hostpath CSI and celld behavior on
 three nodes of one zone. MinIO data is not durable across replacement of its
 Pod, and no scenario replaces the store. The suites do not qualify:
 
-- five-member fleets or zone loss;
-- the ADR's "last complete copy of a dead session" loss scenario, which needs a
-  leader and its only follower to lose their disks together;
-- a node-group upgrade running in parallel with a rolling upgrade;
-- Istio, IRSA or Datadog admission;
+- zone loss, or a five-member fleet under strict host separation (three nodes
+  only fit five members with Relaxed placement);
+- a whole node-group upgrade (one drain during one rolling restart is
+  covered, not a sequence of node replacements);
+- real Istio: traffic interception, mTLS, probe rewriting and mesh routing;
+  a real IRSA credential exchange (the fleets still hold MinIO's static test
+  credentials); a real Datadog agent;
 - AWS EBS deletion, EC2 node loss, prolonged S3 partitions or managed service
   behavior.
 

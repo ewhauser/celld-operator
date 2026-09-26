@@ -132,7 +132,7 @@ current-context: preview-test
 	secret["stringData"] = object{"accessKeyId": "qualification", "secretAccessKey": "qualification-only"}
 	h.apply(secret)
 	h.k("-n", storeNS, "run", "preview-buckets", "--restart=Never", "--image="+mcImage, "--command", "--", "/bin/sh", "-c", `mc alias set local http://minio:9000 qualification qualification-only && mc mb local/preview-source local/preview-target`)
-	h.wait("preview buckets created", func() bool { return h.succeeded(storeNS, "preview-buckets") })
+	h.wait("preview buckets created", func() bool { return h.succeeded("preview-buckets") })
 	// A separate read-only probe observes durable checkpoints; it does not write
 	// receipts or bypass any controller/executor ownership transition.
 	pod := resourceObject("v1", "Pod", "preview-store-client")

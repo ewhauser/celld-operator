@@ -126,7 +126,7 @@ func (h *harness) createCluster() {
 
 func (h *harness) loadImages() {
 	images := []string{h.opts.runtimeImage, minioImage, mcImage, curlImage, metricsServer}
-	if h.opts.upgradeFrom != "" && (h.opts.suite == "all" || h.opts.suite == "maintenance") {
+	if h.upgrades() {
 		images = append(images, h.opts.upgradeFrom)
 	}
 	if h.opts.operatorImage != "" {
@@ -239,9 +239,13 @@ func (h *harness) deployStore() {
 	})
 	h.k("-n", storeNS, "wait", "--for=condition=Ready", "pod/minio", "--timeout=120s")
 	h.storeService("minio", "backend", 9000)
+	buckets := []string{"bucket-alpha", "bucket-beta", "bucket-gamma", "bucket-legacy"}
+	if h.opts.suite == "extended" {
+		buckets = append(buckets, extendedBuckets...)
+	}
 	h.k("-n", storeNS, "run", "seed", "--restart=Never", "--image="+mcImage, "--command", "--", "/bin/sh", "-c",
-		`attempt=0; until mc alias set local http://minio:9000 qualification qualification-only; do attempt=$((attempt+1)); test "$attempt" -lt 30 || exit 1; sleep 2; done; mc mb local/bucket-alpha local/bucket-beta local/bucket-gamma local/bucket-legacy`)
-	h.wait("create isolated test buckets", func() bool { return h.succeeded(storeNS, "seed") })
+		`attempt=0; until mc alias set local http://minio:9000 qualification qualification-only; do attempt=$((attempt+1)); test "$attempt" -lt 30 || exit 1; sleep 2; done; mc mb local/`+strings.Join(buckets, " local/"))
+	h.wait("create isolated test buckets", func() bool { return h.succeeded("seed") })
 }
 
 // deployApplication publishes the qualification app into both buckets with a
@@ -261,9 +265,14 @@ func (h *harness) deployApplication() {
 	h.sh(30*time.Second, "docker", "cp", esbuild, h.nodes[0]+":/opt/celld-test-esbuild")
 	h.sh(30*time.Second, "docker", "cp", filepath.Join(h.root, "hack", "integration", "app"), h.nodes[0]+":/opt/celld-test-app")
 	deployments := [][2]string{{"bucket-alpha", h.opts.runtimeImage}, {"bucket-beta", h.opts.runtimeImage}, {"bucket-gamma", h.opts.runtimeImage}}
-	if h.opts.upgradeFrom != "" && (h.opts.suite == "all" || h.opts.suite == "maintenance") {
+	if h.upgrades() {
 		// The upgrade source deploys its own bucket, as its operator would have.
 		deployments = append(deployments, [2]string{"bucket-legacy", h.opts.upgradeFrom})
+	}
+	if h.opts.suite == "extended" {
+		for _, bucket := range extendedBuckets {
+			deployments = append(deployments, [2]string{bucket, h.extendedImage(bucket)})
+		}
 	}
 	for _, d := range deployments {
 		bucket, image := d[0], d[1]
@@ -289,7 +298,7 @@ func (h *harness) deployApplication() {
 				},
 			},
 		})
-		h.waitFor("qualification app deployed to "+bucket, 120*time.Second, func() bool { return h.succeeded(storeNS, deployName) })
+		h.waitFor("qualification app deployed to "+bucket, 120*time.Second, func() bool { return h.succeeded(deployName) })
 	}
 }
 

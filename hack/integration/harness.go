@@ -182,10 +182,11 @@ func (h *harness) setReplicas(fleetName string, replicas int) {
 	h.merge(fleetName, fmt.Sprintf(`{"spec":{"replicas":%d}}`, replicas))
 }
 
-func (h *harness) succeeded(ns, pod string) bool {
-	phase := str(h.getIn(ns, "pod", pod), "status", "phase")
+// succeeded reports whether a one-shot Pod in the store namespace finished.
+func (h *harness) succeeded(pod string) bool {
+	phase := str(h.getIn(storeNS, "pod", pod), "status", "phase")
 	if phase == "Failed" {
-		fail("Test Pod failed: %s\n%s", pod, h.k("-n", ns, "logs", pod))
+		fail("Test Pod failed: %s\n%s", pod, h.k("-n", storeNS, "logs", pod))
 	}
 	return phase == "Succeeded"
 }

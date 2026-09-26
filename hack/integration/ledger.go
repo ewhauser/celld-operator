@@ -173,3 +173,67 @@ func acks(logs string) []ledgerEntry {
 	}
 	return out
 }
+
+// sweepScript checks every "cell id" line on stdin in repeated passes until
+// each reads back as stored or a shared deadline passes. Unlike readScript, a
+// write that never reads back costs one pass, not a full window, so it suits
+// a scenario where losing acknowledged writes is a permitted outcome.
+const sweepScript = `pending=$(mktemp); next=$(mktemp)
+cat > "$pending"
+deadline=$(( $(date +%s) + WINDOW ))
+while [ -s "$pending" ]; do
+  : > "$next"
+  while read -r cell id; do
+    [ -n "$id" ] || continue
+    out=$(curl --silent --show-error --max-time 3 "http://FLEET:8080/?cell=$cell&id=$id" 2>&1)
+    case "$out" in *"\"id\":\"$id\",\"stored\":true"*) echo "READ $cell $id";; *) echo "$cell $id" >> "$next";; esac
+  done < "$pending"
+  cp "$next" "$pending"
+  [ "$(date +%s)" -ge "$deadline" ] && break
+  [ -s "$pending" ] && sleep 2
+done
+while read -r cell id; do echo "MISSING $cell $id"; done < "$pending"
+echo SWEPT
+`
+
+// sweepLedger reads every acknowledged write for the fleet within one shared
+// window and returns those that never read back. It fails only if the check
+// itself did not cover every write.
+func (h *harness) sweepLedger(fleetName string, window time.Duration) (readable int, missing []ledgerEntry) {
+	entries := h.ledgers[fleetName]
+	assert(len(entries) > 0, "no acknowledged ledger writes for %s", fleetName)
+	var input strings.Builder
+	for _, e := range entries {
+		fmt.Fprintf(&input, "%s %s\n", e.cell, e.id)
+	}
+	script := strings.NewReplacer("WINDOW", strconv.Itoa(int(window.Seconds())), "FLEET", fleetName).Replace(sweepScript)
+	out := h.run(command{
+		args:    h.kubectl("-n", "fleets", "exec", "-i", h.client(fleetName), "--", "/bin/sh", "-c", script),
+		timeout: window + 10*time.Minute + time.Duration(len(entries))*time.Second,
+		stdin:   input.String(),
+	})
+	readable, missing, err := sweptReads(out, len(entries))
+	must(err)
+	return readable, missing
+}
+
+func sweptReads(out string, want int) (int, []ledgerEntry, error) {
+	var readable int
+	var missing []ledgerEntry
+	swept := false
+	for line := range strings.SplitSeq(out, "\n") {
+		fields := strings.Fields(line)
+		switch {
+		case len(fields) == 3 && fields[0] == "READ":
+			readable++
+		case len(fields) == 3 && fields[0] == "MISSING":
+			missing = append(missing, ledgerEntry{cell: fields[1], id: fields[2]})
+		case len(fields) == 1 && fields[0] == "SWEPT":
+			swept = true
+		}
+	}
+	if !swept || readable+len(missing) != want {
+		return 0, nil, fmt.Errorf("ledger sweep covered %d of %d acknowledged writes: %s", readable+len(missing), want, out)
+	}
+	return readable, missing, nil
+}

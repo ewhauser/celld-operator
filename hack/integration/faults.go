@@ -36,7 +36,7 @@ func (h *harness) exerciseFaults() {
 	h.fault("node drain serialized by the PDB", h.drainTwoNodes, h.sameDisksAfter(), h.newPod("beta-1"))
 
 	h.fault("manager killed mid-contraction", func() {
-		h.shrinkWatchingRelease(2, nil, h.killOperator)
+		h.shrinkWatchingRelease("beta", 2, nil, h.killOperator)
 		h.setReplicas("beta", 3)
 	})
 

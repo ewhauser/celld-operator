@@ -10,10 +10,10 @@ on:
   workflow_dispatch:
     inputs:
       suite:
-        description: Suite to run (all, lifecycle, maintenance, faults, external)
+        description: Suite to run (all, lifecycle, maintenance, faults, external, extended)
         default: all
         type: choice
-        options: [all, lifecycle, maintenance, faults, external]
+        options: [all, lifecycle, maintenance, faults, external, extended]
   pull_request:
     types: [opened, labeled, synchronize, reopened]
 
@@ -33,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [lifecycle, maintenance, faults, external]
+        suite: [lifecycle, maintenance, faults, external, extended]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -54,7 +54,7 @@ jobs:
             REQUESTED="$INPUT"
           fi
           case "$REQUESTED" in
-            all|lifecycle|maintenance|faults|external) ;;
+            all|lifecycle|maintenance|faults|external|extended) ;;
             *) echo "Unknown integration suite: $REQUESTED" >&2; exit 1 ;;
           esac
           if [ "$REQUESTED" != all ] && [ "$REQUESTED" != "$SUITE" ]; then
