@@ -1,9 +1,9 @@
-// Package controlplane implements the private, node-local celld HTTP API.
-// An accepted shutdown is never evidence that a process or disk can be removed.
+// Package controlplane reads the private, node-local celld HTTP API. The
+// operator only observes /state; it never asks a node to shut down, reload or
+// remove its disk.
 package controlplane
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,16 +17,13 @@ import (
 const maxResponse = 1 << 20
 const callTimeout = 2 * time.Second
 
+// shutdownSchema is the version of the shutdown object the fork adds to /state
+// (crates/celld/disk_removal.rs on ewhauser/celld). Capacity requires it and
+// the runtime generation it reports.
+const shutdownSchema = 1
+
 var ErrUnsupported = errors.New("runtime capability unsupported")
 var ErrIdentity = errors.New("runtime identity mismatch or unavailable")
-
-// TransportError means no complete response was observed. Callers may retry
-// reads within their existing deadline; this never makes a mutation safe to
-// replay or supplies evidence of runtime completion.
-type TransportError struct{ Err error }
-
-func (e *TransportError) Error() string { return e.Err.Error() }
-func (e *TransportError) Unwrap() error { return e.Err }
 
 // HTTPError preserves protocol rejection codes without exposing response bodies.
 type HTTPError struct{ StatusCode int }
@@ -40,20 +37,7 @@ func (e *HTTPError) Unwrap() error {
 }
 
 // Target uses an exact Pod IP, never a load-balanced Service or a redirect.
-// Generation is the runtime ownership generation, not deployment.generation.
-// Node is caller-supplied Kubernetes identity; the wire exposes only Generation.
-// Reads may omit Generation for discovery; strict requests must supply it.
-type Target struct{ IP, Node, Generation string }
-
-// Lifecycle is shared by Bucket and PersistentFleet. It supplies observations
-// and requests, not Kubernetes termination, fencing, or disk-removal authority.
-type Lifecycle interface {
-	State(context.Context, Target) (State, error)
-	Shutdown(context.Context, Target, ShutdownMode) (Acceptance, error)
-	RemoveDisk(context.Context, Target, string) (Acceptance, error)
-	RemovalStatus(context.Context, Target, string) (ShutdownStatus, error)
-	Reload(context.Context, Target) (ReloadResult, error)
-}
+type Target struct{ IP string }
 
 type Client struct{ http *http.Client }
 
@@ -66,148 +50,107 @@ func New(transport http.RoundTripper) *Client {
 	return &Client{http: &http.Client{Transport: transport, Timeout: callTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 }
 
-func (c *Client) call(ctx context.Context, target Target, method, path string, body []byte) ([]byte, int, error) {
+// readState fetches /state from the node's internal listener and requires a
+// complete, single JSON object.
+func (c *Client) readState(ctx context.Context, target Target) ([]byte, error) {
 	if net.ParseIP(target.IP) == nil {
-		return nil, 0, errors.New("exact node IP required")
+		return nil, errors.New("exact node IP required")
 	}
 	ctx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, method, "http://"+net.JoinHostPort(target.IP, "8081")+path, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+net.JoinHostPort(target.IP, "8081")+"/state", http.NoBody)
 	if err != nil {
-		return nil, 0, err
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+		return nil, err
 	}
 	response, err := c.http.Do(req)
 	if err != nil {
-		return nil, 0, &TransportError{Err: err}
+		return nil, err
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxResponse+1))
 	closeErr := response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, response.StatusCode, &HTTPError{StatusCode: response.StatusCode}
+	if response.StatusCode != http.StatusOK {
+		return nil, &HTTPError{StatusCode: response.StatusCode}
 	}
 	if err != nil {
-		return nil, response.StatusCode, &TransportError{Err: err}
+		return nil, err
 	}
 	if closeErr != nil {
-		return nil, response.StatusCode, &TransportError{Err: closeErr}
+		return nil, closeErr
 	}
 	if len(data) > maxResponse {
-		return nil, response.StatusCode, errors.New("runtime response exceeds budget")
+		return nil, errors.New("runtime response exceeds budget")
 	}
 	if err := validObject(data); err != nil {
-		return nil, response.StatusCode, err
+		return nil, err
 	}
-	return data, response.StatusCode, nil
+	return data, nil
 }
 
+// State is the runtime identity a node reports in /state, with the raw
+// response kept for the load decoder.
 type State struct {
-	Identity     Identity
-	Capabilities Capabilities
-	Shutdown     *ShutdownStatus
-	ReceivedAt   time.Time
-	raw          []byte
+	// SchemaVersion is the shutdown object's version, nil when it is absent.
+	SchemaVersion *uint32
+	// Generation is the runtime process identity, read only from schema 1.
+	Generation string
+	ReceivedAt time.Time
+	raw        []byte
 }
 
 // Capacity requires the new control-plane identity/schema before interpreting
 // load. Old runtime images are not a supported operator execution path.
 func (s State) Capacity(maxAge time.Duration) (Load, error) {
-	if s.Capabilities.SchemaVersion == nil || *s.Capabilities.SchemaVersion != strictSchema {
+	if s.SchemaVersion == nil || *s.SchemaVersion != shutdownSchema {
 		return Load{}, ErrUnsupported
 	}
-	if s.Identity.Generation == "" {
+	if s.Generation == "" {
 		return Load{}, ErrIdentity
 	}
 	return parseLoad(s.raw, s.ReceivedAt, s.ReceivedAt, maxAge)
 }
 
 func (c *Client) State(ctx context.Context, target Target) (State, error) {
-	data, code, err := c.call(ctx, target, http.MethodGet, "/state", nil)
+	data, err := c.readState(ctx, target)
 	if err != nil {
 		return State{}, err
-	}
-	if code != http.StatusOK {
-		return State{}, errors.New("unexpected state status")
 	}
 	state, err := decodeState(data)
 	if err != nil {
 		return State{}, err
-	}
-	if target.Generation != "" && target.Generation != state.Identity.Generation {
-		return State{}, ErrIdentity
 	}
 	state.ReceivedAt = time.Now()
 	state.raw = data
 	return state, nil
 }
 
-type ShutdownMode string
-
-const (
-	Ordinary ShutdownMode = "ordinary"
-	Preserve ShutdownMode = "preserve"
-)
-
-// Acceptance intentionally has no completion flag. Only a fresh, matching
-// versioned /state status may describe data safety, and never process death.
-type Acceptance struct{ Accepted bool }
-
-func (c *Client) Shutdown(ctx context.Context, target Target, mode ShutdownMode) (Acceptance, error) {
-	path := "/shutdown"
-	switch mode {
-	case Ordinary:
-	case Preserve:
-		path += "?handoff=preserve"
-	default:
-		return Acceptance{}, ErrUnsupported
+// decodeState inspects the shutdown object's version first, so an unknown
+// future shape neither breaks load collection nor supplies an identity.
+func decodeState(data []byte) (State, error) {
+	var wire struct {
+		Shutdown json.RawMessage `json:"shutdown"`
 	}
-	// Ordinary mutations have no generation precondition. Do not pretend a read
-	// before a POST closes the process-replacement race.
-	if target.Generation != "" {
-		return Acceptance{}, ErrUnsupported
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return State{}, err
 	}
-	data, code, err := c.call(ctx, target, http.MethodPost, path, nil)
-	if err != nil {
-		return Acceptance{}, err
+	if len(wire.Shutdown) == 0 || string(wire.Shutdown) == "null" {
+		return State{}, nil
 	}
-	var result struct {
-		OK bool `json:"ok"`
+	var version struct {
+		SchemaVersion *uint32 `json:"schema_version"`
 	}
-	if err := json.Unmarshal(data, &result); err != nil {
-		return Acceptance{}, err
+	if err := json.Unmarshal(wire.Shutdown, &version); err != nil {
+		return State{}, err
 	}
-	if code != http.StatusOK || !result.OK {
-		return Acceptance{}, errors.New("shutdown not accepted")
+	state := State{SchemaVersion: version.SchemaVersion}
+	if version.SchemaVersion == nil || *version.SchemaVersion != shutdownSchema {
+		return state, nil
 	}
-	return Acceptance{Accepted: true}, nil
+	var identity struct {
+		Generation string `json:"runtime_generation"`
+	}
+	if err := json.Unmarshal(wire.Shutdown, &identity); err != nil {
+		return State{}, err
+	}
+	state.Generation = identity.Generation
+	return state, nil
 }
-
-type ReloadResult struct {
-	OK         bool    `json:"ok"`
-	Outcome    string  `json:"outcome"`
-	Generation *uint64 `json:"generation"`
-	Version    *string `json:"version"`
-	Prefix     *string `json:"prefix"`
-}
-
-func (c *Client) Reload(ctx context.Context, target Target) (ReloadResult, error) {
-	if target.Generation != "" {
-		return ReloadResult{}, ErrUnsupported
-	}
-	data, code, err := c.call(ctx, target, http.MethodPost, "/reload", nil)
-	if err != nil {
-		return ReloadResult{}, err
-	}
-	var result ReloadResult
-	if err := json.Unmarshal(data, &result); err != nil {
-		return ReloadResult{}, err
-	}
-	if code != http.StatusOK || !result.OK || result.Generation == nil || (result.Outcome != "adopted" && result.Outcome != "unchanged") {
-		return ReloadResult{}, errors.New("reload did not succeed")
-	}
-	return result, nil
-}
-
-var _ Lifecycle = (*Client)(nil)
