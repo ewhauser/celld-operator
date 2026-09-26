@@ -77,8 +77,7 @@ func TestPolicyDesiredReplicaReporting(t *testing.T) {
 				t.Fatal(err)
 			}
 			f.Spec.Capacity = &fleet.CapacityPolicy{Mode: mode}
-			j := getCurrentState(t, r, f)
-			j.Capacity = &capacity.State{Decision: fleet.CapacityStatus{DesiredReplicas: 5}}
+			j := &fleetState{Version: 1, FleetUID: f.UID, Capacity: &capacity.State{Decision: fleet.CapacityStatus{DesiredReplicas: 5}}}
 			res := &fleet.CelldStorageReservation{}
 			if err := r.Get(t.Context(), client.ObjectKey{Name: reservationName(f)}, res); err != nil {
 				t.Fatal(err)

@@ -50,6 +50,7 @@ spec:
           args:
             - --operator-namespace={{ .Release.Namespace }}
             - --network-policy-enforced={{ .Values.networkPolicyEnforced }}
+            - --member-replacement-delay={{ .Values.memberReplacementDelay }}
             {{- if .Values.metrics.enabled }}
             - --metrics-bind-address=:{{ .Values.metrics.port }}
             {{- end }}

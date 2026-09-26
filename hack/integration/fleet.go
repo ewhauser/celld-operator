@@ -43,7 +43,7 @@ func podReady(pod object) bool {
 // reports Provisioned for the current generation, the workload has observed
 // its spec with exactly count updated and ready replicas, no fleet Pod is
 // still terminating (a removed member is gone, not draining), and a
-// PersistentFleet retains no disk above count and allows one disruption.
+// PersistentFleet allows one disruption. Disks of removed members remain.
 func (h *harness) settled(fleetName string, count int64) bool {
 	f := h.get("celldfleet", fleetName)
 	ready := condition(f, "Ready")
@@ -75,14 +75,14 @@ func (h *harness) settled(fleetName string, count int64) bool {
 		return true
 	}
 	for name := range h.claims(fleetName) {
-		if ordinal, ok := claimOrdinal(fleetName, name); !ok || int64(ordinal) >= count {
+		if _, ok := claimOrdinal(fleetName, name); !ok {
 			return false
 		}
 	}
 	return h.budget(fleetName) == 1
 }
 
-// budget reports the fleet PDB's maxUnavailable, or -1 when absent.
+// budget reports the fleet PDB's configured maxUnavailable, or -1 when absent.
 func (h *harness) budget(fleetName string) int64 {
 	pdb, err := h.tryGet("fleets", "pdb", fleetName)
 	if err != nil {
@@ -92,6 +92,16 @@ func (h *harness) budget(fleetName string) int64 {
 		return int64(v)
 	}
 	return -1
+}
+
+// disruptionsAllowed reports how many more voluntary evictions the fleet PDB
+// admits now, or -1 when absent. An unready member counts against it.
+func (h *harness) disruptionsAllowed(fleetName string) int64 {
+	pdb, err := h.tryGet("fleets", "pdb", fleetName)
+	if err != nil {
+		return -1
+	}
+	return num(pdb, "status", "disruptionsAllowed")
 }
 
 func claimOrdinal(fleetName, claim string) (int, bool) {
@@ -224,11 +234,6 @@ func (h *harness) waitWatching(description string, timeout time.Duration, d *dis
 		return check()
 	})
 	fmt.Printf("PASS: %s never had more than %d member(s) down; replaced in order %v\n", d.fleet, d.maxDown, d.replaced)
-}
-
-func (h *harness) fleetReason(fleetName string) (string, string) {
-	c := condition(h.get("celldfleet", fleetName), "Ready")
-	return str(c, "reason"), str(c, "message")
 }
 
 // killOperator force-deletes the running manager Pod, the way a node loss

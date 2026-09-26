@@ -162,7 +162,7 @@ func TestApplicationObservationCannotBlockContraction(t *testing.T) {
 	})
 	x.desired(2)
 	x.converge()
-	if s := x.state(); s.Applied != 2 {
+	if replicas(x.workload()) != 2 {
 		t.Fatal("application observation stalled removal")
 	}
 	f := reconcile(t, x.r, x.f)

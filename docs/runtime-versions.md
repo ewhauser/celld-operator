@@ -5,8 +5,8 @@ Provisioning requires an explicit registry-pinned OCI image ending in
 list of stock upstream releases accepted as substitutes.
 
 The required fork is based on upstream v0.5.1 and exposes its state through the
-existing `/state` control plane, including `node_log` from `.5`. Every possible
-recovery participant must understand its native `bucket_complete` proof. See
+existing `/state` control plane. Every possible recovery participant must
+understand its native `bucket_complete` proof. See
 [the wire contract](runtime-control-plane.md) and [fork source](https://github.com/ewhauser/celld).
 
 Pin validation is syntactic. Before deployment, verify the artifact's source,
@@ -18,18 +18,17 @@ Confirm that the mirror serves the compatible fork under the pinned digest; the
 operator cannot infer image provenance from the reference.
 
 A runtime-image change is a rolling update for both profiles. PersistentFleet
-replaces one member at a time on its retained disk, each only once the fleet has
-settled, so old and new versions run together during the rollout. No old runtime
-adapter or directional stock-release migration exists. The caller must establish
-source/target format compatibility; the operator cannot infer it from two valid
-digest strings.
+replaces one member at a time on its retained disk, highest ordinal first, and
+waits for each to be Ready, so old and new versions run together during the
+rollout. No old runtime adapter or directional stock-release migration exists.
+The caller must establish source/target format compatibility; the operator
+cannot infer it from two valid digest strings.
 
-PersistentFleet settlement and disk release read celld's `/state.node_log`,
-first published in `0.5.1-ewhauser.5`. Earlier runtimes still roll restarts and
-upgrades on readiness plus a one-minute stabilization, so an older fleet can
-upgrade in place. They never authorize disk deletion. On `.5`, an idle leader
-never lets go of a removed follower, so a removed member's disk is never
-released; scale-in of a PersistentFleet requires `.6` or later on every member.
+The operator does not read celld's `/state.node_log`
+([ADR 0024](decisions/0024-persistentfleet-is-a-statefulset.md)) and treats
+every fork build the same way. Builds that predate `node_log`, such as
+`0.5.1-ewhauser.3` and `.4`, restart, upgrade and scale like later ones, so an
+older fleet can upgrade in place.
 
 ## Published fork artifact
 
@@ -39,9 +38,11 @@ Release `v0.5.1-ewhauser.6` has a Linux amd64/arm64 image index:
 ghcr.io/ewhauser/celld@sha256:07a81e72155890b36529756a3ecbb22045d94679b3001a0341cacc044337549a
 ```
 
-`.6` adds to `.5`'s node-log state: three failed idle probes to a follower
-degrade the leader's ensemble exactly as a failed write does, so an idle fleet
-moves off a departed member and releases its obligations.
+In `.6`, three failed idle probes to a follower degrade the leader's ensemble
+exactly as a failed write does, so an idle fleet also moves off a departed
+member. Earlier builds move off it only after a failed write, so an idle leader
+can keep depending on a removed member's disk; see the
+[limits](current-operation.md#limits) before deleting one by hand.
 
 The source revision is `801e98307157e962a57d5b0804dcf4a21ced008c`.
 [Release build 36205466928](https://github.com/ewhauser/celld/actions/runs/36205466928)

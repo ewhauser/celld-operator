@@ -9,11 +9,11 @@ retained CSI disks and changes one member at a time.
 
 > [!WARNING]
 > If you use celld with persistent local storage (`PersistentFleet`), you must
-> use the [ewhauser/celld fork](https://github.com/ewhauser/celld). The operator
-> relies on its node-log state to pace changes and decide when a local disk may
-> be deleted; stock upstream celld does not provide that state. All runtime and
-> recovery nodes must use a compatible fork. The fork is also required for
-> `Bucket` fleets. See [compatibility](site/src/content/docs/reference/compatibility.md)
+> use the [ewhauser/celld fork](https://github.com/ewhauser/celld). It keeps an
+> empty replacement disk from answering for a member's previous disk, and it
+> lets an idle leader stop depending on a departed member; stock upstream celld
+> does neither. All runtime and recovery nodes must use a compatible fork. The
+> fork is also required for `Bucket` fleets. See [compatibility](site/src/content/docs/reference/compatibility.md)
 > for the required release and image digest.
 
 ## Use the operator
@@ -42,7 +42,7 @@ until CNI enforcement is attested. Local integration suites are available for re
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for formatting, linting, hooks, and container
 builds, and [docs/](docs/README.md) for architecture and test evidence.
-Test evidence and boundaries: [qualification records](docs/qualification/README.md). Both profiles require an explicit compatible fork runtime digest and run celld directly; PersistentFleet reads celld's node-log state. The controller has no S3 or EC2 client.
+Test evidence and boundaries: [qualification records](docs/qualification/README.md). Both profiles require an explicit compatible fork runtime digest and run celld directly as ordinary rolling workloads. The controller has no S3 or EC2 client.
 
 ## Contributor references
 

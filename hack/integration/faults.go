@@ -7,10 +7,10 @@ import (
 )
 
 // exerciseFaults disrupts one PersistentFleet member at a time in each way a
-// kind cluster can (ADR 0023 qualification): graceful and forced Pod
+// kind cluster can (ADR 0024 qualification): graceful and forced Pod
 // deletion, SIGKILL of celld, a node drain serialized by the PDB, manager
-// kills mid-rollout and mid-contraction, a lost claim, a lost volume and an
-// administrator replacement. Continuous writes run through every fault, and
+// kills mid-rollout and mid-contraction, a deleted claim, a lost volume and a
+// node whose kubelet stops. Continuous writes run through every fault, and
 // after each one the fleet must settle with every acknowledged write readable.
 // No step is repaired by hand.
 func (h *harness) exerciseFaults() {
@@ -36,37 +36,30 @@ func (h *harness) exerciseFaults() {
 	h.fault("node drain serialized by the PDB", h.drainTwoNodes, h.sameDisksAfter(), h.newPod("beta-1"))
 
 	h.fault("manager killed mid-contraction", func() {
-		h.shrinkWatchingRelease(2, nil, h.killOperator)
+		h.shrinkWatching(2, nil, h.killOperator)
 		h.setReplicas("beta", 3)
-	})
+	}, h.sameDisksAfter())
 
-	h.fault("lost claim", func() {
+	// The StatefulSet controller recreates a deleted claim for the member's
+	// next Pod; the operator takes no part.
+	h.fault("deleted claim", func() {
 		h.k("-n", "fleets", "delete", "pvc", "data-beta-1", "--wait=false")
 		h.k("-n", "fleets", "delete", "pod", "beta-1", "--wait=false")
-		h.waitReplacedDisk("data-beta-1")
+		h.waitReplacedDisk("data-beta-1", 10*time.Minute)
 	}, h.freshDiskAfter("data-beta-1"))
 
 	h.fault("lost volume", func() {
 		// A backend disk that no longer exists: the PV object is removed
 		// without its CSI and protection finalizers, as after an EBS loss.
+		// Kubernetes marks the claim Lost and the operator replaces the member.
 		pv := str(h.get("pvc", "data-beta-0"), "spec", "volumeName")
 		h.k("delete", "pv", pv, "--wait=false")
 		h.k("patch", "pv", pv, "--type=merge", "-p", `{"metadata":{"finalizers":null}}`)
-		h.waitReplacedDisk("data-beta-0")
+		h.waitReplacedDisk("data-beta-0", 10*time.Minute)
 	}, h.freshDiskAfter("data-beta-0"))
 
-	h.merge("beta", `{"metadata":{"annotations":{"celld.eric.dev/replace-member":"7"}}}`)
-	h.wait("replace-member naming no member is reported", func() bool {
-		reason, _ := h.fleetReason("beta")
-		return reason == "ReplaceMemberInvalid"
-	})
-	h.k("-n", "fleets", "annotate", "celldfleet", "beta", "celld.eric.dev/replace-member-")
-	h.fault("replace-member annotation", func() {
-		h.merge("beta", `{"metadata":{"annotations":{"celld.eric.dev/replace-member":"beta-2"}}}`)
-		h.waitReplacedDisk("data-beta-2")
-	}, h.freshDiskAfter("data-beta-2"), func() {
-		assert(annotation(h.get("celldfleet", "beta"), "celld.eric.dev/replace-member") == "", "replace-member annotation was not cleared")
-	})
+	victim, node := h.memberOnSpareNode("beta")
+	h.fault("node failure", func() { h.failNode(node, victim) }, h.freshDiskAfter("data-"+victim))
 
 	h.fault("manager killed mid-rollout", func() {
 		h.rollAll("beta", encode(object{"spec": object{"maintenance": object{"restartToken": "faults-rollout"}}}), nil, h.killOperator)
@@ -132,7 +125,7 @@ func (h *harness) restarted(name string) func() {
 func (h *harness) freshDiskAfter(claim string) func() {
 	return func() {
 		after := h.claims("beta")
-		assert(after[claim].UID != h.faultBefore.claims[claim].UID, "%s was not replaced", claim)
+		assert(freshDisk(h.faultBefore.claims[claim], after[claim]), "%s was not replaced by a new disk: %+v", claim, after[claim])
 		for name, old := range h.faultBefore.claims {
 			if name != claim {
 				assert(after[name] == old, "replacing %s changed %s", claim, name)
@@ -141,12 +134,12 @@ func (h *harness) freshDiskAfter(claim string) func() {
 	}
 }
 
-// waitReplacedDisk waits for the operator to act on a disk declared or found
-// gone: a new claim of the same name. The fleet has not necessarily noticed
-// the loss when inject returns, so settling alone would prove nothing.
-func (h *harness) waitReplacedDisk(claim string) {
+// waitReplacedDisk waits for a new claim of the same name after a claim was
+// deleted. The fleet has not necessarily noticed the loss when inject
+// returns, so settling alone would prove nothing.
+func (h *harness) waitReplacedDisk(claim string, timeout time.Duration) {
 	old := h.faultBefore.claims[claim].UID
-	h.waitFor("operator replaces "+claim, 10*time.Minute, func() bool {
+	h.waitFor("replacement of "+claim, timeout, func() bool {
 		h.observe(h.faultWatch)
 		current, ok := h.claims("beta")[claim]
 		return ok && current.UID != old
@@ -182,7 +175,8 @@ func (h *harness) sigkill(podName string) {
 
 // drainTwoNodes drains beta-1's node, which the budget allows, and then
 // requires a second drain to be refused while beta-1 cannot return: its disk
-// is on the cordoned node, so the fleet stays unsettled and the budget is 0.
+// is on the cordoned node, so beta-1 stays unready and the fixed budget of one
+// admits no further eviction.
 func (h *harness) drainTwoNodes() {
 	selector := "--pod-selector=celld.eric.dev/fleet-uid=" + uidOf(h.get("celldfleet", "beta"))
 	first := str(h.get("pod", "beta-1"), "spec", "nodeName")
@@ -193,9 +187,41 @@ func (h *harness) drainTwoNodes() {
 		h.k("uncordon", second)
 	}()
 	h.k("drain", first, selector, "--ignore-daemonsets", "--delete-emptydir-data", "--timeout=180s")
-	h.wait("PDB allows no disruption while beta recovers", func() bool { return h.budget("beta") == 0 })
+	h.wait("PDB allows no disruption while beta-1 is down", func() bool { return h.budget("beta") == 1 && h.disruptionsAllowed("beta") == 0 })
 	out, err := h.tryK("drain", second, selector, "--ignore-daemonsets", "--delete-emptydir-data", "--timeout=30s")
 	assert(err != nil, "second drain evicted a member while the fleet was recovering: %s", out)
 	assert(uidOf(h.get("pod", "beta-0")) == survivor, "second drain replaced beta-0")
 	fmt.Println("PASS: PDB refused a second eviction while a drained member was down")
+}
+
+// memberOnSpareNode picks a member on a node that neither the store nor the
+// operator runs on, so failing that node disrupts only the fleet.
+func (h *harness) memberOnSpareNode(fleetName string) (member, node string) {
+	store := str(h.getIn(storeNS, "pod", "minio"), "spec", "nodeName")
+	for _, pod := range h.memberPods(fleetName) {
+		if n := str(pod, "spec", "nodeName"); n != "" && n != h.nodes[0] && n != store {
+			return nameOf(pod), n
+		}
+	}
+	fail("no %s member runs on a node free of the store and the operator", fleetName)
+	return "", ""
+}
+
+// failNode stops a node's kubelet, as when a node hangs or loses the control
+// plane. Its containers keep running, so celld on it becomes a zombie. After
+// the unreachable-node toleration the member's Pod is evicted and stays
+// Terminating, since nothing confirms it stopped. The operator must
+// force-delete it and, once the member has been down for the replacement
+// delay, replace its disk. The kubelet returns only after both, and the
+// member rejoins on a fresh disk.
+func (h *harness) failNode(node, member string) {
+	old := h.faultBefore.pods[member]
+	h.sh(time.Minute, "docker", "exec", node, "systemctl", "stop", "kubelet")
+	defer h.sh(time.Minute, "docker", "exec", node, "systemctl", "start", "kubelet")
+	h.waitFor("operator force-deletes "+member+" from the failed node", 15*time.Minute, func() bool {
+		h.observe(h.faultWatch)
+		pod, err := h.tryGet("fleets", "pod", member)
+		return err != nil || uidOf(pod) != old
+	})
+	h.waitReplacedDisk("data-"+member, memberReplacementDelay+10*time.Minute)
 }

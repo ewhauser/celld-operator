@@ -10,7 +10,6 @@ import (
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	"github.com/ewhauser/celld-operator/internal/capacity"
-	"github.com/ewhauser/celld-operator/internal/runtime/controlplane"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -29,8 +28,8 @@ func enableCapacity(t *testing.T, r *Reconciler, f *fleet.CelldFleet, mode strin
 }
 
 // Every capacity entry point contracts a PersistentFleet one member at a time,
-// and only while celld reports the fleet settled.
-func TestCapacityEntriesContractOneSettledMember(t *testing.T) {
+// and never while a rollout is in progress.
+func TestCapacityEntriesContractOneMemberAfterRollout(t *testing.T) {
 	for _, mode := range []string{"Automatic", "External", "Shadow", "ScaleOut"} {
 		t.Run(mode, func(t *testing.T) {
 			x := newOperationFixture(t, "PersistentFleet")
@@ -38,17 +37,20 @@ func TestCapacityEntriesContractOneSettledMember(t *testing.T) {
 			if mode == "External" {
 				x.desired(2)
 			}
-			x.unrecovered = []controlplane.UnrecoveredLog{{Session: "alpha-9/g", State: "open"}}
+			x.edit(func(f *fleet.CelldFleet) { f.Spec.Maintenance = &fleet.MaintenanceSpec{RestartToken: "r1"} })
+			x.hold = true
 			for range 20 {
 				x.step()
+				x.syncWorkload()
 				x.clock = x.clock.Add(15 * time.Second)
 			}
 			if replicas(x.workload()) != 3 {
-				t.Fatal("contracted while celld reports an unrecovered session")
+				t.Fatal("contracted while a rollout was in progress")
 			}
-			x.unrecovered = nil
+			x.hold = false
 			for range 50 {
 				x.step()
+				x.syncWorkload()
 				if replicas(x.workload()) != 3 {
 					break
 				}
@@ -60,7 +62,7 @@ func TestCapacityEntriesContractOneSettledMember(t *testing.T) {
 				}
 				return
 			}
-			if replicas(x.workload()) != 2 || x.state().LastDisruption.IsZero() {
+			if replicas(x.workload()) != 2 {
 				t.Fatalf("capacity did not remove one member: %d", replicas(x.workload()))
 			}
 		})

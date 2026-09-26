@@ -312,10 +312,6 @@ func nameOf(o object) string       { return str(o, "metadata", "name") }
 func conditions(o object) []object { return list(o, "status", "conditions") }
 func generation(o object) int64    { return num(o, "metadata", "generation") }
 func specReplicas(o object) int64  { return num(o, "spec", "replicas") }
-func annotation(o object, key string) string {
-	return str(o, "metadata", "annotations", key)
-}
-
 func hasReason(o object, reasons ...string) bool {
 	for _, c := range conditions(o) {
 		for _, reason := range reasons {

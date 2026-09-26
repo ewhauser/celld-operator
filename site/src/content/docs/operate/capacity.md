@@ -3,7 +3,7 @@ title: Configure capacity policy
 description: Observe demand recommendations, then enable bounded additions if the signals are complete.
 ---
 
-Capacity policy reads each celld Pod's private `/state` endpoint and Kubernetes Metrics Server. Install Metrics Server and permit operator access to port 8081 before using it. You provision nodes, IAM roles, the CSI driver, and Metrics Server. Adding PersistentFleet replicas requests new PVCs through the configured StorageClass. Start with `Shadow` to see recommendations without changing the workload.
+Capacity policy reads each celld Pod's private `/state` endpoint and Kubernetes Metrics Server. Install Metrics Server and permit operator access to port 8081 before using it. You provision nodes, IAM roles, the CSI driver, and Metrics Server. Adding PersistentFleet replicas requests new PVCs through the configured StorageClass, except where an ordinal reattaches the disk it kept after an earlier scale-in. Start with `Shadow` to see recommendations without changing the workload.
 
 ## Start in Shadow mode
 
@@ -29,7 +29,7 @@ kubectl --context YOUR_CONTEXT -n fleets get celldfleet my-fleet \
   -o json | jq '.status.capacity'
 ```
 
-`ScaleOut` can add bounded capacity after a stable high-demand window. `spec.replicas` remains your manual target; the applied count can exceed it. `Automatic` also requests reductions. Requests use the same path as manual scaling: one Bucket member per completed rollout, gated on survivor capacity for every possible victim, and for PersistentFleet only when the fleet is settled. `External` instead assigns `spec.replicas` to one `/scale` writer and disables built-in demand collection.
+`ScaleOut` can add bounded capacity after a stable high-demand window. `spec.replicas` remains your manual target; the applied count can exceed it. `Automatic` also requests reductions. Requests use the same path as manual scaling: reductions remove one member per step, each after the previous change has rolled out, and automatic reductions are also gated on survivor capacity for every possible victim. `External` instead assigns `spec.replicas` to one `/scale` writer and disables built-in demand collection.
 
 `PendingCapacity` means a requested addition has not become useful. `IneffectiveCapacity` means it passed its provisioning deadline; inspect Pods, PVCs, and node capacity. `IncompleteMetrics` and `RepeatedSamples` reset stabilization. `ObservingRedistribution` waits to see whether additions relieve incumbents; `LoadNotRedistributed` holds further pressure-driven batches. The operator does not count an idle new Pod as useful redistribution. These reasons are explained in [conditions](../../reference/conditions/) and [capacity troubleshooting](../../troubleshoot/scheduling/).
 

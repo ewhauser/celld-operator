@@ -23,10 +23,11 @@ workload changes. A new `restartToken` requests a same-version restart. Restarts
 and upgrades are one-member rolling updates for both profiles;
 `allowCoordinatedDowntime` is accepted and ignored.
 
-The `celld.eric.dev/replace-member` annotation on a PersistentFleet names an
-ordinal or Pod name whose existing disk the administrator declares gone. The
-operator replaces that member's Pod and claim under the one-disruption rule and
-removes the annotation. See [one disruption at a time](current-operation.md).
+PersistentFleet has no member-replacement API. The operator replaces a member
+that cannot come back on its own: at once when its claim is `Lost`, or after
+the replacement delay when it is the one member down and the rest of the fleet
+is ready. The StatefulSet creates a fresh claim. See
+[self-healing](current-operation.md#self-healing).
 
 `spec.env` adds up to 32 `CELLD_` variables with either a literal `value` or a
 same-namespace `secretKeyRef` (`name` and `key`). Operator-owned identity,
@@ -55,8 +56,9 @@ with a restart so new Pods read it.
 
 A bucket reservation permanently binds the bucket to the fleet UID. Recreating
 a fleet with the same name does not transfer ownership. Its
-`celld.eric.dev/current-operation` annotation holds operator bookkeeping; fleet
-status is a reconstructible projection.
+`celld.eric.dev/current-operation` annotation holds only capacity-policy
+history and is removed when there is none; fleet status is a reconstructible
+projection.
 [Preview configuration](previews.md) lives on an existing fleet under `spec.previews`.
 It reserves a separate preview bucket to that parent fleet UID, then binds each
 child fleet to a disjoint `storage.prefix` and `previewFleetRef`.
@@ -65,9 +67,9 @@ separate `storage.scratch.request`/`limit` for its disk-backed emptyDir. These
 fields are immutable and do not change ordinary dedicated fleet defaults.
 `spec.previews` may be added once; it is immutable thereafter and excluded from
 the parent runtime reservation hash. Initialization requests and executor status
-use the existing `CelldStorageReservation`; its lifecycle annotation remains
-operator-owned, while its status subresource holds the retained seed result.
-See [one disruption at a time](current-operation.md) before changing lifecycle code.
+use the existing `CelldStorageReservation`; its `current-operation` annotation
+remains operator-owned, while its status subresource holds the retained seed result.
+See [PersistentFleet lifecycle](current-operation.md) before changing lifecycle code.
 
 The `/scale` subresource maps desired replicas to `spec.replicas` and observed
 nonterminal Pods to `status.replicas`. External autoscalers target the CelldFleet,

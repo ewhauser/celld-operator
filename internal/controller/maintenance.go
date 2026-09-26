@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"time"
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -11,25 +10,6 @@ import (
 )
 
 func paused(f *fleet.CelldFleet) bool { return f.Spec.Maintenance != nil && f.Spec.Maintenance.Paused }
-func resetMaintenanceCapacity(s *fleetState) {
-	if s.Capacity == nil {
-		return
-	}
-	c := s.Capacity
-	// Current samples cannot span a disruption. Preserve the bounded addition
-	// baseline and ineffective-batch hold, but collect fresh samples afterward.
-	c.Load = nil
-	c.Stamps = nil
-	c.Actionable = false
-	c.LowSince = time.Time{}
-	c.HighSince = time.Time{}
-	c.LowSamples = 0
-	c.HighSamples = 0
-	if c.Addition != nil {
-		c.Addition.Since = time.Time{}
-		c.Addition.Samples = 0
-	}
-}
 func (r *Reconciler) pauseFleet(ctx context.Context, f *fleet.CelldFleet) (ctrl.Result, error) {
 	// Nothing is in flight outside the workload controller; pausing only stops
 	// new workload changes.
@@ -52,8 +32,5 @@ func (r *Reconciler) deleteFleet(ctx context.Context, f *fleet.CelldFleet) (ctrl
 			}
 		}
 	}
-	if f.Spec.Profile == "Bucket" {
-		return r.deleteBucket(ctx, f)
-	}
-	return r.deletePersistent(ctx, f)
+	return r.deleteWorkload(ctx, f)
 }

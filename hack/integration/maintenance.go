@@ -6,7 +6,7 @@ import (
 )
 
 // exerciseMaintenance qualifies rolling restart and runtime upgrade on
-// retained disks (ADR 0023): one member at a time, highest ordinal first, no
+// retained disks (ADR 0024): one member at a time, highest ordinal first, no
 // coordinated downtime, every PVC/PV/CSI identity unchanged and every
 // acknowledged write readable. It ends with deletion of both profiles.
 func (h *harness) exerciseMaintenance() {
@@ -74,18 +74,8 @@ func (h *harness) exercisePersistentUpgrade() {
 	legacy.Spec.RuntimeImage = h.opts.upgradeFrom
 	legacy.Spec.Replicas = 3
 	h.apply(legacy)
-	h.waitFor("legacy runtime serves on retained disks", 8*time.Minute, func() bool {
-		ready := 0
-		for _, pod := range h.memberPods("legacy") {
-			if podReady(pod) {
-				ready++
-			}
-		}
-		return h.ready("legacy") && ready == 3
-	})
-	reason, message := h.fleetReason("legacy")
-	assert(reason != "Provisioned", "a runtime without node_log state reported a settled fleet: %s", message)
-	fmt.Println("PASS: legacy runtime is served but never reported settled:", reason, message)
+	h.waitSettled("legacy", 3, 8*time.Minute)
+	fmt.Println("PASS: a runtime without node_log state provisions like any other")
 	h.writeLedger("legacy")
 	h.startWriter("legacy")
 	h.rollAll("legacy", encode(object{"spec": object{"runtimeImage": h.opts.runtimeImage}}), func() bool {

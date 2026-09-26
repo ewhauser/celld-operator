@@ -11,7 +11,6 @@ import (
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	"github.com/ewhauser/celld-operator/internal/capacity"
-	"github.com/ewhauser/celld-operator/internal/runtime/controlplane"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -25,8 +24,12 @@ import (
 // driver keeps on a Delete PV until its backing storage is gone.
 const csiDeletionFinalizer = "external-provisioner.volume.kubernetes.io/finalizer"
 
+// revisionLabel is the label the StatefulSet controller puts on each Pod,
+// naming the template revision it was created from.
+const revisionLabel = "controller-revision-hash"
+
 // operationFixture simulates the Kubernetes workload controller, scheduler and
-// CSI binding around one fleet, plus celld's node-log reports.
+// CSI binding around one fleet.
 type operationFixture struct {
 	t     *testing.T
 	r     *Reconciler
@@ -35,13 +38,8 @@ type operationFixture struct {
 	cpu   int64
 	// admit simulates mutating admission on each Pod the workload controller creates.
 	admit func(*corev1.PodSpec)
-	// Node-log reports. By default every member reports a settled fleet with
-	// a sweep made now; tests change these to model recovery.
-	obligations map[string][]string
-	unrecovered []controlplane.UnrecoveredLog
-	stale       bool
-	noNodeLog   bool
-	reads       int
+	// hold stops the simulated StatefulSet rollout, as an unready Pod would.
+	hold bool
 }
 type fixtureCollector struct{ x *operationFixture }
 
@@ -57,25 +55,6 @@ func (c fixtureCollector) Collect(ctx context.Context, _ *fleet.CelldFleet) capa
 		out.Samples = append(out.Samples, capacity.Sample{Identity: id, Ready: true, CPU: x.cpu, MemoryMiB: 10, RuntimeMemoryMiB: 10, RuntimeAt: x.clock, RuntimeReceived: x.clock, MetricsAt: x.clock, MetricsReceived: x.clock, Window: 15 * time.Second})
 	}
 	return out
-}
-
-type fakeNodeLogs struct{ x *operationFixture }
-
-func (c fakeNodeLogs) NodeLog(_ context.Context, target controlplane.Target) (controlplane.NodeLog, error) {
-	x := c.x
-	x.reads++
-	if x.noNodeLog {
-		return controlplane.NodeLog{}, controlplane.ErrNoNodeLog
-	}
-	observed := x.clock.Add(time.Minute)
-	if x.stale {
-		observed = time.Time{}
-	}
-	obligations := x.obligations
-	if obligations == nil {
-		obligations = map[string][]string{}
-	}
-	return controlplane.NodeLog{Posture: "fleet", Session: target.Node + "/g", ShipperHealthy: true, Fleet: &controlplane.FleetLog{ObservedAt: observed, Complete: true, Unrecovered: x.unrecovered, Obligations: obligations}}, nil
 }
 
 func newOperationFixture(t *testing.T, profile string) *operationFixture {
@@ -94,7 +73,6 @@ func newOperationFixture(t *testing.T, profile string) *operationFixture {
 	x.r = setup(t, f)
 	x.r.now = func() time.Time { return x.clock }
 	x.r.Collector = fixtureCollector{x}
-	x.r.RuntimeState = fakeNodeLogs{x}
 	reconcile(t, x.r, f)
 	reconcile(t, x.r, f)
 	x.syncWorkload()
@@ -112,19 +90,18 @@ func (x *operationFixture) step() *fleet.CelldFleet { x.t.Helper(); return recon
 func (x *operationFixture) desired(n int32)         { x.f = desiredCount(x.t, x.r, x.f, n) }
 
 // converge runs the controller and simulated Kubernetes until the fleet
-// reports Provisioned, then returns its status.
-func (x *operationFixture) converge() *fleet.CelldFleet {
+// reports Provisioned.
+func (x *operationFixture) converge() {
 	x.t.Helper()
 	var f *fleet.CelldFleet
 	for range 40 {
 		f = x.step()
 		x.syncWorkload()
 		if c := meta.FindStatusCondition(f.Status.Conditions, "Ready"); c != nil && c.Reason == "Provisioned" {
-			return f
+			return
 		}
 	}
 	x.t.Fatalf("fleet never converged: %+v", meta.FindStatusCondition(f.Status.Conditions, "Ready"))
-	return nil
 }
 func (x *operationFixture) edit(edit func(*fleet.CelldFleet)) {
 	x.t.Helper()
@@ -159,8 +136,9 @@ func (x *operationFixture) pod(name string) *corev1.Pod {
 }
 
 // Simulate only the Kubernetes workload controller, scheduler and CSI binding.
-// A StatefulSet keeps OnDelete semantics: a Pod is created at the update
-// revision and never replaced until something deletes it.
+// A StatefulSet creates each missing Pod at the update revision. Under
+// RollingUpdate it replaces one outdated Pod per sync, highest ordinal first;
+// under OnDelete it never replaces a Pod that nothing deleted.
 func (x *operationFixture) syncWorkload() {
 	t := x.t
 	ctx := t.Context()
@@ -168,13 +146,16 @@ func (x *operationFixture) syncWorkload() {
 	w := x.workload()
 	n := replicas(w)
 	revision := ""
+	rolling := false
 	if sts, ok := w.(*appsv1.StatefulSet); ok {
 		revision = templateRevision(t, sts.Spec.Template)
+		rolling = sts.Spec.UpdateStrategy.Type == appsv1.RollingUpdateStatefulSetStrategyType && !x.hold
 	}
 	pods := &corev1.PodList{}
 	if err := x.r.List(ctx, pods, client.InNamespace(x.f.Namespace), client.MatchingLabels(labels(x.f))); err != nil {
 		t.Fatal(err)
 	}
+	outdated := -1
 	for _, p := range pods.Items {
 		var ordinal int
 		_, _ = fmt.Sscanf(p.Name, x.f.Name+"-%d", &ordinal)
@@ -182,6 +163,14 @@ func (x *operationFixture) syncWorkload() {
 			if err := x.r.Delete(ctx, &p, client.Preconditions{UID: &p.UID}); err != nil {
 				t.Fatal(err)
 			}
+		} else if rolling && p.Labels[revisionLabel] != revision {
+			outdated = max(outdated, ordinal)
+		}
+	}
+	if outdated >= 0 {
+		p := x.pod(fmt.Sprintf("%s-%d", x.f.Name, outdated))
+		if err := x.r.Delete(ctx, p, client.Preconditions{UID: &p.UID}); err != nil {
+			t.Fatal(err)
 		}
 	}
 	updated := int32(0)
@@ -227,8 +216,9 @@ func (x *operationFixture) syncWorkload() {
 			claim := &corev1.PersistentVolumeClaim{}
 			err := x.r.Get(ctx, client.ObjectKey{Namespace: x.f.Namespace, Name: "data-" + name}, claim)
 			if apierrors.IsNotFound(err) {
-				claim = initialClaims(x.f, workload(x.f, x.r.Options))[0]
-				claim.Name = "data-" + name
+				// The StatefulSet controller creates a missing claim from its template.
+				tmpl := w.(*appsv1.StatefulSet).Spec.VolumeClaimTemplates[0]
+				claim = &corev1.PersistentVolumeClaim{Name: "data-" + name, Namespace: x.f.Namespace, Labels: tmpl.Labels, Annotations: tmpl.Annotations, Spec: tmpl.Spec}
 				claim.UID = types.UID(fmt.Sprintf("claim-%s-%d", name, x.clock.UnixNano()))
 				if err := x.r.Create(ctx, claim); err != nil {
 					t.Fatal(err)
@@ -267,9 +257,10 @@ func (x *operationFixture) syncWorkload() {
 		w.Status.Replicas = n
 		w.Status.ObservedGeneration = w.Generation
 		w.Status.UpdatedReplicas = updated
-		// Like the real controller, OnDelete never advances currentRevision.
 		w.Status.UpdateRevision = revision
-		if w.Status.CurrentRevision == "" {
+		// Like the real controller, only a completed RollingUpdate advances
+		// currentRevision; OnDelete never does.
+		if w.Status.CurrentRevision == "" || (w.Spec.UpdateStrategy.Type == appsv1.RollingUpdateStatefulSetStrategyType && updated == n) {
 			w.Status.CurrentRevision = revision
 		}
 	case *appsv1.Deployment:

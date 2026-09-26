@@ -253,8 +253,8 @@ func TestInvalidRoutingDoesNotBlockContraction(t *testing.T) {
 		t.Fatalf("routing error not reported: %+v", c)
 	}
 	x.converge()
-	if s := x.state(); s.Applied != 2 {
-		t.Fatal("routing prevented contraction", s)
+	if replicas(x.workload()) != 2 {
+		t.Fatal("routing prevented contraction")
 	}
 }
 

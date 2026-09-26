@@ -8,18 +8,29 @@ Use the task-oriented [installation guide](../site/src/content/docs/start/instal
 Both Bucket and PersistentFleet need a compatible digest-pinned fork runtime and
 run celld directly. The operator has Kubernetes credentials only; celld receives the runtime
 bucket identity. The manager does not read S3 recovery metadata or terminate EC2
-instances. The fleet namespace Role includes guarded PVC deletion; storage
-finalizers remain under Kubernetes and CSI control. Its Service `update` verb only
-fills fields a newer release declares on an otherwise exactly matching
-operator-created Service; any other difference remains `InfrastructureBlocked`.
+instances. The ClusterRole covers only the fleet API and StorageClass reads; it
+has no PersistentVolume, Node or VolumeAttachment access. The fleet namespace
+Role grants Pod and PVC deletion, and the operator binds every delete to the
+object's UID. It force-deletes a member Pod left on a node that no longer
+answers, deletes a member's claim and Pod when its volume is gone or the member
+cannot come back, and deletes every fleet claim once a deleted
+PersistentFleet's StatefulSet is gone. The Role grants no claim creation; the
+StatefulSet creates claims. Storage finalizers remain under Kubernetes and CSI
+control. The Role's Service `update` verb only fills fields a newer release
+declares on an otherwise exactly matching operator-created Service; any other
+difference remains `InfrastructureBlocked`.
 Its PodDisruptionBudget `update` verb converges fleet budgets; workloads and
 NetworkPolicies are likewise converged for both profiles.
 
-For implementation details use [one disruption at a time](current-operation.md),
+For implementation details use [PersistentFleet lifecycle](current-operation.md),
 [retained disks](disposable-disks.md) and [typed control plane](runtime-control-plane.md).
 Removing a reservation annotation, claim finalizer or fleet finalizer is not a
-recovery procedure. To declare an existing PersistentFleet disk gone, use the
-`celld.eric.dev/replace-member` annotation.
+recovery procedure. A PersistentFleet heals without an administrator; see
+[self-healing](current-operation.md#self-healing). The operator's
+`--member-replacement-delay` flag, chart value `memberReplacementDelay`, sets
+how long one member may stay down, while every other member is ready, before
+it is replaced on a fresh disk. It defaults to `10m` and must be at least one
+minute.
 
 ## Build and validate
 

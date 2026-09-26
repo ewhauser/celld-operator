@@ -5,10 +5,11 @@ description: Understand celld's durability model, then configure its Kubernetes 
 
 :::caution[Local storage requires the celld fork]
 If you use celld with persistent local storage (`PersistentFleet`), you must use
-the [ewhauser/celld fork](https://github.com/ewhauser/celld). The operator relies
-on its node-log state to pace changes and decide when a local disk may be
-deleted; stock upstream celld does not provide that state. All runtime and recovery nodes
-must use a compatible fork. The fork is also required for `Bucket` fleets. See
+the [ewhauser/celld fork](https://github.com/ewhauser/celld). It keeps an empty
+replacement disk from answering for a member's previous disk, and it lets an
+idle leader stop depending on a departed member; stock upstream celld does
+neither. All runtime and recovery nodes must use a compatible fork. The fork is
+also required for `Bucket` fleets. See
 [compatibility](../../reference/compatibility/) for the required release and image digest.
 :::
 
@@ -34,11 +35,11 @@ class using `Delete`, `WaitForFirstConsumer` and RWOP claims. See
 
 | Setting | Bucket | PersistentFleet |
 | --- | --- | --- |
-| Local disk | Disk-backed `emptyDir`, bounded by `sizeGiB`. | One RWOP claim per ordinal, retained across restart and upgrade. |
+| Local disk | Disk-backed `emptyDir`, bounded by `sizeGiB`. | One RWOP claim per ordinal, kept for the life of the fleet. |
 | Layout | Immutable Deployment or Ordered StatefulSet. | StatefulSet. |
-| Scale-in | One member per step; highest ordinal for Ordered. | Highest ordinal when settled; its disk is deleted once no session needs it. |
-| Restart/upgrade | Rolling, one member at a time. | Rolling, one member at a time on the same disk, each after the fleet settles. |
-| PodDisruptionBudget | `maxUnavailable: 1`; node drains evict one member at a time. | `maxUnavailable: 1` while settled, `0` while recovering. |
+| Scale-in | One member per step; highest ordinal for Ordered. | Highest ordinal, one per step; its disk is kept and reattached if the fleet grows back. |
+| Restart/upgrade | Rolling, one member at a time. | Rolling, one member at a time on the same disk, highest ordinal first; each member must be Ready before the next. |
+| PodDisruptionBudget | `maxUnavailable: 1`; node drains evict one member at a time. | `maxUnavailable: 1`; a member that is not Ready counts against it. |
 
 Neither profile provisions your bucket, runtime AWS identity, worker nodes or
 ingress controller. Optional [routing](../networking/) can configure a public

@@ -11,8 +11,7 @@ The example is an Ordered Bucket fleet named `my-fleet` in namespace `fleets`.
 - Enough eligible worker nodes in the fleet's explicit zones. Three strictly
   placed replicas need three distinct hosts.
 - A compatible fork runtime image and operator image, pinned by verified
-  registry digests. All runtime/recovery nodes must use the fork. PersistentFleet
-  scale-in needs `0.5.1-ewhauser.6` or later.
+  registry digests. All runtime/recovery nodes must use the fork.
   Stock upstream v0.5.1 is insufficient; see [compatibility](../../reference/compatibility/).
 - `kubectl`, Helm, Docker/Buildx, AWS CLI, curl and jq. Use the fork's native CLI
   and esbuild for [application deployment](../first-application/).

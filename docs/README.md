@@ -6,8 +6,8 @@ describes implemented behavior and operational limits.
 
 The implementation has two authority boundaries:
 
-- [celld control plane](runtime-control-plane.md): durability, recovery and the node-log reports the operator reads.
-- [One disruption at a time](current-operation.md): the PersistentFleet lifecycle on [retained disks](disposable-disks.md). Bucket fleets roll one member at a time.
+- [celld control plane](runtime-control-plane.md): durability, recovery and the `/state` reports the operator reads for capacity and application status.
+- [PersistentFleet lifecycle](current-operation.md): a StatefulSet rolling update on [retained disks](disposable-disks.md). Bucket fleets roll one member at a time.
 
 The [launcher](launcher-supervision.md) is no longer used by any profile.
 

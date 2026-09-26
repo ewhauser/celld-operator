@@ -31,7 +31,7 @@ const contracts = [
 	['runtime-dependencies', 'Runtime responsibilities'],
 	['runtime-control-plane', 'Typed runtime control plane'],
 	['launcher-supervision', 'Launcher (removed)'],
-	['current-operation', 'One disruption at a time'],
+	['current-operation', 'PersistentFleet lifecycle'],
 	['disposable-disks', 'Retained persistent disks'],
 ];
 
@@ -343,7 +343,7 @@ const helmValuesPage = () => {
 		`| Kubernetes | ${code(chart.kubeVersion)} |`,
 		`| Description | ${cell(chart.description)} |`,
 		'',
-		'Install CRDs explicitly before the first install and on every upgrade; Helm never upgrades or deletes them. Read the [operations contract](../../contracts/operations/) before changing `networkPolicyEnforced`, `launcherImage`.',
+		'Install CRDs explicitly before the first install and on every upgrade; Helm never upgrades or deletes them. Read the [operations contract](../../contracts/operations/) before changing `networkPolicyEnforced`, `memberReplacementDelay`, `launcherImage`.',
 		'',
 		'## Values',
 		'',
@@ -368,7 +368,7 @@ const templatePurpose = {
 	'deployment.yaml': 'Two-replica controller Deployment with leader election, health probes and the opt-in flags rendered from values.',
 	'metrics.yaml': 'Optional metrics Service, ServiceMonitor and PrometheusRule (`metrics.*`).',
 	'pdb.yaml': 'PodDisruptionBudget keeping one controller replica available.',
-	'rbac.yaml': 'ClusterRole limited to the fleet API and cluster-scoped storage and node objects, plus the leader-election Role.',
+	'rbac.yaml': 'ClusterRole limited to the fleet API and StorageClass reads, plus the leader-election Role.',
 	'rbac-fleet-namespaces.yaml': 'The namespaced fleet Role and RoleBinding rendered into every entry of `fleetNamespaces`.',
 	'serviceaccount.yaml': 'Controller ServiceAccount for Kubernetes access; it needs no AWS IAM role.',
 };
@@ -415,9 +415,20 @@ const flagsPage = () => {
 	const source = 'cmd/celld-operator/main.go';
 	const text = readFileSync(path.join(repoDir, source), 'utf8');
 	const rows = [];
-	for (const match of text.matchAll(/fs\.(Bool|String|Int)\("([^"]+)",\s*([^,]+),\s*"((?:[^"\\]|\\.)*)"\)/g)) {
+	// A default that names a controller duration constant is shown as its value.
+	const controllerDir = path.join(repoDir, 'internal/controller');
+	const controllerSource = readdirSync(controllerDir)
+		.filter((file) => file.endsWith('.go') && !file.endsWith('_test.go'))
+		.map((file) => readFileSync(path.join(controllerDir, file), 'utf8'))
+		.join('\n');
+	const flagDefault = (def) => {
+		const constant = /^controller\.(\w+)$/.exec(def)?.[1];
+		const value = constant && new RegExp(`\\b${constant}\\s*=\\s*(\\d+)\\s*\\*\\s*time\\.(Hour|Minute|Second)\\b`).exec(controllerSource);
+		return value ? `${value[1]}${value[2][0].toLowerCase()}` : def;
+	};
+	for (const match of text.matchAll(/fs\.(Bool|String|Int|Duration)\("([^"]+)",\s*([^,]+),\s*"((?:[^"\\]|\\.)*)"\)/g)) {
 		const [, kind, name, def, usage] = match;
-		rows.push(`| ${code(`--${name}`)} | ${kind.toLowerCase()} | ${code(def.trim())} | ${cell(usage)} |`);
+		rows.push(`| ${code(`--${name}`)} | ${kind.toLowerCase()} | ${code(flagDefault(def.trim()))} | ${cell(usage)} |`);
 	}
 	const markdown = [
 		'---',
@@ -434,7 +445,8 @@ const flagsPage = () => {
 		'',
 		'## Combinations the binary rejects',
 		'',
-		'- `--local-rwop` or `--local-fault-point` without `--local-test`.',
+		'- `--local-rwop` without `--local-test`.',
+		'- `--member-replacement-delay` below one minute.',
 		'',
 		'## Listeners',
 		'',
@@ -474,7 +486,7 @@ const generated = [
 		'A `CelldFleet` describes one celld fleet in a namespace: its profile, replica target, storage bucket, placement, optional capacity policy and maintenance requests. `previews` can be enabled once; its configuration is immutable thereafter. `replicas`, `capacity`, `runtimeImage`, `maintenance` and `routing` remain mutable. See the [fleet API contract](../../contracts/fleet-api/) for semantics and the [conditions reference](../../reference/conditions/) for what status reports.',
 	]),
 	crdPage('config/crd/celld.eric.dev_celldstoragereservations.yaml', 'celldstoragereservation', [
-		'A `CelldStorageReservation` is the cluster-scoped, never garbage-collected tombstone that binds a bucket to exactly one fleet identity and carries bounded current-operation authority. The operator creates it; administrators read it. Never delete one to reuse a bucket or a retained disk. See [current operations](../../concepts/current-operation/) and [the exact disk contract](../../contracts/disposable-disks/).',
+		'A `CelldStorageReservation` is the cluster-scoped, never garbage-collected tombstone that binds a bucket to exactly one fleet identity. Its `celld.eric.dev/current-operation` annotation holds only capacity-policy state. The operator creates it; administrators read it. Never delete one to reuse a bucket or a retained disk. See [PersistentFleet lifecycle](../../concepts/current-operation/) and [the exact disk contract](../../contracts/disposable-disks/).',
 	]),
 	samplesPage(),
 	helmValuesPage(),

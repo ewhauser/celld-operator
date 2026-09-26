@@ -41,7 +41,6 @@ type Reconciler struct {
 	Recorder              events.EventRecorder
 	Collector             capacityCollector
 	ApplicationRuntime    controlplane.ApplicationReader
-	RuntimeState          RuntimeStateReader
 	now                   func() time.Time
 }
 
@@ -170,12 +169,8 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 			return ctrl.Result{}, err
 		}
 	}
-	// Load the one bounded current operation once; status is a projection.
-	h := r.hydrate(ctx, reservation)
-	h = r.loadedCurrent(f, h)
-	if h.err != nil {
-		return r.report(ctx, f, h, "OperationInvalid", h.err.Error(), false)
-	}
+	// Load the persisted capacity history once; status is a projection.
+	h := r.currentState(f, r.hydrate(ctx, reservation))
 	if len(reservation.OwnerReferences) != 0 || !reservation.DeletionTimestamp.IsZero() || !r.reservationMatches(ctx, f, h, expected) {
 		return r.report(ctx, f, h, "StorageScopeConflict", "Bucket is permanently reserved to another fleet UID or immutable configuration; no resources adopted", false)
 	}
@@ -187,10 +182,7 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 		}
 		return r.report(ctx, f, h, "SeedInitializing", message, false)
 	}
-	if f.Spec.Profile == "Bucket" {
-		return r.reconcileBucket(ctx, f, h)
-	}
-	return r.reconcilePersistent(ctx, f, h)
+	return r.reconcileWorkload(ctx, f, h)
 }
 
 func (r *Reconciler) ensure(ctx context.Context, desired client.Object) error {
@@ -292,10 +284,6 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, h *loadedS
 				f.Status.DesiredReplicas = s.Capacity.Decision.DesiredReplicas
 			}
 		}
-		if s.Completion != nil {
-			f.Status.Lifecycle.LastOutcome = s.Completion.Outcome
-			f.Status.Lifecycle.LastCompletionAt = s.Completion.At.UTC().Format(time.RFC3339)
-		}
 	}
 	if provisioned {
 		f.Status.Reservation = reservationName(f)
@@ -353,6 +341,12 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, h *loadedS
 	r.recordConditionChange(f, before.Status.Conditions)
 	publishFleetMetrics(f, footprint, r.capacityNow())
 	return ctrl.Result{RequeueAfter: reconcileDelay(f)}, nil
+}
+
+func (r *Reconciler) eventf(f *fleet.CelldFleet, kind, reason, format string, args ...any) {
+	if r.Recorder != nil {
+		r.Recorder.Eventf(f, nil, kind, reason, "Reconcile", format, args...)
+	}
 }
 
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {

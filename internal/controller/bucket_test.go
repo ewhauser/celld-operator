@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -58,7 +60,7 @@ func TestBucketRendersPlainWorkload(t *testing.T) {
 				}
 			}
 			for _, g := range pod.SchedulingGates {
-				if g.Name == launcherGate {
+				if g.Name == "celld.eric.dev/exclusive-volume" {
 					t.Fatal("bucket pod carries the launcher gate")
 				}
 			}
@@ -83,8 +85,8 @@ func TestBucketRendersPlainWorkload(t *testing.T) {
 					}
 				}
 			}
-			if s := x.state(); s.Operation != nil || s.Applied != 3 {
-				t.Fatalf("unexpected state %+v", s)
+			if s := x.state(); s != nil {
+				t.Fatalf("bucket fleet persisted state %+v", s)
 			}
 			reason(t, reconcile(t, x.r, x.f), "Provisioned")
 		})
@@ -110,13 +112,13 @@ func TestBucketScalesOneMemberAtATime(t *testing.T) {
 			}
 			x.syncWorkload()
 			x.step()
-			if replicas(x.workload()) != 1 || x.state().Applied != 1 {
+			if replicas(x.workload()) != 1 {
 				t.Fatal("contraction incomplete")
 			}
 			x.syncWorkload()
 			x.desired(4)
 			x.step()
-			if replicas(x.workload()) != 4 || x.state().Applied != 4 {
+			if replicas(x.workload()) != 4 {
 				t.Fatal("growth is applied directly")
 			}
 		})
@@ -130,17 +132,17 @@ func TestBucketRestartAndUpgradeRollWithoutDowntimePermission(t *testing.T) {
 	})
 	x.step()
 	d := x.workload().(*appsv1.Deployment)
-	if d.Spec.Template.Annotations[restartTokenAnnotation] != "r1" || replicas(d) != 3 || x.state().RestartToken != "r1" {
+	if d.Spec.Template.Annotations[restartTokenAnnotation] != "r1" || replicas(d) != 3 {
 		t.Fatal("restart token did not roll the template")
 	}
 	x.edit(func(f *fleet.CelldFleet) { f.Spec.RuntimeImage = fixtureRuntimeUpgrade })
 	x.step()
 	d = x.workload().(*appsv1.Deployment)
-	if d.Spec.Template.Spec.Containers[0].Image != fixtureRuntimeUpgrade || replicas(d) != 3 || x.state().RuntimeImage != fixtureRuntimeUpgrade {
+	if d.Spec.Template.Spec.Containers[0].Image != fixtureRuntimeUpgrade || replicas(d) != 3 {
 		t.Fatal("upgrade did not roll the template")
 	}
-	if x.state().Operation != nil {
-		t.Fatal("bucket maintenance recorded an operation")
+	if s := x.state(); s != nil {
+		t.Fatalf("bucket maintenance persisted state %+v", s)
 	}
 }
 
@@ -226,7 +228,7 @@ func TestBucketRecreatesMissingWorkload(t *testing.T) {
 		t.Fatal(err)
 	}
 	reason(t, reconcile(t, x.r, x.f), "Provisioning")
-	if replicas(x.workload()) != 3 || x.state().WorkloadUID != x.workload().GetUID() {
+	if replicas(x.workload()) != 3 {
 		t.Fatal("missing bucket workload not recreated")
 	}
 }
@@ -268,21 +270,35 @@ func TestBucketMigratesStrictFleet(t *testing.T) {
 }
 
 func TestBucketDropsStrictOperationState(t *testing.T) {
-	r := &Reconciler{now: func() time.Time { return time.Unix(100, 0) }}
-	f := fixture("alpha", "bucket-alpha", "Bucket")
-	s := &fleetState{Version: 1, FleetUID: f.UID, Operation: &legacyOperation{ID: "op", Kind: "Restart"}}
-	got := r.bucketLoaded(f, &loadedState{j: s})
-	if got.j.Operation != nil || got.j.Completion == nil || got.j.Completion.Outcome != "Superseded" || got.j.Completion.ID != "op" {
-		t.Fatalf("in-flight strict operation not superseded: %+v", got.j)
+	x := bucketFleet(t, "Deployment")
+	recorder := events.NewFakeRecorder(16)
+	x.r.Recorder = recorder
+	res := envReservation(t, x.r, x.f)
+	res.Annotations = map[string]string{stateKey: `{"Version":1,"FleetUID":"` + string(x.f.UID) + `","Applied":3,"Operation":{"ID":"op","Kind":"Restart","Phase":"Requesting"}}`}
+	if err := x.r.Update(t.Context(), res); err != nil {
+		t.Fatal(err)
 	}
-	if s.Operation == nil {
-		t.Fatal("loaded state mutated in place")
+	reason(t, reconcile(t, x.r, x.f), "Provisioned")
+	reconcile(t, x.r, x.f)
+	if s := x.state(); s != nil {
+		t.Fatalf("strict operation state kept: %+v", s)
 	}
-	if got := r.bucketLoaded(f, &loadedState{j: s, err: errInvalidFixture}); got.j != nil || got.err != nil {
+	superseded := 0
+	for len(recorder.Events) > 0 {
+		if e := <-recorder.Events; strings.Contains(e, "OperationSuperseded") {
+			superseded++
+		}
+	}
+	if superseded != 1 {
+		t.Fatalf("want one superseded event, got %d", superseded)
+	}
+	r := &Reconciler{}
+	s := &fleetState{Version: 1, FleetUID: x.f.UID}
+	if got := r.currentState(x.f, &loadedState{j: s, err: errInvalidFixture}); got.j != nil || got.err != nil {
 		t.Fatal("unreadable state must not block a bucket fleet")
 	}
 	foreign := &fleetState{FleetUID: types.UID("other")}
-	if got := r.bucketLoaded(f, &loadedState{j: foreign}); got.j != nil {
+	if got := r.currentState(x.f, &loadedState{j: foreign}); got.j != nil {
 		t.Fatal("foreign state reused")
 	}
 }
@@ -293,13 +309,14 @@ func TestBucketInvalidStateDoesNotBlock(t *testing.T) {
 	if err := x.r.Get(t.Context(), types.NamespacedName{Name: reservationName(x.f)}, res); err != nil {
 		t.Fatal(err)
 	}
+	res.Annotations = map[string]string{}
 	res.Annotations[stateKey] = `{"Version":99}`
 	if err := x.r.Update(t.Context(), res); err != nil {
 		t.Fatal(err)
 	}
 	reason(t, reconcile(t, x.r, x.f), "Provisioned")
-	if s := x.state(); s.Applied != 3 || s.WorkloadUID != x.workload().GetUID() {
-		t.Fatalf("state not rebuilt: %+v", s)
+	if s := x.state(); s != nil {
+		t.Fatalf("unreadable state kept: %+v", s)
 	}
 }
 
@@ -352,5 +369,41 @@ func TestBucketDeletionRemovesComputeOnly(t *testing.T) {
 	}
 	if err := x.r.Get(t.Context(), types.NamespacedName{Name: reservationName(x.f)}, &fleet.CelldStorageReservation{}); err != nil {
 		t.Fatal("bucket reservation must stay permanent", err)
+	}
+}
+
+// A removal that waits for a rollout must not hold back the zone assignment
+// the rollout's new Pods need, or neither could finish.
+func TestOrderedBucketReleasesGatesWhileContractionWaits(t *testing.T) {
+	x := bucketFleet(t, "Ordered")
+	x.edit(func(f *fleet.CelldFleet) {
+		f.Spec.Maintenance = &fleet.MaintenanceSpec{RestartToken: "r1"}
+		f.Spec.Replicas = 2
+	})
+	x.hold = true
+	x.step()
+	x.syncWorkload()
+	// The StatefulSet controller replaces the highest member with a gated Pod.
+	old := x.pod("alpha-2")
+	if err := x.r.Delete(t.Context(), old); err != nil {
+		t.Fatal(err)
+	}
+	p := old.DeepCopy()
+	p.ResourceVersion, p.UID = "", "alpha-2-rolled"
+	p.Spec.NodeName = ""
+	p.Spec.NodeSelector = nil
+	p.Spec.SchedulingGates = []corev1.PodSchedulingGate{{Name: bucketZoneGate}}
+	p.Status = corev1.PodStatus{}
+	if err := x.r.Create(t.Context(), p); err != nil {
+		t.Fatal(err)
+	}
+	if got := readyReason(x.step()); got != "Provisioning" {
+		t.Fatalf("removal did not wait for the rollout: %s", got)
+	}
+	if replicas(x.workload()) != 3 {
+		t.Fatal("removal overlapped the rollout")
+	}
+	if gates := x.pod("alpha-2").Spec.SchedulingGates; len(gates) != 0 {
+		t.Fatal("zone gate held while the removal waits")
 	}
 }

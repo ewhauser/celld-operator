@@ -34,17 +34,40 @@ Rolling back to an earlier controller reports the new field as drift.
 Bucket fleets created by earlier releases converge in place: one rolling update
 removes the launcher from the Pod template and switches the workload to
 one-member rolling updates, and the PodDisruptionBudget becomes
-`maxUnavailable: 1`. An in-flight Bucket current operation is dropped and
-recorded with outcome `Superseded`. Updating the budget needs the
+`maxUnavailable: 1`. An in-flight Bucket current operation is dropped with an
+`OperationSuperseded` Event. Updating the budget needs the
 PodDisruptionBudget `update` verb; reapply `config/rbac/fleet-namespace.yaml`
 first if you manage that Role yourself.
 
-PersistentFleets created by earlier releases also converge in place. An
-in-flight strict operation is recorded as `Superseded`, unreadable state is
-rebuilt, launcher-gated Pods are released, and members roll onto the new template
-one at a time on their existing disks, each after the fleet settles. Launcher
-retirement markers on those disks are ignored. The `DiskCleanupPending`
-condition is removed and `status.lifecycle` no longer shows operation phases.
+PersistentFleets created by earlier releases also converge in place. The
+operator switches the StatefulSet from `OnDelete` to `RollingUpdate` and writes
+the current template, and the PodDisruptionBudget becomes `maxUnavailable: 1`.
+Kubernetes then replaces each earlier Pod one at a time, highest ordinal first,
+including Pods held by the launcher scheduling gate. Each member keeps its
+claim, with the same name and identity. An in-flight strict operation is
+dropped with an `OperationSuperseded` Event, and the reservation annotation is
+rewritten to capacity-policy history alone, or removed. Launcher retirement
+markers on those disks are ignored. The `DiskCleanupPending` condition is
+removed and `status.lifecycle` is left empty. See the
+[PersistentFleet lifecycle](../../concepts/current-operation/).
+
+This release needs fewer permissions. The ClusterRole no longer grants
+PersistentVolume, Node or VolumeAttachment reads, and the fleet-namespace Role
+no longer grants PVC `create`. The Role keeps Pod and PVC `delete`, which the
+operator uses to heal members. The chart applies the smaller roles; if you
+apply `config/manager/operator.yaml` or `config/rbac/fleet-namespace.yaml`
+yourself, reapply the release's copies.
+
+This release heals PersistentFleets without an administrator. The operator
+force-deletes a member Pod left on a node that no longer answers, in Ordered
+Bucket fleets too. It replaces a member on a fresh disk when its volume is
+gone, or when it is the one member down for the chart value
+`memberReplacementDelay` (default `10m`, operator flag
+`--member-replacement-delay`) while the rest of the fleet is ready. Apart from
+image and configuration errors, it does not judge why a member is down: raise
+the value before planned work that keeps one member down longer. See
+[self-healing](../../concepts/current-operation/#self-healing).
+
 The operator accepts `--launcher-image` and ignores it; `launcherImage` can be
 dropped from chart values.
 

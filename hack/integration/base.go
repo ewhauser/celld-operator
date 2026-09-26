@@ -146,9 +146,12 @@ func (h *harness) exerciseIsolation() {
 	fmt.Println("PASS: PersistentFleet members report /state.node_log in fleet posture")
 	h.waitSettled("beta", 2, 5*time.Minute)
 	assert(h.budget("beta") == 1 && h.budget("alpha") == 1, "settled fleets do not allow one disruption")
-	// Template drift in the operator's own fields is converged, not blocked,
-	// and OnDelete keeps running members as they are while it happens.
-	betaPodUIDs := h.ordinalUIDs("beta", 2)
+	// Template drift in the operator's own fields is converged, not blocked.
+	// The StatefulSet controller can start rolling the drifted template before
+	// the operator restores it. That replaces at most one member, which cannot
+	// become ready on the broken template and rolls back on its own disk.
+	betaDisks := h.claims("beta")
+	d := h.watchDisruptions("beta")
 	h.k("-n", "fleets", "patch", "statefulset", "beta", "--type=json", "-p", encode([]object{
 		{"op": "add", "path": "/spec/template/spec/containers/0/livenessProbe", "value": object{"exec": object{"command": []string{"false"}}}},
 		{"op": "add", "path": "/spec/template/spec/containers/0/env/-", "value": object{"name": "CELLD_BUCKET", "value": "s3://other-fleet"}},
@@ -163,9 +166,10 @@ func (h *harness) exerciseIsolation() {
 		}
 		return field(container, "livenessProbe") == nil && buckets == 1
 	})
-	h.waitSettled("beta", 2, 5*time.Minute)
-	assert(same(h.ordinalUIDs("beta", 2), betaPodUIDs), "template drift correction replaced runtime pods")
-	fmt.Println("PASS: drift corrected without replacing members")
+	h.waitWatching("beta settles after drift correction", 5*time.Minute, d, func() bool { return h.settled("beta", 2) })
+	assert(len(d.replaced) <= 1, "template drift replaced more than one member: %v", d.replaced)
+	must(sameDisks(betaDisks, h.claims("beta")))
+	fmt.Println("PASS: drift corrected; at most one member rolled and every disk retained")
 }
 
 // assertDirectRuntime requires fleet Pods to run celld itself: no launcher
@@ -181,14 +185,6 @@ func (h *harness) assertDirectRuntime(fleetName string) {
 		}
 	}
 	fmt.Println("PASS:", fleetName, "runs celld directly")
-}
-
-func (h *harness) ordinalUIDs(fleetName string, count int) []string {
-	uids := make([]string, 0, count)
-	for i := range count {
-		uids = append(uids, uidOf(h.get("pod", fmt.Sprintf("%s-%d", fleetName, i))))
-	}
-	return uids
 }
 
 // reservation finds the storage reservation for a fleet in the fleets namespace.

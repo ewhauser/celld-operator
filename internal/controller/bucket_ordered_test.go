@@ -27,8 +27,7 @@ func TestOrderedBucketZoneGateAndDeterministicVictim(t *testing.T) {
 		objects = append(objects, pod)
 	}
 	r := setup(t, objects...)
-	j := &fleetState{WorkloadUID: "workload"}
-	if err := r.scheduleOrderedBucket(t.Context(), f, j); err != nil {
+	if err := r.scheduleOrderedBucket(t.Context(), f, "workload"); err != nil {
 		t.Fatal(err)
 	}
 	for i := range 3 {
@@ -61,7 +60,7 @@ func TestOrderedBucketGateRejectsForeignAndConflictingPods(t *testing.T) {
 				pod.Spec.NodeName = "node"
 			}
 			r := setup(t, pod)
-			if err := r.scheduleOrderedBucket(t.Context(), f, &fleetState{WorkloadUID: "workload"}); err == nil {
+			if err := r.scheduleOrderedBucket(t.Context(), f, "workload"); err == nil {
 				t.Fatal("unsafe gate release")
 			}
 			got := &corev1.Pod{}

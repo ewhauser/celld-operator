@@ -92,7 +92,7 @@ export default defineConfig({
                 { label: 'Contribute', collapsed: true, items: [
                     { label: 'Development and documentation', slug: 'contribute' },
                     { label: 'Architecture', slug: 'concepts/architecture' },
-                    { label: 'How operations resume', slug: 'concepts/current-operation' },
+                    { label: 'PersistentFleet lifecycle', slug: 'concepts/current-operation' },
                     { label: 'How removal is checked', slug: 'concepts/safety-model' },
                 ] },
             ],
