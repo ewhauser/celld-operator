@@ -110,27 +110,46 @@ func (h *harness) createCluster() {
 		h.k("taint", "nodes", h.nodes[0], "node-role.kubernetes.io/control-plane:NoSchedule-")
 	}
 	h.k("-n", "kube-system", "rollout", "status", "daemonset/calico-node", "--timeout=240s")
-	h.k("apply", "-f", filepath.Join(h.root, "config", "crd"))
-	h.k("wait", "--for=condition=Established", "crd/celldfleets.celld.eric.dev", "--timeout=60s")
-	// Manager manifest is validated, but run the native binary under the exact SA RBAC below.
-	h.k("apply", "-f", filepath.Join(h.root, "config", "manager", "operator.yaml"))
-	h.k("-n", operatorNS, "scale", "deployment/celld-operator", "--replicas=0")
 	for _, ns := range []string{"fleets", "other", storeNS, "unbound"} {
 		h.k("create", "namespace", ns)
 		h.k("-n", ns, "create", "serviceaccount", "runtime")
 	}
-	// Fleet-namespace privileges are granted per namespace; `unbound`
-	// deliberately receives none.
-	for _, ns := range []string{"fleets", "other"} {
-		h.k("-n", ns, "apply", "-f", filepath.Join(h.root, "config", "rbac", "fleet-namespace.yaml"))
+	manifests := filepath.Join(h.root, "config")
+	if h.opts.suite == "upgrade" {
+		manifests = filepath.Join(h.root, "hack", "integration", "testdata", previousRelease)
 	}
+	h.installManifests(manifests)
 	h.arch = str(h.cluster("node", h.nodes[0]), "status", "nodeInfo", "architecture")
+}
+
+// installManifests applies the CRDs, the manager manifest and the fleet
+// Role from dir: config/ for this build, or a vendored earlier release. The
+// manager manifest is validated but scaled to zero; startOperator runs the
+// chosen manager under the exact ServiceAccount RBAC it declares.
+// Fleet-namespace privileges are granted per namespace; `unbound`
+// deliberately receives none.
+func (h *harness) installManifests(dir string) {
+	h.k("apply", "-f", filepath.Join(dir, "crd"))
+	h.k("wait", "--for=condition=Established", "crd/celldfleets.celld.eric.dev", "--timeout=60s")
+	manager := filepath.Join(dir, "manager", "operator.yaml")
+	role := filepath.Join(dir, "rbac", "fleet-namespace.yaml")
+	if _, err := os.Stat(manager); err != nil {
+		manager, role = filepath.Join(dir, "operator.yaml"), filepath.Join(dir, "fleet-namespace.yaml")
+	}
+	h.k("apply", "-f", manager)
+	h.k("-n", operatorNS, "scale", "deployment/celld-operator", "--replicas=0")
+	for _, ns := range []string{"fleets", "other"} {
+		h.k("-n", ns, "apply", "-f", role)
+	}
 }
 
 func (h *harness) loadImages() {
 	images := []string{h.opts.runtimeImage, minioImage, mcImage, curlImage, metricsServer}
 	if h.opts.upgradeFrom != "" && (h.opts.suite == "all" || h.opts.suite == "maintenance") {
 		images = append(images, h.opts.upgradeFrom)
+	}
+	if h.opts.suite == "upgrade" {
+		images = append(images, previousOperatorImage, previousRuntimeImage)
 	}
 	if h.opts.operatorImage != "" {
 		images = append(images, h.opts.operatorImage)
@@ -342,6 +361,12 @@ func (h *harness) startOperator() {
 	// fault within the suite's time budget; every other fault ends well
 	// before it.
 	args := []string{"--operator-namespace=" + operatorNS, "--network-policy-enforced", "--local-test", "--local-rwop", "--member-replacement-delay=" + memberReplacementDelay.String()}
+	if h.opts.suite == "upgrade" {
+		// The member the old launcher retired has been down for minutes by
+		// the upgrade; the default delay keeps self-healing from replacing
+		// its disk before the rollout restarts it on that disk.
+		args = args[:len(args)-1]
+	}
 	container := object{"name": "operator", "args": args}
 	var volumes []object
 	if h.opts.operatorImage != "" {

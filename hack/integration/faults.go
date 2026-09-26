@@ -10,7 +10,8 @@ import (
 // kind cluster can (ADR 0024 qualification): graceful and forced Pod
 // deletion, SIGKILL of celld, a node drain serialized by the PDB, manager
 // kills mid-rollout and mid-contraction, a deleted claim, a lost volume and a
-// node whose kubelet stops. Continuous writes run through every fault, and
+// node whose kubelet stops. It then takes every member down at once, by
+// SIGKILL and by Pod deletion. Continuous writes run through every fault, and
 // after each one the fleet must settle with every acknowledged write readable.
 // No step is repaired by hand.
 func (h *harness) exerciseFaults() {
@@ -29,7 +30,7 @@ func (h *harness) exerciseFaults() {
 		h.sigkill("beta-2")
 		h.wait("kubelet restarts the killed celld container", func() bool {
 			h.observe(h.faultWatch)
-			return h.restartCounts("beta")["beta-2"] > h.faultBefore.restarts["beta-2"]
+			return h.restartCounts()["beta-2"] > h.faultBefore.restarts["beta-2"]
 		})
 	}, h.sameDisksAfter(), h.restarted("beta-2"))
 
@@ -65,6 +66,35 @@ func (h *harness) exerciseFaults() {
 		h.rollAll("beta", encode(object{"spec": object{"maintenance": object{"restartToken": "faults-rollout"}}}), nil, h.killOperator)
 	})
 
+	// Every member at once: celld restarts all of them on their own disks and
+	// they recover each other's logs, with no action from anyone.
+	h.fleetOutage("every celld killed at once", func() {
+		for _, pod := range h.memberPods("beta") {
+			h.sigkill(nameOf(pod))
+		}
+		h.wait("kubelet restarts every killed celld container", func() bool {
+			after := h.restartCounts()
+			for name, before := range h.faultBefore.restarts {
+				if after[name] <= before {
+					return false
+				}
+			}
+			return true
+		})
+	}, h.restartedInPlace())
+	h.fleetOutage("every Pod deleted at once", func() {
+		h.k("-n", "fleets", "delete", "pod", "-l", "celld.eric.dev/fleet-uid="+uidOf(h.get("celldfleet", "beta")), "--wait=false")
+		h.wait("the StatefulSet replaces every Pod", func() bool {
+			after := nameUIDs(h.memberPods("beta"))
+			for name, uid := range h.faultBefore.pods {
+				if after[name] == "" || after[name] == uid {
+					return false
+				}
+			}
+			return true
+		})
+	})
+
 	// A Bucket member is disposable: its disk is a cache.
 	h.scale("alpha", 2)
 	h.writeLedger("alpha")
@@ -73,7 +103,7 @@ func (h *harness) exerciseFaults() {
 	h.waitSettled("alpha", 2, 5*time.Minute)
 	h.stopWriter("alpha")
 	h.readLedger("alpha")
-	fmt.Println("PASS: every single-member fault was absorbed automatically with every acknowledged write readable")
+	fmt.Println("PASS: every single-member fault and whole-fleet outage was absorbed automatically with every acknowledged write readable")
 }
 
 // fault runs inject against beta under continuous writes, waits for beta to
@@ -85,7 +115,7 @@ func (h *harness) fault(name string, inject func(), checks ...func()) {
 	h.startWriter("beta")
 	before := h.claims("beta")
 	pods := nameUIDs(h.memberPods("beta"))
-	h.faultBefore = faultSnapshot{claims: before, pods: pods, restarts: h.restartCounts("beta")}
+	h.faultBefore = faultSnapshot{claims: before, pods: pods, restarts: h.restartCounts()}
 	d := h.watchDisruptions("beta")
 	h.faultWatch = d
 	inject()
@@ -96,6 +126,33 @@ func (h *harness) fault(name string, inject func(), checks ...func()) {
 	h.stopWriter("beta")
 	h.readLedger("beta")
 	fmt.Println("PASS: fault absorbed:", name)
+}
+
+// fleetOutage takes down every beta member at once under continuous writes.
+// The one-disruption invariant does not apply; the fleet must settle again on
+// its own disks with every acknowledged write readable and no disk replaced.
+func (h *harness) fleetOutage(name string, inject func(), checks ...func()) {
+	fmt.Println("FAULT:", name)
+	h.waitSettled("beta", 3, 10*time.Minute)
+	h.startWriter("beta")
+	h.faultBefore = faultSnapshot{claims: h.claims("beta"), pods: nameUIDs(h.memberPods("beta")), restarts: h.restartCounts()}
+	inject()
+	h.waitFor("beta recovers from "+name, 15*time.Minute, func() bool { return h.settled("beta", 3) })
+	must(sameDisks(h.faultBefore.claims, h.claims("beta")))
+	for _, check := range checks {
+		check()
+	}
+	h.stopWriter("beta")
+	h.readLedger("beta")
+	fmt.Println("PASS: whole-fleet outage absorbed:", name)
+}
+
+// restartedInPlace requires every member to keep its Pod: kubelet restarted
+// the containers and nothing replaced a member.
+func (h *harness) restartedInPlace() func() {
+	return func() {
+		assert(same(nameUIDs(h.memberPods("beta")), h.faultBefore.pods), "a member Pod was replaced after its container was killed")
+	}
 }
 
 type faultSnapshot struct {
@@ -117,7 +174,7 @@ func (h *harness) newPod(name string) func() {
 func (h *harness) restarted(name string) func() {
 	return func() {
 		assert(nameUIDs(h.memberPods("beta"))[name] == h.faultBefore.pods[name], "%s was replaced instead of restarted", name)
-		assert(h.restartCounts("beta")[name] > h.faultBefore.restarts[name], "%s container did not restart", name)
+		assert(h.restartCounts()[name] > h.faultBefore.restarts[name], "%s container did not restart", name)
 	}
 }
 
@@ -146,9 +203,10 @@ func (h *harness) waitReplacedDisk(claim string, timeout time.Duration) {
 	})
 }
 
-func (h *harness) restartCounts(fleetName string) map[string]int64 {
+// restartCounts reports the celld container restart count of each beta member.
+func (h *harness) restartCounts() map[string]int64 {
 	out := map[string]int64{}
-	for _, pod := range h.memberPods(fleetName) {
+	for _, pod := range h.memberPods("beta") {
 		for _, c := range list(pod, "status", "containerStatuses") {
 			if str(c, "name") == "celld" {
 				out[nameOf(pod)] = num(c, "restartCount")

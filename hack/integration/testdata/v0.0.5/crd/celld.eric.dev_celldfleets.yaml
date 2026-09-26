@@ -1,0 +1,1587 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: celldfleets.celld.eric.dev
+spec:
+  group: celld.eric.dev
+  names:
+    kind: CelldFleet
+    listKind: CelldFleetList
+    plural: celldfleets
+    shortNames:
+    - cf
+    singular: celldfleet
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.readyReplicas
+      name: Ready
+      type: integer
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          CelldFleet supports serialized capacity and maintenance requests. The /scale
+          subresource declared below exposes spec.replicas for external capacity mode.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              bucketWorkload:
+                default: Deployment
+                description: Bucket workload layout. Defaults to Deployment; Ordered
+                  uses deterministic ordinal removal. Layout is immutable.
+                enum:
+                - Deployment
+                - Ordered
+                type: string
+              capacity:
+                description: Optional policy; omission keeps manual ownership.
+                properties:
+                  cpuHighMillicores:
+                    default: 200
+                    description: Absolute per-container CPU threshold for high demand,
+                      in millicores; not a percentage of resource requests.
+                    format: int32
+                    maximum: 1000000
+                    minimum: 1
+                    type: integer
+                  cpuLowMillicores:
+                    default: 80
+                    description: Absolute per-container CPU threshold for low demand,
+                      in millicores.
+                    format: int32
+                    maximum: 1000000
+                    minimum: 1
+                    type: integer
+                  maxAgeSeconds:
+                    default: 45
+                    description: Maximum allowed observation age and gap between observations.
+                    format: int32
+                    maximum: 600
+                    minimum: 10
+                    type: integer
+                  maxReplicas:
+                    default: 10
+                    description: Policy ceiling for automatic additions. Manual overrides
+                      can exceed policy bounds.
+                    format: int32
+                    maximum: 100
+                    minimum: 1
+                    type: integer
+                  maxWindowSeconds:
+                    default: 60
+                    description: Maximum accepted Metrics Server CPU averaging window.
+                    format: int32
+                    maximum: 300
+                    minimum: 5
+                    type: integer
+                  memoryHighMiB:
+                    default: 768
+                    description: Per-container Metrics Server memory threshold for
+                      high demand, in MiB.
+                    format: int32
+                    maximum: 1048576
+                    minimum: 1
+                    type: integer
+                  memoryLowMiB:
+                    default: 384
+                    description: Per-container Metrics Server memory threshold for
+                      low demand, in MiB.
+                    format: int32
+                    maximum: 1048576
+                    minimum: 1
+                    type: integer
+                  minReplicas:
+                    default: 3
+                    description: Policy replica floor; must cover every configured
+                      availability zone. Manual overrides can exceed policy bounds.
+                    format: int32
+                    maximum: 100
+                    minimum: 1
+                    type: integer
+                  minSamples:
+                    default: 3
+                    description: Distinct advancing observations required in a stabilization
+                      window.
+                    format: int32
+                    maximum: 100
+                    minimum: 2
+                    type: integer
+                  minWindowSeconds:
+                    default: 5
+                    description: Minimum accepted Metrics Server CPU averaging window.
+                    format: int32
+                    maximum: 60
+                    minimum: 1
+                    type: integer
+                  mode:
+                    default: Shadow
+                    description: |-
+                      Shadow reports recommendations only. ScaleOut permits bounded additions. Automatic also requests removals, which remain disabled against production evidence.
+                      External hands spec.replicas to one /scale writer (typically an HPA); the
+                      built-in policy computes nothing and the other policy fields are ignored.
+                    enum:
+                    - Shadow
+                    - ScaleOut
+                    - Automatic
+                    - External
+                    type: string
+                  provisioningTimeoutSeconds:
+                    default: 600
+                    description: Time allowed for requested capacity to become useful
+                      before further additions are held.
+                    format: int32
+                    maximum: 86400
+                    minimum: 60
+                    type: integer
+                  redistributionObservationSeconds:
+                    default: 120
+                    description: Continuous complete observation after an addition
+                      before judging redistribution.
+                    format: int32
+                    maximum: 3600
+                    minimum: 30
+                    type: integer
+                  sampleIntervalSeconds:
+                    default: 15
+                    description: Minimum interval between counted observations.
+                    format: int32
+                    maximum: 300
+                    minimum: 5
+                    type: integer
+                  scaleInCooldownSeconds:
+                    default: 900
+                    description: Minimum wait after a durable action before an automatic
+                      removal request.
+                    format: int32
+                    maximum: 86400
+                    minimum: 60
+                    type: integer
+                  scaleInStabilizationSeconds:
+                    default: 600
+                    description: Continuous low-demand duration required before a
+                      policy removal recommendation.
+                    format: int32
+                    maximum: 86400
+                    minimum: 60
+                    type: integer
+                  scaleOutCooldownSeconds:
+                    default: 300
+                    description: Minimum wait after a durable action before another
+                      automatic addition.
+                    format: int32
+                    maximum: 86400
+                    minimum: 30
+                    type: integer
+                  scaleOutStabilizationSeconds:
+                    default: 30
+                    description: Continuous high-demand duration required before a
+                      policy addition.
+                    format: int32
+                    maximum: 3600
+                    minimum: 10
+                    type: integer
+                  scaleOutStep:
+                    default: 1
+                    description: Maximum replicas added in one completed stable policy
+                      decision.
+                    format: int32
+                    maximum: 10
+                    minimum: 1
+                    type: integer
+                type: object
+                x-kubernetes-validations:
+                - message: invalid replica bounds
+                  rule: self.minReplicas <= self.maxReplicas
+                - message: low thresholds must be below high thresholds
+                  rule: self.cpuLowMillicores < self.cpuHighMillicores && self.memoryLowMiB
+                    < self.memoryHighMiB
+                - message: invalid sampling windows
+                  rule: self.minWindowSeconds <= self.maxWindowSeconds && self.sampleIntervalSeconds
+                    <= self.maxAgeSeconds
+              env:
+                description: |-
+                  Additional celld settings, fixed at creation. Secret values stay in the
+                  referenced Secret; changes to Secret data take effect only in new Pods.
+                items:
+                  properties:
+                    name:
+                      maxLength: 128
+                      pattern: ^CELLD_[A-Z][A-Z0-9_]*$
+                      type: string
+                    secretKeyRef:
+                      description: Secret in the same namespace as the fleet.
+                      properties:
+                        key:
+                          maxLength: 253
+                          minLength: 1
+                          pattern: ^[-._a-zA-Z0-9]+$
+                          type: string
+                        name:
+                          maxLength: 253
+                          minLength: 1
+                          pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                          type: string
+                      required:
+                      - key
+                      - name
+                      type: object
+                    value:
+                      description: Literal, including an empty string. Use secretKeyRef
+                        for credentials.
+                      maxLength: 4096
+                      type: string
+                  required:
+                  - name
+                  type: object
+                  x-kubernetes-validations:
+                  - message: exactly one of value or secretKeyRef is required
+                    rule: has(self.value) != has(self.secretKeyRef)
+                maxItems: 32
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+                x-kubernetes-validations:
+                - message: env may not override operator-owned or reserved celld variables
+                  rule: self.all(e, !(['CELLD_NODE','CELLD_ADVERTISE','CELLD_BUCKET','CELLD_DURABILITY','CELLD_ADDR','CELLD_INTERNAL_ADDR','CELLD_WATCH','CELLD_TTL_MS','CELLD_SHUTDOWN_TOTAL_MS','CELLD_TOKIO_THREADS','CELLD_MAX_RESIDENT_CELLS','CELLD_IDLE_EVICT_S'].exists(n,
+                    n == e.name) || e.name.startsWith('CELLD_REEXEC_') || e.name.startsWith('CELLD_OTEL')
+                    || e.name.startsWith('CELLD_UNSAFE_') || e.name.startsWith('CELLD_TEST_')
+                    || e.name.startsWith('CELLD_STRICT_')))
+              execution:
+                description: |-
+                  Per-fleet runtime sizing. Immutable after creation: the operator never rolls
+                  out a changed pod template. Omitted fields keep the prototype constants.
+                properties:
+                  cpuLimit:
+                    description: 'CPU limit for the celld container. Default: none.'
+                    pattern: ^[0-9]+(\.[0-9]+)?m?$
+                    type: string
+                  cpuRequest:
+                    description: CPU request for the celld container (Kubernetes quantity).
+                      Default 250m for fleets, 25m for preview pools.
+                    pattern: ^[0-9]+(\.[0-9]+)?m?$
+                    type: string
+                  idleEvictSeconds:
+                    description: |-
+                      Seconds after which an idle resident cell hibernates (CELLD_IDLE_EVICT_S).
+                      Unset leaves only pressure and the residency cap to evict idle cells.
+                    format: int32
+                    maximum: 86400
+                    minimum: 1
+                    type: integer
+                  maxResidentCells:
+                    description: |-
+                      Hard resident-cell admission limit (CELLD_MAX_RESIDENT_CELLS). Unset leaves
+                      the runtime default.
+                    format: int32
+                    maximum: 1000000
+                    minimum: 1
+                    type: integer
+                  memoryLimit:
+                    description: Memory limit for the celld container. Default 1Gi
+                      for fleets, 256Mi for preview pools.
+                    pattern: ^[0-9]+(\.[0-9]+)?(Ki|Mi|Gi|Ti|K|M|G|T)?$
+                    type: string
+                  memoryRequest:
+                    description: Memory request for the celld container. Default 512Mi
+                      for fleets, 64Mi for preview pools.
+                    pattern: ^[0-9]+(\.[0-9]+)?(Ki|Mi|Gi|Ti|K|M|G|T)?$
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: cpuLimit must be at least cpuRequest
+                  rule: '!has(self.cpuLimit) || !has(self.cpuRequest) || quantity(self.cpuLimit).isGreaterThan(quantity(self.cpuRequest))
+                    || quantity(self.cpuLimit).compareTo(quantity(self.cpuRequest))
+                    == 0'
+                - message: memoryLimit must be at least memoryRequest
+                  rule: '!has(self.memoryLimit) || !has(self.memoryRequest) || quantity(self.memoryLimit).isGreaterThan(quantity(self.memoryRequest))
+                    || quantity(self.memoryLimit).compareTo(quantity(self.memoryRequest))
+                    == 0'
+              lifecycle:
+                description: Per-fleet shutdown and termination budgets. Immutable
+                  after creation.
+                properties:
+                  shutdownSeconds:
+                    description: celld total stop bound in seconds (CELLD_SHUTDOWN_TOTAL_MS).
+                      Default 20.
+                    format: int32
+                    maximum: 3600
+                    minimum: 1
+                    type: integer
+                  terminationGraceSeconds:
+                    description: Pod terminationGracePeriodSeconds. Default 30. Must
+                      exceed shutdownSeconds by 5.
+                    format: int32
+                    maximum: 3605
+                    minimum: 6
+                    type: integer
+                type: object
+                x-kubernetes-validations:
+                - message: terminationGraceSeconds must exceed shutdownSeconds by
+                    at least 5
+                  rule: '!has(self.shutdownSeconds) || !has(self.terminationGraceSeconds)
+                    || self.shutdownSeconds + 5 <= self.terminationGraceSeconds'
+                - message: shutdownSeconds above 25 requires an explicit terminationGraceSeconds
+                  rule: '!has(self.shutdownSeconds) || has(self.terminationGraceSeconds)
+                    || self.shutdownSeconds + 5 <= 30'
+                - message: terminationGraceSeconds must be at least 25 with the default
+                    20 second shutdown
+                  rule: has(self.shutdownSeconds) || !has(self.terminationGraceSeconds)
+                    || self.terminationGraceSeconds >= 25
+              maintenance:
+                description: Maintenance requests share the bounded current operation.
+                properties:
+                  allowCoordinatedDowntime:
+                    description: Explicitly permit an operation that stops the entire
+                      fleet.
+                    type: boolean
+                  paused:
+                    description: Pause new actions and unissued operations; continue
+                      recovery of issued actions.
+                    type: boolean
+                  restartToken:
+                    description: Change to a new nonempty token to request a same-version
+                      restart. The current completed token is not replayed. Placement
+                      and verified shutdown prerequisites must pass.
+                    maxLength: 128
+                    type: string
+                type: object
+              placement:
+                description: Allowed availability zones and scheduling strictness.
+                  Immutable after creation.
+                properties:
+                  azCount:
+                    description: Number of availability zones; must equal the number
+                      of entries in zones.
+                    format: int32
+                    maximum: 6
+                    minimum: 1
+                    type: integer
+                  mode:
+                    default: Strict
+                    description: Strict requires zone balance and distinct hosts.
+                      Relaxed makes spread and host separation preferences while retaining
+                      the zone allowlist.
+                    enum:
+                    - Strict
+                    - Relaxed
+                    type: string
+                  zones:
+                    description: Explicit zone allowlist; no automatic reselection
+                      when capacity changes.
+                    items:
+                      maxLength: 33
+                      minLength: 1
+                      type: string
+                    maxItems: 6
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-type: set
+                required:
+                - azCount
+                - zones
+                type: object
+              previews:
+                description: Optional immutable configuration for previews referencing
+                  this fleet.
+                properties:
+                  execution:
+                    description: |-
+                      Omitted values use preview defaults: 25m CPU, 64Mi request, 256Mi limit,
+                      eight resident cells and 30-second idle eviction.
+                    properties:
+                      cpuLimit:
+                        description: 'CPU limit for the celld container. Default:
+                          none.'
+                        pattern: ^[0-9]+(\.[0-9]+)?m?$
+                        type: string
+                      cpuRequest:
+                        description: CPU request for the celld container (Kubernetes
+                          quantity). Default 250m for fleets, 25m for preview pools.
+                        pattern: ^[0-9]+(\.[0-9]+)?m?$
+                        type: string
+                      idleEvictSeconds:
+                        description: |-
+                          Seconds after which an idle resident cell hibernates (CELLD_IDLE_EVICT_S).
+                          Unset leaves only pressure and the residency cap to evict idle cells.
+                        format: int32
+                        maximum: 86400
+                        minimum: 1
+                        type: integer
+                      maxResidentCells:
+                        description: |-
+                          Hard resident-cell admission limit (CELLD_MAX_RESIDENT_CELLS). Unset leaves
+                          the runtime default.
+                        format: int32
+                        maximum: 1000000
+                        minimum: 1
+                        type: integer
+                      memoryLimit:
+                        description: Memory limit for the celld container. Default
+                          1Gi for fleets, 256Mi for preview pools.
+                        pattern: ^[0-9]+(\.[0-9]+)?(Ki|Mi|Gi|Ti|K|M|G|T)?$
+                        type: string
+                      memoryRequest:
+                        description: Memory request for the celld container. Default
+                          512Mi for fleets, 64Mi for preview pools.
+                        pattern: ^[0-9]+(\.[0-9]+)?(Ki|Mi|Gi|Ti|K|M|G|T)?$
+                        type: string
+                    type: object
+                    x-kubernetes-validations:
+                    - message: cpuLimit must be at least cpuRequest
+                      rule: '!has(self.cpuLimit) || !has(self.cpuRequest) || quantity(self.cpuLimit).isGreaterThan(quantity(self.cpuRequest))
+                        || quantity(self.cpuLimit).compareTo(quantity(self.cpuRequest))
+                        == 0'
+                    - message: memoryLimit must be at least memoryRequest
+                      rule: '!has(self.memoryLimit) || !has(self.memoryRequest) ||
+                        quantity(self.memoryLimit).isGreaterThan(quantity(self.memoryRequest))
+                        || quantity(self.memoryLimit).compareTo(quantity(self.memoryRequest))
+                        == 0'
+                  routing:
+                    properties:
+                      baseDomain:
+                        description: Wildcard DNS for this domain must point to the
+                          Gateway or Ingress controller.
+                        maxLength: 218
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                        type: string
+                      gateway:
+                        properties:
+                          name:
+                            description: Name of an existing Gateway.
+                            maxLength: 253
+                            minLength: 1
+                            pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                            type: string
+                          namespace:
+                            description: Gateway namespace. Omission uses the fleet
+                              namespace.
+                            maxLength: 63
+                            minLength: 1
+                            pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                            type: string
+                          sectionName:
+                            description: Listener name. Omission attaches to compatible
+                              listeners.
+                            maxLength: 253
+                            minLength: 1
+                            pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      ingress:
+                        properties:
+                          annotations:
+                            additionalProperties:
+                              type: string
+                            description: |-
+                              Controller-specific annotations, including optional cert-manager settings.
+                              Treat permission to configure these as privileged ingress administration.
+                            maxProperties: 16
+                            type: object
+                            x-kubernetes-validations:
+                            - message: operator annotations and the legacy ingress
+                                class annotation are reserved
+                              rule: self.all(k, !k.startsWith('celld.eric.dev/') &&
+                                k != 'kubernetes.io/ingress.class')
+                            - message: annotation values must not exceed 4096 bytes
+                              rule: self.all(k, size(bytes(self[k])) <= 4096)
+                          className:
+                            description: Explicit installed IngressClass.
+                            maxLength: 253
+                            minLength: 1
+                            pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                            type: string
+                          tlsSecretName:
+                            description: TLS Secret in the fleet namespace, covering
+                              every configured hostname.
+                            maxLength: 253
+                            minLength: 1
+                            pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                            type: string
+                        required:
+                        - className
+                        type: object
+                      scheme:
+                        default: https
+                        description: HTTPS requires a TLS listener on a Gateway or
+                          a wildcard TLS Secret for Ingress.
+                        enum:
+                        - http
+                        - https
+                        type: string
+                      source:
+                        properties:
+                          namespace:
+                            description: Exact namespace containing the gateway or
+                              ingress data-plane pods.
+                            maxLength: 63
+                            minLength: 1
+                            pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                            type: string
+                          podLabels:
+                            additionalProperties:
+                              type: string
+                            description: Nonempty matchLabels selector in that namespace.
+                            maxProperties: 16
+                            minProperties: 1
+                            type: object
+                        required:
+                        - namespace
+                        - podLabels
+                        type: object
+                    required:
+                    - baseDomain
+                    - source
+                    type: object
+                    x-kubernetes-validations:
+                    - message: choose exactly one of gateway or ingress
+                      rule: has(self.gateway) != has(self.ingress)
+                    - message: HTTPS ingress requires a TLS secret
+                      rule: self.scheme != 'https' || !has(self.ingress) || has(self.ingress.tlsSecretName)
+                  runtimeImage:
+                    description: Immutable celld runtime digest, shared by the independent
+                      preview runtimes.
+                    pattern: ^([a-z0-9]+([.-][a-z0-9]+)*|localhost)(:[0-9]{1,5})?(/[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*)+@sha256:[a-f0-9]{64}$
+                    type: string
+                  scratch:
+                    description: Disk-backed scratch; defaults to a 64Mi request and
+                      512Mi limit.
+                    properties:
+                      limit:
+                        maxLength: 32
+                        pattern: ^[0-9]+(\.[0-9]+)?(Ki|Mi|Gi|Ti|K|M|G|T)?$
+                        type: string
+                      request:
+                        maxLength: 32
+                        pattern: ^[0-9]+(\.[0-9]+)?(Ki|Mi|Gi|Ti|K|M|G|T)?$
+                        type: string
+                    required:
+                    - limit
+                    - request
+                    type: object
+                    x-kubernetes-validations:
+                    - message: scratch limit must cover request
+                      rule: quantity(self.limit).compareTo(quantity(self.request))
+                        >= 0
+                    - message: scratch request must be positive
+                      rule: quantity(self.request).compareTo(quantity('0')) > 0
+                  seeding:
+                    description: Opt-in source authorization and trusted executor
+                      for state seeding.
+                    properties:
+                      executor:
+                        description: |-
+                          Trusted executor implementation that understands the seed request protocol.
+                          The operator does not install this executor or grant it source credentials.
+                        maxLength: 63
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                        type: string
+                      sources:
+                        items:
+                          properties:
+                            fleetRef:
+                              properties:
+                                name:
+                                  maxLength: 40
+                                  minLength: 1
+                                  pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                                  type: string
+                                namespace:
+                                  maxLength: 63
+                                  minLength: 1
+                                  pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                                  type: string
+                                uid:
+                                  description: Exact authorized fleet identity; recreating
+                                    a name never transfers access.
+                                  maxLength: 64
+                                  minLength: 1
+                                  type: string
+                              required:
+                              - name
+                              - namespace
+                              - uid
+                              type: object
+                            name:
+                              maxLength: 63
+                              minLength: 1
+                              pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                              type: string
+                          required:
+                          - fleetRef
+                          - name
+                          type: object
+                        maxItems: 32
+                        minItems: 1
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                    required:
+                    - executor
+                    - sources
+                    type: object
+                  serviceAccountName:
+                    description: Existing ServiceAccount in the pool/preview namespace.
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                    type: string
+                  storage:
+                    properties:
+                      bucket:
+                        description: Existing bucket dedicated to this pool; the operator
+                          does not create or delete it.
+                        maxLength: 63
+                        minLength: 3
+                        pattern: ^[a-z0-9][a-z0-9-]*[a-z0-9]$
+                        type: string
+                      endpoint:
+                        description: Omit for AWS S3 with ServiceAccount credentials.
+                          Set for a shared local store.
+                        properties:
+                          credentialsSecretName:
+                            description: |-
+                              Same-namespace Secret with accessKeyId and secretAccessKey keys.
+                              Values are injected by kubelet, never read into controller status.
+                            maxLength: 253
+                            minLength: 1
+                            pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                            type: string
+                          egress:
+                            description: Narrow object-store destination, independent
+                              of fleet peer ingress.
+                            properties:
+                              cidr:
+                                description: Single collector address, /32 for IPv4
+                                  or /128 for IPv6.
+                                type: string
+                              namespace:
+                                description: Collector namespace; only valid with
+                                  podLabels.
+                                type: string
+                              podLabels:
+                                additionalProperties:
+                                  type: string
+                                description: Labels on collector pods. A namespace
+                                  is optional for same-namespace pods.
+                                minProperties: 1
+                                type: object
+                            type: object
+                            x-kubernetes-validations:
+                            - message: exactly one of cidr or podLabels is required
+                              rule: has(self.cidr) != has(self.podLabels)
+                          url:
+                            description: HTTP(S) origin only. HTTP explicitly opts
+                              into plaintext transport.
+                            maxLength: 512
+                            pattern: ^https?://[^/?#@]+/?$
+                            type: string
+                        required:
+                        - credentialsSecretName
+                        - egress
+                        - url
+                        type: object
+                      region:
+                        maxLength: 32
+                        pattern: ^[a-z]{2}(-[a-z]+)+-[0-9]+$
+                        type: string
+                    required:
+                    - bucket
+                    - region
+                    type: object
+                  zone:
+                    description: One allowed zone. Previews use a single replica and
+                      relaxed host placement.
+                    maxLength: 33
+                    minLength: 1
+                    type: string
+                required:
+                - routing
+                - runtimeImage
+                - serviceAccountName
+                - storage
+                - zone
+                type: object
+                x-kubernetes-validations:
+                - message: zone must belong to the storage region
+                  rule: self.zone.startsWith(self.storage.region) && size(self.zone)
+                    == size(self.storage.region) + 1 && self.zone.matches('.*[a-z]$')
+              profile:
+                description: 'Storage profile: Bucket uses temporary local disk and
+                  S3; PersistentFleet adds peer disks disposed after strict shutdown.
+                  Immutable after creation.'
+                enum:
+                - Bucket
+                - PersistentFleet
+                type: string
+              replicas:
+                default: 3
+                description: Manual replica target. Capacity policy can choose a different
+                  applied count without editing this field. Must cover every configured
+                  availability zone.
+                format: int32
+                maximum: 100
+                minimum: 1
+                type: integer
+              routing:
+                description: |-
+                  Optional public HTTP routing. Mutable without restarting the runtime.
+                  Omission removes operator-owned routes and their separate ingress policy.
+                properties:
+                  gateway:
+                    description: Attach an HTTPRoute to an existing Gateway. TLS belongs
+                      to its listener.
+                    properties:
+                      name:
+                        description: Name of an existing Gateway.
+                        maxLength: 253
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                        type: string
+                      namespace:
+                        description: Gateway namespace. Omission uses the fleet namespace.
+                        maxLength: 63
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                        type: string
+                      sectionName:
+                        description: Listener name. Omission attaches to compatible
+                          listeners.
+                        maxLength: 253
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  hostnames:
+                    description: Explicit hostnames; no catch-all route is created.
+                    items:
+                      maxLength: 253
+                      minLength: 1
+                      pattern: ^(\*\.)?[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                      type: string
+                    maxItems: 16
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-type: set
+                  ingress:
+                    description: Create a networking.k8s.io/v1 Ingress using an installed
+                      controller.
+                    properties:
+                      annotations:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          Controller-specific annotations, including optional cert-manager settings.
+                          Treat permission to configure these as privileged ingress administration.
+                        maxProperties: 16
+                        type: object
+                        x-kubernetes-validations:
+                        - message: operator annotations and the legacy ingress class
+                            annotation are reserved
+                          rule: self.all(k, !k.startsWith('celld.eric.dev/') && k
+                            != 'kubernetes.io/ingress.class')
+                        - message: annotation values must not exceed 4096 bytes
+                          rule: self.all(k, size(bytes(self[k])) <= 4096)
+                      className:
+                        description: Explicit installed IngressClass.
+                        maxLength: 253
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                        type: string
+                      tlsSecretName:
+                        description: TLS Secret in the fleet namespace, covering every
+                          configured hostname.
+                        maxLength: 253
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                        type: string
+                    required:
+                    - className
+                    type: object
+                  source:
+                    description: Pods that originate application traffic, not the
+                      control-plane controller.
+                    properties:
+                      namespace:
+                        description: Exact namespace containing the gateway or ingress
+                          data-plane pods.
+                        maxLength: 63
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                        type: string
+                      podLabels:
+                        additionalProperties:
+                          type: string
+                        description: Nonempty matchLabels selector in that namespace.
+                        maxProperties: 16
+                        minProperties: 1
+                        type: object
+                    required:
+                    - namespace
+                    - podLabels
+                    type: object
+                required:
+                - hostnames
+                - source
+                type: object
+                x-kubernetes-validations:
+                - message: choose exactly one of gateway or ingress
+                  rule: has(self.gateway) != has(self.ingress)
+              runtimeImage:
+                description: |-
+                  Requested immutable runtime digest. Required for provisioning; no default release is assumed.
+                  Use a homogeneous compatible fork; verify release and recovery compatibility.
+                pattern: ^([a-z0-9]+([.-][a-z0-9]+)*|localhost)(:[0-9]{1,5})?(/[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*)+@sha256:[a-f0-9]{64}$
+                type: string
+              serviceAccountName:
+                description: Existing ServiceAccount in the fleet namespace with the
+                  runtime bucket permissions. Immutable after creation.
+                maxLength: 253
+                minLength: 1
+                pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                type: string
+              storage:
+                description: Reserved object-store scope and local disk settings.
+                  Immutable after creation.
+                properties:
+                  bucket:
+                    description: S3 bucket permanently reserved to this fleet, or
+                      to the referenced preview pool.
+                    maxLength: 63
+                    minLength: 3
+                    pattern: ^[a-z0-9][a-z0-9-]*[a-z0-9]$
+                    type: string
+                  endpoint:
+                    properties:
+                      credentialsSecretName:
+                        description: |-
+                          Same-namespace Secret with accessKeyId and secretAccessKey keys.
+                          Values are injected by kubelet, never read into controller status.
+                        maxLength: 253
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                        type: string
+                      egress:
+                        description: Narrow object-store destination, independent
+                          of fleet peer ingress.
+                        properties:
+                          cidr:
+                            description: Single collector address, /32 for IPv4 or
+                              /128 for IPv6.
+                            type: string
+                          namespace:
+                            description: Collector namespace; only valid with podLabels.
+                            type: string
+                          podLabels:
+                            additionalProperties:
+                              type: string
+                            description: Labels on collector pods. A namespace is
+                              optional for same-namespace pods.
+                            minProperties: 1
+                            type: object
+                        type: object
+                        x-kubernetes-validations:
+                        - message: exactly one of cidr or podLabels is required
+                          rule: has(self.cidr) != has(self.podLabels)
+                      url:
+                        description: HTTP(S) origin only. HTTP explicitly opts into
+                          plaintext transport.
+                        maxLength: 512
+                        pattern: ^https?://[^/?#@]+/?$
+                        type: string
+                    required:
+                    - credentialsSecretName
+                    - egress
+                    - url
+                    type: object
+                  initialization:
+                    description: One-time startup gate, bound to an operator-owned
+                      seed request.
+                    properties:
+                      deadline:
+                        description: Executor must stop before this time and must
+                          never begin after it.
+                        format: date-time
+                        type: string
+                      executor:
+                        maxLength: 63
+                        minLength: 1
+                        type: string
+                      selection:
+                        description: |-
+                          PreviewSeedSpec selects persisted objects, copied once before runtime startup.
+                          Snapshots are consistent per object, not globally across the selection.
+                        properties:
+                          alarms:
+                            default: Clear
+                            description: Clear disables copied alarms. Preserve explicitly
+                              opts into scheduled work.
+                            enum:
+                            - Clear
+                            - Preserve
+                            type: string
+                          objects:
+                            items:
+                              properties:
+                                class:
+                                  description: Exported Durable Object class, with
+                                    the same mapping in the target application.
+                                  maxLength: 128
+                                  minLength: 1
+                                  pattern: ^[A-Za-z0-9_$.-]+$
+                                  type: string
+                                id:
+                                  description: Canonical object ID, not an idFromName
+                                    input or a storage path.
+                                  maxLength: 256
+                                  minLength: 1
+                                  pattern: ^[A-Za-z0-9_$.-]+$
+                                  type: string
+                              required:
+                              - class
+                              - id
+                              type: object
+                            maxItems: 100
+                            minItems: 1
+                            type: array
+                            x-kubernetes-list-map-keys:
+                            - class
+                            - id
+                            x-kubernetes-list-type: map
+                          source:
+                            description: Administrator-approved alias from the pool's
+                              seeding.sources.
+                            maxLength: 63
+                            minLength: 1
+                            pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                            type: string
+                        required:
+                        - objects
+                        - source
+                        type: object
+                      sourceFleet:
+                        properties:
+                          name:
+                            maxLength: 40
+                            minLength: 1
+                            pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                            type: string
+                          namespace:
+                            maxLength: 63
+                            minLength: 1
+                            pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                            type: string
+                          uid:
+                            description: Exact authorized fleet identity; recreating
+                              a name never transfers access.
+                            maxLength: 64
+                            minLength: 1
+                            type: string
+                        required:
+                        - name
+                        - namespace
+                        - uid
+                        type: object
+                      target:
+                        properties:
+                          fleetName:
+                            maxLength: 40
+                            minLength: 1
+                            type: string
+                          previewFleetRef:
+                            properties:
+                              name:
+                                description: Pool in the same namespace as the fleet.
+                                maxLength: 253
+                                minLength: 1
+                                pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                                type: string
+                              uid:
+                                description: Exact pool UID; names alone cannot transfer
+                                  a reservation.
+                                maxLength: 64
+                                minLength: 1
+                                type: string
+                            required:
+                            - name
+                            - uid
+                            type: object
+                          previewName:
+                            maxLength: 253
+                            minLength: 1
+                            type: string
+                          previewUID:
+                            maxLength: 64
+                            minLength: 1
+                            type: string
+                          storageURL:
+                            description: Exact isolated S3 destination; no credentials.
+                            maxLength: 133
+                            pattern: ^s3://[a-z0-9-]+/[a-z0-9-]+$
+                            type: string
+                        required:
+                        - fleetName
+                        - previewFleetRef
+                        - previewName
+                        - previewUID
+                        - storageURL
+                        type: object
+                    required:
+                    - deadline
+                    - executor
+                    - selection
+                    - sourceFleet
+                    - target
+                    type: object
+                  prefix:
+                    description: Single segment within a pool-owned bucket. Nested/overlapping
+                      prefixes are forbidden.
+                    maxLength: 63
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                  previewFleetRef:
+                    description: Pool identity, permanently bound by the whole-bucket
+                      reservation.
+                    properties:
+                      name:
+                        description: Pool in the same namespace as the fleet.
+                        maxLength: 253
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                        type: string
+                      uid:
+                        description: Exact pool UID; names alone cannot transfer a
+                          reservation.
+                        maxLength: 64
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    - uid
+                    type: object
+                  region:
+                    description: AWS region containing the bucket and the configured
+                      availability zones.
+                    maxLength: 32
+                    pattern: ^[a-z]{2}(-[a-z]+)+-[0-9]+$
+                    type: string
+                  scratch:
+                    description: Disk-backed emptyDir request and limit; overrides
+                      sizeGiB only for Bucket.
+                    properties:
+                      limit:
+                        maxLength: 32
+                        pattern: ^[0-9]+(\.[0-9]+)?(Ki|Mi|Gi|Ti|K|M|G|T)?$
+                        type: string
+                      request:
+                        maxLength: 32
+                        pattern: ^[0-9]+(\.[0-9]+)?(Ki|Mi|Gi|Ti|K|M|G|T)?$
+                        type: string
+                    required:
+                    - limit
+                    - request
+                    type: object
+                    x-kubernetes-validations:
+                    - message: scratch limit must cover request
+                      rule: quantity(self.limit).compareTo(quantity(self.request))
+                        >= 0
+                    - message: scratch request must be positive
+                      rule: quantity(self.request).compareTo(quantity('0')) > 0
+                  sizeGiB:
+                    default: 10
+                    description: 'Disk space in GiB: PVC size for PersistentFleet,
+                      disk-backed emptyDir limit for Bucket.'
+                    format: int32
+                    maximum: 16384
+                    minimum: 1
+                    type: integer
+                  storageClassName:
+                    description: Required only for PersistentFleet; must reference
+                      an existing CSI Delete/WaitForFirstConsumer class. Disks are
+                      disposed only after strict shutdown proof; CSI deletion protection
+                      is required.
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                    type: string
+                required:
+                - bucket
+                - region
+                type: object
+                x-kubernetes-validations:
+                - message: prefix and previewFleetRef must be supplied together
+                  rule: has(self.prefix) == has(self.previewFleetRef)
+                - message: initialization requires a pool reservation
+                  rule: '!has(self.initialization) || has(self.previewFleetRef)'
+                - message: custom endpoints require a pool reservation
+                  rule: '!has(self.endpoint) || has(self.previewFleetRef)'
+              telemetry:
+                description: |-
+                  Optional OTLP collector; omission leaves telemetry disabled. Immutable
+                  because the operator does not roll out ordinary pod-template changes.
+                properties:
+                  collectorURL:
+                    description: HTTP(S) collector base URL; celld appends /v1/traces
+                      and /v1/logs.
+                    pattern: ^https?://[^/?#@]+(/[^?#]*)?$
+                    type: string
+                  egress:
+                    properties:
+                      cidr:
+                        description: Single collector address, /32 for IPv4 or /128
+                          for IPv6.
+                        type: string
+                      namespace:
+                        description: Collector namespace; only valid with podLabels.
+                        type: string
+                      podLabels:
+                        additionalProperties:
+                          type: string
+                        description: Labels on collector pods. A namespace is optional
+                          for same-namespace pods.
+                        minProperties: 1
+                        type: object
+                    type: object
+                    x-kubernetes-validations:
+                    - message: exactly one of cidr or podLabels is required
+                      rule: has(self.cidr) != has(self.podLabels)
+                  flushBytes:
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  flushMilliseconds:
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  headersSecretKeyRef:
+                    description: Secret value contains comma-separated OTLP headers;
+                      it never enters status.
+                    properties:
+                      key:
+                        pattern: ^[-._a-zA-Z0-9]+$
+                        type: string
+                      name:
+                        pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                        type: string
+                    required:
+                    - key
+                    - name
+                    type: object
+                  sampler:
+                    enum:
+                    - always_on
+                    - always_off
+                    - parentbased_always_on
+                    - parentbased_always_off
+                    - traceidratio
+                    - parentbased_traceidratio
+                    type: string
+                  samplerArg:
+                    description: Decimal ratio in [0,1], serialized as a string for
+                      portable CRD clients.
+                    pattern: ^(0(\.[0-9]+)?|1(\.0+)?)$
+                    type: string
+                required:
+                - collectorURL
+                - egress
+                type: object
+                x-kubernetes-validations:
+                - message: samplerArg is required only for ratio samplers
+                  rule: 'has(self.sampler) && (self.sampler == ''traceidratio'' ||
+                    self.sampler == ''parentbased_traceidratio'') ? has(self.samplerArg)
+                    : !has(self.samplerArg)'
+            required:
+            - placement
+            - profile
+            - serviceAccountName
+            - storage
+            type: object
+            x-kubernetes-validations:
+            - message: preview configuration cannot change once enabled
+              rule: '!has(oldSelf.previews) || (has(self.previews) && self.previews
+                == oldSelf.previews)'
+            - message: runtime storage, layout, placement, execution, lifecycle, env
+                and telemetry are fixed at creation
+              rule: self.profile == oldSelf.profile && self.serviceAccountName ==
+                oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement
+                == oldSelf.placement && has(self.execution) == has(oldSelf.execution)
+                && (!has(self.execution) || self.execution == oldSelf.execution) &&
+                has(self.lifecycle) == has(oldSelf.lifecycle) && (!has(self.lifecycle)
+                || self.lifecycle == oldSelf.lifecycle) && has(self.env) == has(oldSelf.env)
+                && (!has(self.env) || self.env == oldSelf.env) && has(self.telemetry)
+                == has(oldSelf.telemetry) && (!has(self.telemetry) || self.telemetry
+                == oldSelf.telemetry) && self.bucketWorkload == oldSelf.bucketWorkload
+            - message: preview storage must use a separate bucket from the parent
+                runtime
+              rule: '!has(self.previews) || self.previews.storage.bucket != self.storage.bucket'
+            - message: shared prefixes and scratch overrides require Bucket profile
+              rule: self.profile == 'Bucket' || (!has(self.storage.prefix) && !has(self.storage.scratch))
+            - message: Ordered bucketWorkload requires Bucket profile
+              rule: self.bucketWorkload != 'Ordered' || self.profile == 'Bucket'
+            - message: azCount must equal the zones count
+              rule: self.placement.azCount == size(self.placement.zones)
+            - message: replicas must be at least azCount
+              rule: self.replicas >= self.placement.azCount
+            - message: storageClassName is required only for PersistentFleet
+              rule: 'self.profile == ''PersistentFleet'' ? has(self.storage.storageClassName)
+                && size(self.storage.storageClassName) > 0 : !has(self.storage.storageClassName)'
+            - message: zones must be standard AZ names in storage.region
+              rule: self.placement.zones.all(z, z.startsWith(self.storage.region)
+                && size(z) == size(self.storage.region) + 1 && z.matches('.*[a-z]$'))
+            - message: capacity minimum must cover requested AZs
+              rule: '!has(self.capacity) || self.capacity.minReplicas >= self.placement.azCount'
+          status:
+            properties:
+              application:
+                description: Read-only application deployment observations, independent
+                  of lifecycle readiness.
+                properties:
+                  expectedNodes:
+                    format: int32
+                    type: integer
+                  nodes:
+                    items:
+                      properties:
+                        name:
+                          maxLength: 253
+                          type: string
+                        reason:
+                          maxLength: 64
+                          type: string
+                        runtimeGeneration:
+                          maxLength: 128
+                          type: string
+                        uid:
+                          maxLength: 128
+                          type: string
+                        version:
+                          maxLength: 256
+                          type: string
+                      required:
+                      - name
+                      - reason
+                      - uid
+                      type: object
+                    maxItems: 100
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                  observedAt:
+                    format: date-time
+                    type: string
+                  observedNodes:
+                    format: int32
+                    type: integer
+                  observedVersion:
+                    description: Common loaded version; omitted when versions disagree
+                      or coverage is incomplete.
+                    properties:
+                      prefix:
+                        maxLength: 1024
+                        type: string
+                      version:
+                        maxLength: 256
+                        type: string
+                    required:
+                    - prefix
+                    - version
+                    type: object
+                  pendingCells:
+                    description: Counts from valid fresh observations only; incomplete
+                      coverage is Unknown.
+                    format: int64
+                    type: integer
+                  swappingCells:
+                    format: int64
+                    type: integer
+                  unavailableNodes:
+                    format: int32
+                    type: integer
+                  versions:
+                    items:
+                      properties:
+                        nodes:
+                          format: int32
+                          type: integer
+                        prefix:
+                          maxLength: 1024
+                          type: string
+                        version:
+                          maxLength: 256
+                          type: string
+                      required:
+                      - nodes
+                      - prefix
+                      - version
+                      type: object
+                    maxItems: 100
+                    type: array
+                required:
+                - expectedNodes
+                - observedAt
+                - observedNodes
+                - pendingCells
+                - swappingCells
+                - unavailableNodes
+                type: object
+              appliedReplicas:
+                description: Replica target currently applied to the owned Kubernetes
+                  workload.
+                format: int32
+                type: integer
+              blockedSince:
+                description: RFC3339 time when the fleet entered its current continuous
+                  Blocked state; empty when not blocked.
+                type: string
+              capacity:
+                description: Latest capacity policy recommendation and observation
+                  coverage.
+                properties:
+                  coveredReplicas:
+                    description: Expected replicas covered by the current capacity
+                      observations.
+                    format: int32
+                    type: integer
+                  desiredReplicas:
+                    description: Recommended count; informational in Shadow mode and
+                      not necessarily the applied workload count.
+                    format: int32
+                    type: integer
+                  message:
+                    description: Human-readable explanation of the latest recommendation
+                      or hold.
+                    type: string
+                  mode:
+                    description: Current capacity policy mode.
+                    type: string
+                  pendingReplicas:
+                    description: Capacity requested but not yet observed as useful.
+                    format: int32
+                    type: integer
+                  reason:
+                    description: Machine-readable explanation of the latest recommendation
+                      or hold.
+                    type: string
+                  usefulReplicas:
+                    description: Observed replicas considered ready and useful by
+                      the capacity policy.
+                    format: int32
+                    type: integer
+                type: object
+              conditions:
+                description: Current readiness, progress, blocked, and maintenance
+                  conditions.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              desiredReplicas:
+                description: Current operation or enabled policy target, otherwise
+                  spec.replicas; zero during deletion.
+                format: int32
+                type: integer
+              joiningReplicas:
+                description: Observed non-terminating Pods that are not ready yet.
+                format: int32
+                type: integer
+              labelSelector:
+                description: Serialized selector for exactly this fleet's Pods, for
+                  the /scale subresource.
+                type: string
+              lifecycle:
+                description: Progress and current findings for capacity and maintenance
+                  operations.
+                properties:
+                  blocker:
+                    description: Reason the current operation cannot progress.
+                    type: string
+                  deadline:
+                    description: RFC3339 operation deadline. Passing it reports a
+                      stall; it does not cancel recovery.
+                    type: string
+                  from:
+                    description: Starting replica count of the active capacity operation.
+                    format: int32
+                    type: integer
+                  lastCompletionAt:
+                    description: RFC3339 completion time of the last completed operation,
+                      when available.
+                    type: string
+                  lastOutcome:
+                    description: Outcome recorded in the last completed operation.
+                    type: string
+                  operationID:
+                    description: Identifier of the active capacity or maintenance
+                      operation.
+                    type: string
+                  phase:
+                    description: Current phase of the active operation; use the condition
+                      message for the next action.
+                    type: string
+                  requestID:
+                    description: Identifier or token of the current request.
+                    type: string
+                  requestKind:
+                    description: Kind of a current maintenance or runtime-transition
+                      request.
+                    type: string
+                  stalled:
+                    description: Whether the active operation has exceeded its persisted
+                      deadline.
+                    type: boolean
+                  startedAt:
+                    description: RFC3339 start time of the active operation, when
+                      available.
+                    type: string
+                  targetGeneration:
+                    description: Runtime session generation of the selected target.
+                    type: string
+                  targetImage:
+                    description: Requested runtime image of a current transition request.
+                    type: string
+                  targetPod:
+                    description: Pod selected for the active capacity operation, when
+                      applicable.
+                    type: string
+                  targetUID:
+                    description: Exact Kubernetes UID of the selected target Pod.
+                    type: string
+                  to:
+                    description: Target replica count of the active capacity operation.
+                    format: int32
+                    type: integer
+                type: object
+              observedGeneration:
+                description: Fleet metadata.generation reflected by this status update.
+                format: int64
+                type: integer
+              observedReplicas:
+                description: Number of owned Pods observed in the latest complete
+                  inventory, including terminating Pods.
+                format: int32
+                type: integer
+              readyReplicas:
+                description: Ready count from the owned workload status, provided
+                  it covers the current workload generation.
+                format: int32
+                type: integer
+              replicaObservationValid:
+                description: Whether the Pod inventory was complete. False means counts
+                  must not be interpreted as proof of no running processes.
+                type: boolean
+              replicas:
+                description: |-
+                  Replicas and LabelSelector serve the /scale subresource: non-terminal pods
+                  of this fleet, including terminating ones, and the selector that matches
+                  exactly them. They never express permission to scale.
+                  Zero is serialized so the scale view always carries a count, but the schema
+                  does not require it: a status written before this field existed stays valid.
+                format: int32
+                type: integer
+              reservation:
+                description: Name of the cluster-scoped storage reservation holding
+                  this fleet's bucket ownership and current operation.
+                type: string
+              terminatingReplicas:
+                description: Observed Pods with a deletion timestamp.
+                format: int32
+                type: integer
+            type: object
+        required:
+        - spec
+        type: object
+        x-kubernetes-validations:
+        - message: fleet name must be a DNS label of at most 40 characters
+          rule: size(self.metadata.name) <= 40 && self.metadata.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')
+    served: true
+    storage: true
+    subresources:
+      scale:
+        labelSelectorPath: .status.labelSelector
+        specReplicasPath: .spec.replicas
+        statusReplicasPath: .status.replicas
+      status: {}

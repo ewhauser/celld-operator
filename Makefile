@@ -98,7 +98,7 @@ manifests-check:
 	python3 hack/check-generated.py
 
 # Actual Kind workloads, strict fork runtime and hostpath CSI RWOP/Delete storage.
-.PHONY: integration-store-images integration integration-lifecycle integration-maintenance integration-faults integration-external
+.PHONY: integration-store-images integration integration-lifecycle integration-maintenance integration-faults integration-external integration-upgrade
 integration-store-images:
 	bash hack/build-integration-store.sh
 integration: integration-store-images
@@ -111,6 +111,8 @@ integration-faults: integration-store-images
 	go run ./hack/integration --suite faults
 integration-external: integration-store-images
 	go run ./hack/integration --suite external
+integration-upgrade: integration-store-images
+	go run ./hack/integration --suite upgrade
 
 .PHONY: chart-sync chart-check chart-package
 chart-sync:
