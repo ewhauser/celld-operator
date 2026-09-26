@@ -21,8 +21,9 @@ make integration-extended
 ```
 
 The Make targets use the verified fork digest in `hack/runtime-image.txt`. It
-must be v0.5.1-ewhauser.6 or later: PersistentFleet settlement is read from
-`/state.node_log`, and idle contraction needs `.6`'s follower-loss detection. `CELLD_RUNTIME_IMAGE` or
+must be v0.5.1-ewhauser.7 or later: PersistentFleet settlement is read from
+`/state.node_log`, idle contraction needs `.6`'s follower-loss detection, and
+the extended suite's last-copy scenario needs `.7`'s replacement-witness fix. `CELLD_RUNTIME_IMAGE` or
 `--runtime-image` selects another immutable fork digest. There is no upstream or
 unpinned fallback. To qualify an already published operator image without
 rebuilding the manager, pass

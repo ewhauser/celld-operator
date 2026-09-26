@@ -33,20 +33,24 @@ released; scale-in of a PersistentFleet requires `.6` or later on every member.
 
 ## Published fork artifact
 
-Release `v0.5.1-ewhauser.6` has a Linux amd64/arm64 image index:
+Release `v0.5.1-ewhauser.7` has a Linux amd64/arm64 image index:
 
 ```text
-ghcr.io/ewhauser/celld@sha256:07a81e72155890b36529756a3ecbb22045d94679b3001a0341cacc044337549a
+ghcr.io/ewhauser/celld@sha256:c6b28dd2cc7b80ac910013df06951dc1a06409cab3f98185594fe0f246d6039e
 ```
 
 `.6` adds to `.5`'s node-log state: three failed idle probes to a follower
 degrade the leader's ensemble exactly as a failed write does, so an idle fleet
-moves off a departed member and releases its obligations.
+moves off a departed member and releases its obligations. `.7` lets a
+replacement disk under a member's own name answer recovery conclusively, so a
+fleet that loses every copy of a session (for example both members of a
+two-member fleet at once) records a bounded loss and recovers instead of
+waiting forever.
 
-The source revision is `801e98307157e962a57d5b0804dcf4a21ced008c`.
-[Release build 36205466928](https://github.com/ewhauser/celld/actions/runs/36205466928)
-and [image build 36205982955](https://github.com/ewhauser/celld/actions/runs/36205982955)
+The source revision is `9413a0bafd596db273649ed470ca8a1527263aec`.
+[Release build 36213756956](https://github.com/ewhauser/celld/actions/runs/36213756956)
+and [image build 36214420376](https://github.com/ewhauser/celld/actions/runs/36214420376)
 completed. The binary checksums, build provenance, `celld --version` and the
 image index's build attestation were verified. Native binaries and checksums are
-attached to the [fork release](https://github.com/ewhauser/celld/releases/tag/v0.5.1-ewhauser.6).
+attached to the [fork release](https://github.com/ewhauser/celld/releases/tag/v0.5.1-ewhauser.7).
 Confirm deployment behavior with the exact artifact and storage configuration you use. The operator image is built and pinned separately.
