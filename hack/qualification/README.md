@@ -13,5 +13,5 @@ qualifies recovery. Source hashes and the wire contract are recorded in
 [the typed client documentation](../../docs/runtime-control-plane.md).
 
 Live integration belongs in `hack/integration` and the opt-in runtime tests under
-`internal/launcher` and `internal/controller`. The old private-S3 snapshot/replay,
+`internal/controller`. The old private-S3 snapshot/replay,
 stock-version and disk-reuse harnesses have been removed.
