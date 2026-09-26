@@ -78,7 +78,9 @@ func (c fakeNodeLogs) NodeLog(_ context.Context, target controlplane.Target) (co
 	return controlplane.NodeLog{Posture: "fleet", Session: target.Node + "/g", ShipperHealthy: true, Fleet: &controlplane.FleetLog{ObservedAt: observed, Complete: true, Unrecovered: x.unrecovered, Obligations: obligations}}, nil
 }
 
-func newOperationFixture(t *testing.T, profile string) *operationFixture {
+// newOperationFixture provisions a three-member fleet. Options run before the
+// first reconcile, so they can change the fleet spec or install admission.
+func newOperationFixture(t *testing.T, profile string, options ...func(*operationFixture)) *operationFixture {
 	t.Helper()
 	deployment := profile == "Deployment"
 	if deployment {
@@ -91,12 +93,15 @@ func newOperationFixture(t *testing.T, profile string) *operationFixture {
 	f.Spec.Placement.AZCount = 1
 	f.Spec.Placement.Zones = []string{"us-east-1a"}
 	x := &operationFixture{t: t, f: f, clock: time.Now().UTC().Truncate(time.Millisecond), cpu: 10}
-	x.r = setup(t, f)
+	for _, option := range options {
+		option(x)
+	}
+	x.r = setup(t, x.f)
 	x.r.now = func() time.Time { return x.clock }
 	x.r.Collector = fixtureCollector{x}
 	x.r.RuntimeState = fakeNodeLogs{x}
-	reconcile(t, x.r, f)
-	reconcile(t, x.r, f)
+	reconcile(t, x.r, x.f)
+	reconcile(t, x.r, x.f)
 	x.syncWorkload()
 	return x
 }
@@ -175,10 +180,15 @@ func (x *operationFixture) syncWorkload() {
 	if err := x.r.List(ctx, pods, client.InNamespace(x.f.Namespace), client.MatchingLabels(labels(x.f))); err != nil {
 		t.Fatal(err)
 	}
+	rolling := false
+	if sts, ok := w.(*appsv1.StatefulSet); ok {
+		rolling = sts.Spec.UpdateStrategy.Type == appsv1.RollingUpdateStatefulSetStrategyType
+	}
 	for _, p := range pods.Items {
 		var ordinal int
 		_, _ = fmt.Sscanf(p.Name, x.f.Name+"-%d", &ordinal)
-		if ordinal >= int(n) {
+		// RollingUpdate: the StatefulSet controller replaces outdated Pods itself.
+		if ordinal >= int(n) || (rolling && p.Labels[revisionLabel] != revision) {
 			if err := x.r.Delete(ctx, &p, client.Preconditions{UID: &p.UID}); err != nil {
 				t.Fatal(err)
 			}
@@ -267,9 +277,10 @@ func (x *operationFixture) syncWorkload() {
 		w.Status.Replicas = n
 		w.Status.ObservedGeneration = w.Generation
 		w.Status.UpdatedReplicas = updated
-		// Like the real controller, OnDelete never advances currentRevision.
+		// Like the real controller, only RollingUpdate advances
+		// currentRevision; OnDelete keeps the creation revision.
 		w.Status.UpdateRevision = revision
-		if w.Status.CurrentRevision == "" {
+		if w.Status.CurrentRevision == "" || (rolling && updated == n) {
 			w.Status.CurrentRevision = revision
 		}
 	case *appsv1.Deployment:
