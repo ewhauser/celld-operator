@@ -30,9 +30,9 @@ const contracts = [
 	['runtime-versions', 'Runtime requirements'],
 	['runtime-dependencies', 'Runtime responsibilities'],
 	['runtime-control-plane', 'Typed runtime control plane'],
-	['launcher-supervision', 'Strict launcher supervision'],
-	['current-operation', 'Bounded current operation'],
-	['disposable-disks', 'Disposable disks'],
+	['launcher-supervision', 'Launcher (removed)'],
+	['current-operation', 'One disruption at a time'],
+	['disposable-disks', 'Retained persistent disks'],
 ];
 
 /** @type {{source: string, section: string, slug: string, label?: string}[]} */

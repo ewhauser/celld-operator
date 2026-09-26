@@ -21,7 +21,7 @@ ghcr.io/ewhauser/celld@sha256:b86b115f1af776eb90f086934c6cffba5e470e0bc99dcfe76c
 ```
 
 The source revision is `93506ef77217ffac225cf63d1bfceb232d4fc119`.
-Verify source, platform and digest for the artifact you deploy. Stock upstream releases do not expose this strict contract. A
+Verify source, platform and digest for the artifact you deploy. Stock upstream releases do not report node-log state. A
 syntactically valid pin does not establish runtime/storage-format qualification.
 
 Use `.3` for new fleets. `.1` can stall populated full-stop removal; `.2` fixes
