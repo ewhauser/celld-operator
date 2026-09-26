@@ -9,12 +9,13 @@ retained CSI disks and changes one member at a time.
 
 > [!WARNING]
 > If you use celld with persistent local storage (`PersistentFleet`), you must
-> use the [ewhauser/celld fork](https://github.com/ewhauser/celld). It keeps an
-> empty replacement disk from answering for a member's previous disk, and it
-> lets an idle leader stop depending on a departed member; stock upstream celld
-> does neither. All runtime and recovery nodes must use a compatible fork. The
-> fork is also required for `Bucket` fleets. See [compatibility](site/src/content/docs/reference/compatibility.md)
-> for the required release and image digest.
+> use the [ewhauser/celld fork](https://github.com/ewhauser/celld). It never
+> counts an unreachable peer as holding no copy of a write, and it lets an idle
+> leader stop depending on a departed member; stock upstream celld does neither.
+> All runtime and recovery nodes must use a compatible fork. The fork is also
+> required for `Bucket` fleets. See
+> [compatibility](site/src/content/docs/reference/compatibility.md) for the
+> required release and image digest.
 
 ## Use the operator
 

@@ -242,7 +242,8 @@ jobs:
 
           - Image: \`$IMAGE@$DIGEST\` (linux/amd64, linux/arm64), signed keyless by this workflow run.
           - Chart: \`ghcr.io/$owner/charts/celld-operator:$version\` (digest in chart.txt), signed keyless.
-          - Bounded current-operation state version: 1. This is a fresh-install cutover; migration from the retired lifecycle controller is unsupported.
+          - Qualified with celld runtime \`$(cat hack/runtime-image.txt)\`. Pin a compatible fork runtime by digest; see the compatibility reference.
+          - Fleets created by earlier releases upgrade in place; see the operator upgrade guide. Reservation state version: 1.
           - CRD upgrades are explicit: apply the bundled CRDs before upgrading the chart. Bucket data and storage reservations must never be deleted on uninstall.
 
           Verify: \`cosign verify --certificate-identity "$identity" --certificate-oidc-issuer https://token.actions.githubusercontent.com $IMAGE@$DIGEST\`

@@ -43,11 +43,11 @@ events and EBS records to verify detach and deletion.
 Run the disposable suite with an actual published fork image digest:
 
 ```sh
-CELLD_RUNTIME_IMAGE=ghcr.io/ewhauser/celld@sha256:07a81e72155890b36529756a3ecbb22045d94679b3001a0341cacc044337549a \
+CELLD_RUNTIME_IMAGE=ghcr.io/ewhauser/celld@sha256:c6b28dd2cc7b80ac910013df06951dc1a06409cab3f98185594fe0f246d6039e \
 go run ./hack/integration --suite all
 ```
 
-The command pins the published `.6` fork artifact, the same digest as
+The command pins the published `.7` fork artifact, the same digest as
 `hack/runtime-image.txt`, which `make integration` uses. Individual suites are
 `lifecycle`, `maintenance`, `faults`, `external` and `upgrade`. `all` omits
 `upgrade`, which installs the released v0.0.5 operator, lets its launcher
