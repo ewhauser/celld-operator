@@ -17,7 +17,8 @@ RBAC are changed.
 ## Runtime identity
 
 The fork adds a `shutdown` object to `/state`, first published in
-`v0.5.1-ewhauser.2` (upstream v0.5.1 base). Stock v0.5.1 does not implement it.
+`v0.5.1-ewhauser.2` (upstream v0.5.1 base) and kept in `0.6.0-ewhauser.1`. Stock
+upstream celld does not implement it.
 Capacity reads two of its fields:
 
 ```json
