@@ -25,7 +25,7 @@ recovery procedure. To declare an existing PersistentFleet disk gone, use the
 
 `make check` builds the Go packages, runs race tests and checks native/Linux lint.
 `make test-envtest` exercises the real API server's admission and resource-version
-conflicts. `make test-linux` executes Linux process-lock tests with Docker.
+conflicts. `make test-linux` runs the controller tests on Linux with Docker.
 `make chart-check` and `make manifests-check` verify shipped configuration.
 The [test records](qualification/README.md) document the environments exercised.
 

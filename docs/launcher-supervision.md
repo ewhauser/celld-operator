@@ -17,7 +17,7 @@ On upgrade, Pods still held by the launcher scheduling gate are released and
 rolled onto the current template. Restart-deny markers left on retained disks
 are ignored because nothing reads them.
 
-The `internal/launcher` package, `cmd/celld-launcher` binary and `make test-linux`
-remain in the repository until they are removed. Their design and September
-real-binary handshake evidence are in Git history and the
+The `internal/launcher` package and `cmd/celld-launcher` binary have been removed,
+and the operator image no longer contains the launcher. Their design and
+September real-binary handshake evidence are in Git history and the
 [qualification records](qualification/README.md).

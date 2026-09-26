@@ -43,10 +43,8 @@ jobs:
         run: python3 hack/package-release.py --version "$RELEASE_VERSION" --image ghcr.io/ewhauser/celld-operator --digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       - name: Install pinned QEMU handlers
         run: docker run --privileged --rm "$BINFMT_IMAGE" --install arm64
-      - name: Launcher and controller tests on both Linux architectures
-        # The launcher's lock inheritance and PID 1 behavior are Linux-specific and
-        # arch-independent only in principle; run the real suites under each arch
-        # inside the pinned runtime image, which supplies /bin/sh for the fixtures.
+      - name: Controller tests on both Linux architectures
+        # Run the controller suite under each arch inside the pinned runtime image.
         run: |
           set -euo pipefail
           # Docker's classic image store cannot hold two platforms of one digest
@@ -54,18 +52,13 @@ jobs:
           # of the pinned celld index by its own manifest digest.
           index="$(cat hack/runtime-image.txt)"
           repository="${index%@*}"
-          native="$(dpkg --print-architecture)"
           for arch in amd64 arm64; do
             manifest="$(docker buildx imagetools inspect "$index" --raw | jq -r --arg a "$arch" '.manifests[] | select(.platform.os=="linux" and .platform.architecture==$a) | .digest')"
             test -n "$manifest"
-            # Signal-disposition fixtures are not reproducible under user-mode QEMU;
-            # the emulated architecture skips exactly those tests and says so.
-            emulated=()
-            if [ "$arch" != "$native" ]; then emulated=(-e LAUNCHER_TESTS_EMULATED=1); fi
-            for pkg in launcher controller; do
+            for pkg in controller; do
               CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go test -c -o "bin/tests/${pkg}-${arch}.test" "./internal/${pkg}"
               # pipefail carries the test binary's exit status through the filter.
-              docker run --rm --platform "linux/${arch}" "${emulated[@]}" \
+              docker run --rm --platform "linux/${arch}" \
                 -v "$PWD/bin/tests:/t:ro" -v "$PWD:/src:ro" -w "/src/internal/${pkg}" \
                 --entrypoint "/t/${pkg}-${arch}.test" \
                 "$repository@${manifest}" -test.count=1 -test.v 2>&1 | grep -E "^(--- (FAIL|SKIP)|FAIL|ok|PASS)"
@@ -128,7 +121,7 @@ jobs:
         run: docker run --privileged --rm "$BINFMT_IMAGE" --install arm64
       - name: Smoke test the published image on both architectures
         # A multi-arch manifest proves nothing about either binary. Run each platform
-        # of the exact pushed digest: version banner and the launcher install path.
+        # of the exact pushed digest: its version banner.
         env:
           IMAGE: ${{ steps.repository.outputs.image }}
           DIGEST: ${{ steps.image.outputs.digest }}
@@ -142,7 +135,6 @@ jobs:
             test -n "$manifest"
             version="$(docker run --rm --platform "linux/${arch}" "$IMAGE@$manifest" --version)"
             test "$version" = "$RELEASE_VERSION"
-            docker run --rm --platform "linux/${arch}" --entrypoint /celld-launcher "$IMAGE@$manifest" install /home/nonroot/launcher/celld-launcher
           done
       - name: Attest the published image
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4

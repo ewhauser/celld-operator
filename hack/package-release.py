@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package a release chart with immutable controller and launcher images."""
+"""Package a release chart with an immutable controller image."""
 import argparse
 import pathlib
 import re
@@ -30,7 +30,6 @@ with tempfile.TemporaryDirectory(prefix='celld-release-') as temp:
     for pattern, replacement in [
         (r'^  repository:.*$', f'  repository: {a.image}'),
         (r'^  digest:.*$', f'  digest: {a.digest}'),
-        (r'^launcherImage:.*$', f'launcherImage: {a.image}@{a.digest}'),
     ]:
         data, count = re.subn(pattern, replacement, data, flags=re.MULTILINE)
         if count != 1:

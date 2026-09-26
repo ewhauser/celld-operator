@@ -18,7 +18,7 @@ SECURITY_ENV_STAMP := .security-venv/.installed
 
 .PHONY: check check-full build test vet fmt lint lint-linux lint-new test-linux image clean
 
-# Linux-only files (launcher process handling, build tags) are invisible to a
+# Linux-only files (build tags) are invisible to a
 # macOS lint run; lint-linux analyzes the Linux build so they cannot reach CI red.
 check: build test lint lint-linux
 
@@ -45,7 +45,6 @@ vuln-check:
 build:
 	go build -o /dev/null $(GO_PACKAGES)
 	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/celld-operator ./cmd/celld-operator
-	CGO_ENABLED=0 go build -trimpath -o bin/celld-launcher ./cmd/celld-launcher
 
 test:
 	go test $(RACE) $(GO_PACKAGES)
@@ -74,13 +73,11 @@ $(GOLANGCI_LINT_BIN):
 lint-linux: $(GOLANGCI_LINT_BIN)
 	GOOS=linux $(GOLANGCI_LINT_BIN) run ./...
 
-# Cross-compile the platform-sensitive packages' tests and run them on Linux in
-# the pinned runtime image (which supplies /bin/sh for the launcher fixtures).
+# Cross-compile the controller tests and run them on Linux in the pinned
+# runtime image.
 # No race detector: that needs cgo. Requires Docker.
 test-linux:
-	CGO_ENABLED=0 GOOS=linux GOARCH=$(HOST_GOARCH) go test -c -o bin/tests/launcher.test ./internal/launcher
 	CGO_ENABLED=0 GOOS=linux GOARCH=$(HOST_GOARCH) go test -c -o bin/tests/controller.test ./internal/controller
-	docker run --rm --platform linux/$(HOST_GOARCH) -e TZ=UTC -v $(CURDIR)/bin/tests:/t:ro -v $(CURDIR):/src:ro -w /src/internal/launcher --entrypoint /t/launcher.test $(RUNTIME_IMAGE) -test.count=1
 	docker run --rm --platform linux/$(HOST_GOARCH) -e TZ=UTC -v $(CURDIR)/bin/tests:/t:ro -v $(CURDIR):/src:ro -w /src/internal/controller --entrypoint /t/controller.test $(RUNTIME_IMAGE) -test.count=1
 
 lint-new:

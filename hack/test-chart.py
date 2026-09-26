@@ -49,7 +49,7 @@ assert any(doc['kind'] == 'ServiceMonitor' for doc in full)
 assert any(doc['kind'] == 'PrometheusRule' for doc in full)
 fullpod = next(doc for doc in full if doc['kind'] == 'Deployment')['spec']['template']['spec']
 assert fullpod['containers'][0]['image'].endswith('@sha256:' + 'a' * 64)
-assert any(arg.startswith('--launcher-image=') for arg in fullpod['containers'][0]['args'])
+assert not any(arg.startswith('--launcher-image') for arg in fullpod['containers'][0]['args'])
 assert not any(doc['kind'] == 'PodDisruptionBudget' for doc in render('--set', 'replicaCount=1'))
 for bad in ('fleetNamespaces={Bad_Name}', 'replicaCount=0', 'metrics.serviceMonitor.enabled=true', 'metrics.port=8082', 'launcherImage=mutable:latest', 'image.digest=sha256:bad'):
     result = subprocess.run(['helm', 'template', 'example', CHART, '--set', bad], text=True, capture_output=True)

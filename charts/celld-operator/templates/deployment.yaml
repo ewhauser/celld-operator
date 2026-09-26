@@ -50,9 +50,6 @@ spec:
           args:
             - --operator-namespace={{ .Release.Namespace }}
             - --network-policy-enforced={{ .Values.networkPolicyEnforced }}
-            {{- if .Values.launcherImage }}
-            - --launcher-image={{ .Values.launcherImage }}
-            {{- end }}
             {{- if .Values.metrics.enabled }}
             - --metrics-bind-address=:{{ .Values.metrics.port }}
             {{- end }}
