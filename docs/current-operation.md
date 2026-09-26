@@ -60,10 +60,11 @@ created.
 
 Leaders stop using a departed member within seconds, and every node sweeps
 dead leaders every 30 seconds. Once the rest of the fleet has been ready for
-five minutes, no session depends on the down member's disk. celld refuses
-answers from a fresh disk until its member publishes a lease. After that, it
-seals any session whose only complete copy was on the old disk and records a
-bounded loss in `log/<session>.e<epoch>.loss.json`. With the rest of the fleet
+five minutes, no session depends on the down member's disk. A member on a
+fresh disk declares its old disk lost: it answers recovery for that disk with
+a conclusive "no fragment", and celld seals any session whose only complete
+copy was on the old disk and records a bounded loss in
+`log/<session>.e<epoch>.loss.json`. With the rest of the fleet
 ready, no such session remains unless a second failure happened first.
 
 ## Recovering a fleet
@@ -85,10 +86,10 @@ its own disk and waits for each to be Ready.
   its own disk, and the retired member rejoins on that disk.
 
 Never edit finalizers, the reservation annotation or claims by hand, and never
-delete every member's disk. celld refuses answers from a fresh disk until its
-member publishes a lease, and a member publishes its lease only after it
-recovers its previous session. With every disk fresh while sessions are still
-open, no member can recover.
+delete every member's disk. Every session whose writes were only on those
+disks would be recorded as lost. Runtimes before `0.5.1-ewhauser.7` refuse
+answers from a fresh disk until its member publishes a lease, so on them
+recovery stalls instead.
 
 ## Limits
 
