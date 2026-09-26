@@ -17,7 +17,11 @@ make integration-lifecycle
 make integration-maintenance
 make integration-faults
 make integration-external
+make integration-upgrade
 ```
+
+`make integration` runs every suite except `upgrade`, which needs its own
+cluster.
 
 The Make targets use the verified fork digest in `hack/runtime-image.txt`
 (v0.5.1-ewhauser.6). `CELLD_RUNTIME_IMAGE` or `--runtime-image` selects another
@@ -117,6 +121,11 @@ writes, in each of these ways:
   replaces the member's disk. Only then does the kubelet return, and the member
   rejoins on a fresh disk.
 
+The suite then takes every member down at once, first by SIGKILL of every
+celld and then by deleting every Pod. celld restarts all of them on their own
+disks and they recover each other's logs; the one-member invariant does not
+apply, but no disk may change and no member Pod may be replaced after SIGKILL.
+
 Each fault must settle without manual repair, with every acknowledged write
 readable. A replaced disk comes back with a fresh identity, and every other disk
 is kept. A forced Bucket Pod delete loses nothing. The continuous writer and the
@@ -127,6 +136,26 @@ disturbs.
 `/scale` subresource. It checks that External mode never fights the HPA, that
 a lowered maximum contracts the fleet one member at a time with the ledger
 intact, and that manual ownership returns afterwards.
+
+
+**upgrade** reproduces [#60](https://github.com/ewhauser/celld-operator/issues/60)
+on the released v0.0.5 operator, using its vendored manifests in
+`testdata/v0.0.5/` and its signed image. It provisions a three-member
+PersistentFleet on the runtime v0.0.5 was qualified with and writes a ledger.
+Then it deletes one member's Pod, which makes the v0.0.5 launcher permanently
+retire that member's disk; the member stays down. The suite then upgrades the
+operator as an administrator would, applying this build's CRDs, manager
+manifest and fleet Role, and requires:
+
+- the StatefulSet rolls every member onto plain celld, one at a time, on the
+  same disks, including the retired one;
+- every acknowledged write is readable;
+- the v0.0.5 bookkeeping annotation is gone from the storage reservation;
+- nothing is edited by hand.
+
+This suite runs the operator with its default replacement delay, so
+self-healing does not replace the retired member's disk before the rollout
+restarts it.
 
 ## Limits
 

@@ -66,6 +66,30 @@ seals any session whose only complete copy was on the old disk and records a
 bounded loss in `log/<session>.e<epoch>.loss.json`. With the rest of the fleet
 ready, no such session remains unless a second failure happened first.
 
+## Recovering a fleet
+
+There is no rebuild operation. celld recovers every member from its own disk
+and its peers, so the only lever an administrator needs is a rolling restart:
+a new `maintenance.restartToken`. Kubernetes restarts one member at a time on
+its own disk and waits for each to be Ready.
+
+- **Every member down at once.** Whether celld was killed on every member or
+  every Pod was deleted, the StatefulSet restarts all of them on their own
+  disks. Each serves its follower data before it recovers its own session, so
+  the fleet recovers without help and loses no acknowledged write.
+- **A member whose disk is lost or unusable** is replaced by the operator; see
+  [self-healing](#self-healing).
+- **A fleet stuck under v0.0.5**, with a member down because the launcher
+  retired its disk (`DiskRetired` or `LauncherBlocked`), recovers when the
+  operator is upgraded. The StatefulSet rolls every member onto plain celld on
+  its own disk, and the retired member rejoins on that disk.
+
+Never edit finalizers, the reservation annotation or claims by hand, and never
+delete every member's disk. celld refuses answers from a fresh disk until its
+member publishes a lease, and a member publishes its lease only after it
+recovers its previous session. With every disk fresh while sessions are still
+open, no member can recover.
+
 ## Limits
 
 - **Two members that cannot come back wait.** When two members are down at
@@ -124,4 +148,5 @@ them, contraction waiting for a rollout, foreign claims, workload recreation,
 deletion, adoption of strict fleets, and each self-healing action together
 with the cases it must leave alone. These are unit tests with a fake
 client. The kind suites run the same behavior against the real fork under
-write load; see [qualification](qualification/README.md).
+write load, including every member killed or deleted at once and an upgrade
+from v0.0.5 with a retired disk; see [qualification](qualification/README.md).

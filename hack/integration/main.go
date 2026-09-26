@@ -49,7 +49,7 @@ func main() {
 func realMain() (code int) {
 	var opts options
 	fs := flag.NewFlagSet("integration", flag.ContinueOnError)
-	fs.StringVar(&opts.suite, "suite", "all", "suite: all, lifecycle, maintenance, faults, external, previews")
+	fs.StringVar(&opts.suite, "suite", "all", "suite: all, lifecycle, maintenance, faults, external, upgrade, previews")
 	fs.StringVar(&opts.runtimeImage, "runtime-image", os.Getenv("CELLD_RUNTIME_IMAGE"), "required immutable ghcr.io/ewhauser/celld@sha256:... fork image")
 	fs.StringVar(&opts.upgradeFrom, "upgrade-from", envOr("CELLD_UPGRADE_FROM_IMAGE", legacyRuntimeImage), "fork digest the maintenance suite upgrades a PersistentFleet from, on retained disks; \"none\" skips it")
 	fs.StringVar(&opts.operatorImage, "operator-image", "", "published controller image to qualify instead of building source")
@@ -80,7 +80,7 @@ func realMain() (code int) {
 		return 2
 	}
 	switch opts.suite {
-	case "all", "lifecycle", "maintenance", "faults", "external", "previews":
+	case "all", "lifecycle", "maintenance", "faults", "external", "upgrade", "previews":
 	default:
 		fmt.Fprintln(os.Stderr, "unknown suite:", opts.suite)
 		return 2
@@ -162,6 +162,11 @@ func (h *harness) exercise() {
 	}
 	h.deployApplication()
 	h.installStorageClass()
+	if h.opts.suite == "upgrade" {
+		h.exerciseUpgrade()
+		fmt.Println("PASS: kind integration suite upgrade from", previousRelease)
+		return
+	}
 	h.startOperator()
 	h.exerciseIsolation()
 	switch h.opts.suite {
