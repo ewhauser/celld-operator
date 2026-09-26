@@ -15,7 +15,10 @@ Contraction lowers replicas by one, removing the highest ordinal, and waits for
 the StatefulSet to report updated, ready replicas before the next step.
 Automatic and External contraction also require survivor-capacity evidence for
 that ordinal. Restart and upgrade use a StatefulSet `RollingUpdate`, one ordinal
-at a time. New growth starts fresh Pods and temporary disks.
+at a time. New growth starts fresh Pods and temporary disks. A member Pod still
+present more than two minutes after its termination grace ended, because its
+node no longer answers, is force-deleted so the StatefulSet can recreate it
+(`MemberForceDeleted`); see [self-healing](current-operation.md#self-healing).
 
 The default Bucket layout is `Deployment` (`RollingUpdate`, `maxUnavailable: 1`,
 `maxSurge: 0`). It contracts the same way, but Kubernetes chooses the victim, so

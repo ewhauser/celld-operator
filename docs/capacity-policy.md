@@ -2,9 +2,9 @@
 
 The built-in collector reads celld's typed `/state` and Kubernetes Metrics Server.
 Incomplete observations are invalid, never zero demand. CPU, memory and readiness
-do not establish PersistentFleet removal safety. Manual and policy requests share
-one path: one member per step, and for PersistentFleet only when the fleet is
-[settled](current-operation.md#settlement).
+do not establish PersistentFleet removal safety; a removed member keeps its disk
+([PersistentFleet lifecycle](current-operation.md)). Manual and policy requests
+share one path: growth in one step, contraction one member per step.
 
 | Mode | Replica ownership |
 | --- | --- |
@@ -15,10 +15,10 @@ one path: one member per step, and for PersistentFleet only when the fleet is
 | External | One external `/scale` writer owns `spec.replicas`; no built-in demand collection. |
 
 Contraction removes one member per step after the previous change has rolled
-out. PersistentFleet removes the highest ordinal and deletes its disk only once no
-session needs it. Automatic and External steps require survivor capacity for
-every possible victim, else `CapacityUncertain`. [Test records](qualification/README.md)
-describe the capacity and lifecycle scenarios exercised.
+out. PersistentFleet removes the highest ordinal and keeps its disk. Automatic
+and External steps require survivor capacity for every possible victim, else
+`CapacityUncertain`. [Test records](qualification/README.md) describe the
+capacity and lifecycle scenarios exercised.
 
 | Field under `capacity` | Default | Meaning |
 | --- | --- | --- |
@@ -41,8 +41,7 @@ describe the capacity and lifecycle scenarios exercised.
 
 These defaults are starting points, not production capacity guarantees. Source
 samples must advance and fit configured age/window limits. Built-in contraction
-requires complete fresh low-demand observations and ready survivors;
-PersistentFleet also requires a settled fleet.
+requires complete fresh low-demand observations and ready survivors.
 
 `spec.replicas` is never rewritten by built-in automation. A manual edit takes
 precedence for the next operation. Policy mode and bounds do not retarget issued
@@ -58,9 +57,9 @@ alone is not evidence of useful redistribution. Explicit minimum capacity and
 manual replica requests retain their documented precedence.
 
 Maintenance pause stops new workload changes and invalidates positive demand
-windows. Each disruption also clears load samples. Controller restart or status
-clearing does not reset policy state. Never edit reservation annotations to
-remove a policy hold.
+windows. A membership change, such as a restarted member, restarts stable
+windows. Controller restart or status clearing does not reset policy state.
+Never edit reservation annotations to remove a policy hold.
 
 External autoscalers target `CelldFleet` using its `/scale` subresource, never the
 managed workload. The subresource reports nonterminal observed Pods, including

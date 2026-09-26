@@ -9,13 +9,23 @@ celld alone holds the fleet's runtime bucket identity.
 
 ## Kubernetes access
 
-The cluster-scoped role covers fleet discovery/status, permanent reservations,
-current PV/StorageClass/node inspection and attachment observations. Each fleet
-namespace has a separate Role for workloads, Pods, Services, policies, credentials
-and guarded PVC creation/deletion. Service updates only fill unset fields a newer
-release declares on operator-created Services. PodDisruptionBudget updates
-converge fleet budgets. The controller's leader-election
-lease is scoped to its own namespace.
+The cluster-scoped role covers fleet discovery/status, permanent reservations
+and StorageClass reads. It has no PersistentVolume, Node or VolumeAttachment
+access. Each fleet namespace has a separate Role for workloads, Pods (reads,
+scheduling-gate updates and deletion), Services, policies, credentials, and
+PVCs (reads and deletion). The operator binds every Pod and PVC delete to the
+object's UID, and deletes Pods and PVCs only under its
+[self-healing](../../concepts/current-operation/#self-healing) rules and at
+fleet deletion. It force-deletes a member Pod left on a node that no longer
+answers.
+It deletes a member's claim and Pod when the claim is `Lost`, or when that one
+member has been down for the replacement delay while every other member has
+been ready for five minutes. It deletes every fleet claim once a deleted
+PersistentFleet's StatefulSet is gone. The Role has no PVC `create`; the
+StatefulSet creates claims. Service updates only fill unset fields a newer
+release declares on operator-created Services.
+PodDisruptionBudget updates converge fleet budgets. The controller's
+leader-election lease is scoped to its own namespace.
 
 Use the shipped chart and `config/rbac/fleet-namespace.yaml` as the exact permission
 reference. The tests audit actual reconciler calls against these grants.
@@ -38,18 +48,24 @@ the unauthenticated celld internal listener through public ingress.
 
 No fleet uses a launcher, key Secret or proof channel. celld owns durability:
 Bucket writes are in S3 before acknowledgement, and PersistentFleet writes are on
-every follower's disk. The operator reads each member's unauthenticated
-`/state.node_log` over port 8081 to decide when the fleet has settled and when a
-removed member's disk may be deleted. Anyone who can forge that response inside
-the fleet's network boundary could delay changes or release a disk early, which
-is why the internal listener must stay private.
+every follower's disk. Kubernetes readiness paces rollouts. The operator
+deletes an existing disk only with the fleet or under its self-healing rules,
+which read Pod readiness, Pod termination and claim phase from the Kubernetes
+API, so no `/state` response can release a disk.
+The operator reads each member's unauthenticated `/state` over port 8081 for
+capacity observations and application status. Anyone who can forge that
+response inside the fleet's network boundary could skew capacity decisions or
+reported application state, which is why the internal listener must stay
+private.
 
-The contract assumes administrators do not bypass storage protection. The
-`celld.eric.dev/replace-member` annotation deletes a member's existing disk, so
-treat CelldFleet edit access as authority over fleet data.
+The contract assumes administrators do not bypass storage protection. Deleting
+a member's PVC declares its disk gone, and deleting a PersistentFleet deletes
+every one of its disks. Treat PVC and CelldFleet delete access in fleet
+namespaces as authority over fleet data. The operator's Role holds PVC delete
+access too, and uses it only under the rules above.
 
 All recovery participants must understand the fork's proof. Pin and qualify the
-runtime artifact. See [one disruption at a time](../../contracts/current-operation/),
+runtime artifact. See [the PersistentFleet lifecycle](../../contracts/current-operation/),
 [retained disks](../../contracts/disposable-disks/) and
 [qualification](../../qualification/) for boundaries and tests.
 

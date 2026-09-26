@@ -1,5 +1,5 @@
 # External capacity mode: one HorizontalPodAutoscaler owns spec.replicas through
-# the CelldFleet /scale subresource. Never target the child Deployment.
+# the CelldFleet /scale subresource. Never target the managed StatefulSet.
 apiVersion: celld.eric.dev/v1alpha1
 kind: CelldFleet
 metadata:
@@ -7,7 +7,7 @@ metadata:
   namespace: agents-prod
 spec:
   profile: Bucket
-  bucketWorkload: Ordered # HPA scale-in requires an exact highest-ordinal victim.
+  bucketWorkload: Ordered # Scale-in checks survivor capacity for the highest ordinal only.
   replicas: 3
   serviceAccountName: agents-celld
   storage:

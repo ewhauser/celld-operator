@@ -31,8 +31,8 @@ make integration-previews RUNTIME_IMAGE=ghcr.io/ewhauser/celld@sha256:YOUR_DIGES
 
 The ordinary runtime pin may predate preview CLI support. No existing cluster,
 default kubeconfig, host DNS configuration, or production store is used. The
-suite removes only its uniquely named cluster and launcher image on success,
-failure, or interruption. The caller's runtime image and optional build cache
+suite removes only its uniquely named cluster on success, failure, or
+interruption. The caller's runtime image and optional build cache
 remain available for reruns. Logs go to the terminal, not the repository.
 
 The preview suite is opt-in: it is not part of `make integration` or the current

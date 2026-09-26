@@ -13,21 +13,22 @@ kubectl --context YOUR_CONTEXT -n fleets get celldfleet my-fleet -o yaml
 The operator writes the token to the Pod template annotation
 `celld.eric.dev/restart-token`, and members are replaced one at a time. Each
 member drains on SIGTERM within `lifecycle.shutdownSeconds`. No downtime
-permission is needed; `allowCoordinatedDowntime` is ignored. A Bucket fleet's
-Deployment or StatefulSet performs the rolling update.
+permission is needed; `allowCoordinatedDowntime` is ignored. The workload
+controller performs the rolling update: a Bucket fleet's Deployment or
+StatefulSet, or a PersistentFleet's StatefulSet.
 
 ## PersistentFleet
 
-The StatefulSet uses `OnDelete`, so the operator deletes each outdated Pod
-itself: a member that is already down first, then running members from the
-highest ordinal, each only once the fleet has [settled](../../concepts/current-operation/).
-The replacement Pod reattaches the same disk. While waiting, the fleet reports
-`LifecycleProgress` with `Rolling update waits before POD: REASON`.
-
-A runtime without node-log state (before `0.5.1-ewhauser.5`) rolls on
-readiness plus a one-minute stabilization after the last disruption.
+The StatefulSet uses `RollingUpdate`. Kubernetes restarts one member at a time,
+highest ordinal first, and waits for each to be Ready before the next. Readiness
+is celld's health endpoint, which returns 200 only after the member has
+recovered its previous session. The replacement Pod reattaches the same disk.
+The operator deletes no Pods to restart them. While the rollout runs, the fleet
+reports `Provisioning` with `Rolling out one member at a time; waiting for updated, ready replicas`.
+See the [PersistentFleet lifecycle](../../concepts/current-operation/).
 
 The current token is not replayed; use a new token for another restart.
-`maintenance.paused: true` suspends all workload changes (`MaintenancePaused`),
-including lost-disk replacement. See [lifecycle troubleshooting](../../troubleshoot/lifecycle/)
+`maintenance.paused: true` stops the operator from writing workload changes
+(`MaintenancePaused`); a rollout the workload controller has already started
+continues. See [lifecycle troubleshooting](../../troubleshoot/lifecycle/)
 if a rollout keeps waiting.

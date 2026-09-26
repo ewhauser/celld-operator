@@ -25,17 +25,18 @@ RBAC are changed.
 - Strict shutdown uses `/shutdown?mode=remove-disk`, with exactly
   `operation_id` and `expected_generation` in the JSON body. Preflight requires
   the versioned capability; the server enforces the generation on the mutation.
-- Node-log state decodes `/state.node_log`; see [below](#node-log-state).
 
 Ordinary shutdown/reload APIs cannot atomically bind a runtime generation. The
 client rejects requests that ask those APIs to enforce one; it does not
 simulate safety with a racy GET followed by an unguarded POST. There are no
 controller callers of these mutations, and no fleet consumes the strict
 `remove-disk` API since the [launcher](launcher-supervision.md) was retired.
-PersistentFleet instead reads node-log state and disrupts
-[one member at a time](current-operation.md); private S3 evidence, journal
-archives and old release adapters have no active reconciliation path. An
-explicitly verified compatible fork digest is still required for rollout.
+PersistentFleet instead restarts one member at a time through its StatefulSet
+([PersistentFleet lifecycle](current-operation.md)). The client does not decode
+the `node_log` object that `0.5.1-ewhauser.5` and later add to `/state`.
+Private S3 evidence, journal archives and old release adapters have no active
+reconciliation path. An explicitly verified compatible fork digest is still
+required for rollout.
 
 PersistentFleet advertises each stable StatefulSet Pod DNS name through the
 headless peer Service, which publishes addresses before readiness. celld consults
@@ -54,29 +55,17 @@ required; `.2` lost acknowledged writes under ordinary startup skew.
 
 The runtime retains its explicit-loss policy when reachable members
 conclusively report missing or incomplete fragments and no complete witness
-remains. Kubelet restarts an exited celld container on the same disk. The
-operator replaces a member whose disk is gone and does not inspect private
-recovery metadata. See the [delayed-witness evidence](qualification/native-peer-startup/README.md).
-
-## Node-log state
-
-`0.5.1-ewhauser.5` and later add `node_log` to `GET /state`: the node's
-durability `posture`, `session`, its own log, `shipper_healthy` (a follower
-ensemble is attached) and `fleet`, the last dead-leader sweep. The sweep carries
-`observed_ms`, `complete`, `unrecovered` sessions with their state and lease
-expiry, and `obligations`, a map from member node to the leader sessions whose
-current epoch still needs that member's fragment. Required fields must be
-present; a partial object is an error, not a healthy default. An absent or null
-`node_log` reports `ErrNoNodeLog`, which the operator treats as unknown.
-
-`internal/fleethealth` turns these reports into two answers: whether the fleet
-has settled since the last disruption, and whether a removed member's disk is
-still needed. See [one disruption at a time](current-operation.md#settlement).
+remains. See the [delayed-witness evidence](qualification/native-peer-startup/README.md).
+Kubelet restarts an exited celld container on the same disk. The operator does
+not inspect private recovery metadata. It replaces a member that cannot come
+back, judged only from what Kubernetes reports about the member's Pod and
+claim; it makes no control-plane call for this. See
+[self-healing](current-operation.md#self-healing).
 
 ## Strict schema alignment
 
-No fleet consumes this API now. The client and fixtures remain for the
-retained launcher package.
+No fleet consumes this API now. The strict client and its fixtures remain; no
+operator code has called them since the launcher was removed.
 
 The adapter follows the implemented `State::snapshot` in
 `crates/celld/disk_removal.rs` and `handle_internal` in `crates/celld/main.rs` on
@@ -126,9 +115,9 @@ still succeeds while capacity marks that node unavailable. There is no
 private-S3 fallback in this client.
 
 celld drains existing HTTP connections before entering control-only mode. After
-an accepted strict request, the launcher retries incomplete transport reads
-within the original operation deadline while the exact child remains alive.
-It never replays the mutation or treats a connection failure as proof. HTTP
+an accepted strict request, the launcher retried incomplete transport reads
+within the original operation deadline while the exact child remained alive.
+It never replayed the mutation or treated a connection failure as proof. HTTP
 rejections, malformed results, identity mismatches and runtime failures remain
 terminal; completion still requires a fresh matching `data_safe` observation.
 
@@ -153,9 +142,10 @@ The fixture-generation source SHA256 values were:
 - `crates/logic/disk_removal.rs`: `4ae763abcf9e2657880970ed0d0ea82d6e90341c11c13999cfade9c591df4b89`
 
 This validates the implemented wire serializer against the Go client, not real
-celld shutdown, S3 recovery or EBS removal. The opt-in real-binary tests described in [qualification](qualification/README.md)
-exercise the launcher/controller handshake separately. See the native and Kind
-records for replicated recovery; verify CSI/EBS deletion in your deployment.
+celld shutdown, S3 recovery or EBS removal. The opt-in real-binary tests of the
+launcher/controller handshake were removed with the launcher; see
+[earlier evidence](qualification/README.md#earlier-evidence). See the native and
+Kind records for replicated recovery; verify CSI/EBS deletion in your deployment.
 
 ## Application deployment observations
 

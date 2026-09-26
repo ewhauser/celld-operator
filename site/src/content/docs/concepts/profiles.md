@@ -14,14 +14,15 @@ acknowledged once its followers' disks hold it.
 | --- | --- | --- |
 | Bucket / Deployment | Deployment with disk-backed `emptyDir`. | One member per step; Kubernetes chooses the deleted Pod. |
 | Bucket / Ordered | StatefulSet with disk-backed `emptyDir`. | Highest ordinal, one per step. |
-| PersistentFleet | StatefulSet with retained RWOP CSI disks. | Highest ordinal when settled; its disk is deleted once no session needs it. |
+| PersistentFleet | StatefulSet with retained RWOP CSI disks. | Highest ordinal, one per step; its disk is kept and reattached if the fleet grows back. |
 
 Use Ordered Bucket when you need deterministic zone assignment by ordinal.
 Restart and upgrade roll one member at a time for both profiles.
-PersistentFleet keeps each member's disk across restart and upgrade and waits
-for celld to report the fleet settled before disrupting the next member. It adds
-CSI requirements and needs runtime `0.5.1-ewhauser.6` or later for scale-in.
+PersistentFleet keeps each member's disk for the life of the fleet, including
+across scale-in. Its StatefulSet waits for each restarted member to be Ready
+before the next. It adds CSI requirements.
 
 Profiles, Bucket layout, storage and placement are fixed at creation. There is no
-migration or adoption path for old fleets or previously retained disks. See
+conversion between them, and no adoption of fleets or disks from the former
+operator or from another fleet. See
 [storage configuration](../../configure/storage/) before choosing PersistentFleet.

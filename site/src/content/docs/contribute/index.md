@@ -17,10 +17,10 @@ for generated manifests, lint and integration commands. Read
 
 ## Contracts
 
-- [Architecture](../concepts/architecture/) and [one disruption at a time](../contracts/current-operation/).
+- [Architecture](../concepts/architecture/) and the [PersistentFleet lifecycle](../contracts/current-operation/).
 - [celld wire protocol](../contracts/runtime-control-plane/); [launcher supervision](../contracts/launcher-supervision/) is obsolete.
 - [Retained disks](../contracts/disposable-disks/) and [capacity policy](../contracts/capacity-policy/).
-- [Current decision](../decisions/0022-celld-control-plane/).
+- Current decisions: [0023](../decisions/0023-node-loss-is-routine/) and [0024](../decisions/0024-persistentfleet-is-a-statefulset/), which replaces 0023's PersistentFleet lifecycle. See the [decision index](../decisions/).
 
 The old private-S3 adapters, journal archive, EC2 fencing and disk-reuse harness
 are removed. Their source and past reports remain in Git history, not in current

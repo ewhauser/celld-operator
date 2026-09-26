@@ -1,6 +1,8 @@
 # 0023: Node loss is routine
 
-Status: proposed. Supersedes [0022](0022-celld-control-plane.md) once accepted.
+Status: accepted. Supersedes [0022](0022-celld-control-plane.md).
+[0024](0024-persistentfleet-is-a-statefulset.md) supersedes its PersistentFleet
+profile, controller state and celld contract sections.
 The celld behavior cited here was read from `ewhauser/celld` at `bb25517`
 (v0.5.1-ewhauser.4); see [Investigation](#investigation).
 

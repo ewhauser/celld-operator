@@ -14,12 +14,12 @@ kubectl --context YOUR_CONTEXT -n fleets get celldfleet my-fleet -o yaml
 | --- | --- |
 | Operator unavailable, missing CRD or namespace access | [Installation](installation/). |
 | Pod Pending, claim unbound or newcomer unready | [Scheduling and storage](scheduling/). |
-| Runtime not ready, waiting for a retained peer, or a lost disk | [Runtime recovery](recovery/). |
-| `Rolling update waits`, `Retaining disk ... still needed by`, or a blocked deletion | [Waiting and blocked changes](lifecycle/). |
+| Runtime not ready, waiting for a retained peer, a lost node or a lost disk | [Runtime recovery](recovery/). |
+| A rollout or scale-in that keeps waiting, a member waiting to be replaced, or a blocked deletion | [Waiting and blocked changes](lifecycle/). |
 | Incomplete or ineffective capacity observations | [Capacity policy](../operate/capacity/). |
 
-`Ready` describes availability. For PersistentFleet it does not mean the fleet
-has settled since the last disruption.
+`Ready` describes availability. It does not mean celld has finished recovering
+every session.
 
 Use the [conditions reference](../reference/conditions/) to interpret the type,
 reason and message together. Preserve storage whenever a disk's contents are

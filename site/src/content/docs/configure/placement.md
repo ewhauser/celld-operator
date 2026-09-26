@@ -24,7 +24,7 @@ Strict is the default. It uses hard zone spread (maxSkew 1, DoNotSchedule) and d
 
 Relaxed keeps the zone allowlist but makes spread and hostname separation preferences. It can place replicas unevenly or on a shared host, reducing fault isolation. Neither mode provisions nodes or fixes a missing zone. Check node labels, taints, capacity and Pod scheduling events before choosing Relaxed.
 
-If you enable a capacity policy, capacity.minReplicas must be at least azCount. The policy can recommend additions and eligible contractions, but lifecycle evidence gates decide whether a change executes. Manual spec.replicas and capacity policy share the same path: one member per step, and for PersistentFleet only when the fleet is settled. See [capacity policy](../../operate/capacity/) and [safety model](../../concepts/safety-model/).
+If you enable a capacity policy, capacity.minReplicas must be at least azCount. The policy can recommend additions and eligible contractions, but the lifecycle rules decide whether a change executes: contraction removes one member per step, only after the previous change has rolled out, and automatic contraction needs survivor-capacity evidence. Manual spec.replicas and capacity policy share the same path. See [capacity policy](../../operate/capacity/) and [safety model](../../concepts/safety-model/).
 
 ## Size each replica before creation
 

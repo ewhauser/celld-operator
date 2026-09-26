@@ -1,85 +1,127 @@
-# One disruption at a time
+# PersistentFleet lifecycle
 
-Earlier releases drove PersistentFleet changes through a bounded current
-operation: strict `remove-disk` proof, launcher exit and restart-denial proof,
-a ten-phase executor and coordinated whole-fleet downtime for restart and
-upgrade. That executor is removed. This page describes what replaced it.
+PersistentFleet runs `CELLD_DURABILITY=fleet` on a StatefulSet. Each member
+keeps its disk for the life of the fleet. The StatefulSet controller performs
+every restart and scaling step, and celld recovers every node. The operator
+renders and applies the objects and replaces a member that cannot come back on
+its own, so the fleet heals without an administrator. It stores nothing about
+the lifecycle ([ADR 0024](decisions/0024-persistentfleet-is-a-statefulset.md)).
 
-celld tolerates the loss of any one member. In `fleet` durability a write is
-acknowledged only after every follower in the leader's ensemble has fsynced it,
-and a dead leader is recovered from one complete follower copy. The operator's
-only safety job is therefore to disrupt one member at a time, wait until celld
-reports that the fleet has absorbed it, and never delete an existing disk that a
-session still needs. A disk that is already gone is replaced without waiting.
+## What celld does
 
-## Settlement
-
-The operator reads celld's `/state.node_log` from every expected member (celld
-`0.5.1-ewhauser.5` or later). The fleet is **settled** when:
-
-- every expected member is Ready and reports `fleet` durability;
-- every member has a follower ensemble (not required for a one-member fleet);
-- a complete dead-leader sweep observed after the last disruption plus one
-  lease TTL (10 seconds) lists no unrecovered session.
-
-The last disruption is the later of the operator's own last change and any
-member's latest Pod creation or container start. A member's disk is
-**releasable** when a fresh complete sweep exists and none lists a session that
-still needs that member. Anything unknown, including an unreadable member,
-answers no. Waiting delays only the next voluntary step, never the running fleet.
+- On SIGTERM, a node hands its cells to the other nodes. It seals its own log
+  once the bucket covers it.
+- On start, a node first serves its follower data to its peers. It then
+  recovers its previous session from its followers and takes its lease. Several
+  nodes, or all of them, can restart at once.
+- The health endpoint, which is the readiness probe, returns 200 only after
+  that recovery. A new node also holds its first 200 until the fleet has
+  absorbed the change: no other node is handing off cells, and every live node
+  has memory headroom.
+- Leaders stop using a departed member on their own. Until their ensembles
+  re-form, they acknowledge writes through the bucket.
 
 ## Lifecycle
 
 | Change | Behavior |
 | --- | --- |
-| Restart, upgrade | `maintenance.restartToken` (Pod template annotation `celld.eric.dev/restart-token`) or `runtimeImage` rolls the template. The StatefulSet keeps `OnDelete`; the operator deletes outdated Pods one at a time: a member already down at once, running members highest ordinal first and only when settled. Disks are retained. |
-| Scale-in | When settled, replicas drop by one (highest ordinal). Its PVC is deleted only once releasable; until then status names the sessions that still need it. Automatic and External contraction also require survivor-capacity evidence (`CapacityUncertain`). |
-| Growth | New members get new claims. Growth waits until any removed member's retained PVC is deleted; it never reuses one. |
-| Lost disk | A PVC in phase `Lost`, a bound PV that no longer exists, or a Pending Pod whose PVC is gone: the member's Pod and PVC are replaced at once. The status message and a `MemberDiskLost` Warning event name sessions celld may record as lost. |
-| `celld.eric.dev/replace-member` | Annotation on the CelldFleet naming an ordinal or Pod name whose existing disk the administrator declares gone. The operator replaces Pod and PVC when settled, or at once if that member is the only one down, then removes the annotation and emits `MemberReplaced`. An unknown member reports `ReplaceMemberInvalid`. |
-| Node drain | The PodDisruptionBudget allows `maxUnavailable: 1` while settled and `0` while recovering. |
-| Deletion | Foreground StatefulSet deletion (members drain on SIGTERM), then every fleet PVC, then the finalizer. The bucket reservation is permanent. |
+| Restart, upgrade | `maintenance.restartToken` (Pod template annotation `celld.eric.dev/restart-token`) or `runtimeImage` changes the template. The StatefulSet uses `RollingUpdate`: Kubernetes restarts one member at a time, highest ordinal first, and waits for each to be Ready. Disks are kept. An operator release that changes the template rolls the same way. |
+| Scale-in | One member per step, the highest ordinal, and only after the previous change has rolled out. The removed member keeps its PVC. Automatic and External contraction also require survivor-capacity evidence (`CapacityUncertain`). |
+| Growth | Applied in one step. An ordinal that had a member before reattaches its kept PVC, and celld treats that as a restart. New ordinals get new claims. A claim at a member's name without the fleet's UID label reports `StorageIdentityConflict`. |
+| Node drain | The PodDisruptionBudget allows `maxUnavailable: 1`. A member that is not Ready counts against it, so drains proceed one member at a time. |
+| Pause | `maintenance.paused` stops the operator from writing workload changes. A rollout the StatefulSet controller has already started continues. |
+| Deletion | Foreground StatefulSet deletion (members drain on SIGTERM), then every fleet PVC, including those of removed members, then the finalizer. The bucket reservation is permanent. |
 
-celld seals a session whose only complete copy was on a lost disk with a bounded
-loss record, so the fleet never waits on a disk that is gone. The operator never
-deletes an existing disk with outstanding obligations on its own; only a lost
-disk or an explicit `replace-member` request does that.
+## Self-healing
 
-Runtimes without node-log state (for example `0.5.1-ewhauser.4`) report
-settlement as unknown. Restarts and upgrades may still roll on readiness plus a
-one-minute stabilization after the last disruption, so an upgrade from `.4` to
-`.5` works. Such runtimes never authorize disk deletion: scale-in needs `.5`.
+No administrator is expected to intervene. On every reconcile the operator
+reads each member's Pod and claim, takes at most one of these actions, and
+records nothing:
+
+| Condition | Action | Event |
+| --- | --- | --- |
+| A member Pod is still present more than two minutes after its termination grace ended, because its node no longer answers | Force-delete the Pod. The StatefulSet recreates it and the member keeps its disk. Also applies to Ordered Bucket fleets. | `MemberForceDeleted` |
+| A member's claim is `Lost`, because its volume no longer exists | Delete the claim and the Pod at once. The StatefulSet recreates both. | `MemberDiskLost` |
+| One member has been down for the replacement delay while every other member has been ready for five minutes | Delete the claim and the Pod. The member returns on a fresh disk. | `MemberReplaced` |
+
+The replacement delay defaults to 10 minutes and is set with the operator's
+`--member-replacement-delay` flag (chart value `memberReplacementDelay`). The
+delay is patience, not the safety condition. It outlasts the roughly six
+minutes Kubernetes takes to force-detach a volume from a lost node, and typical
+node provisioning, so a member that can return usually does so on its own disk.
+The delay covers a disk stranded in an unavailable zone, a volume that no
+longer attaches, and a corrupt disk that keeps celld from starting. While a
+member waits for it, the fleet reports `Provisioning` with the time it will be
+replaced. Two cases are left alone because a new disk would not help: a member
+waiting on its image or configuration, and a member already on a disk created
+for its current Pod. A claim that was only deleted, while its volume still
+existed, is recreated by the StatefulSet as soon as the member's next Pod is
+created.
+
+Leaders stop using a departed member within seconds, and every node sweeps
+dead leaders every 30 seconds. Once the rest of the fleet has been ready for
+five minutes, no session depends on the down member's disk. celld refuses
+answers from a fresh disk until its member publishes a lease. After that, it
+seals any session whose only complete copy was on the old disk and records a
+bounded loss in `log/<session>.e<epoch>.loss.json`. With the rest of the fleet
+ready, no such session remains unless a second failure happened first.
+
+## Limits
+
+- **Two members that cannot come back wait.** When two members are down at
+  once, neither is replaced until one returns, unless its volume is lost.
+  Replacing either could lose writes that only their disks hold. celld's
+  guarantee covers the loss of one node.
+- **Pacing is readiness.** The operator does not wait for celld to finish
+  recovering other sessions between restarts. With disks kept, a restart
+  destroys nothing.
+- **A rollout waits only for the member it restarted.** It does not wait for
+  another member that is already down, so two members can be down at once.
+  Both keep their disks, so this costs availability, not acknowledged writes.
+- **Removed members' disks cost storage.** They stay until growth reattaches
+  them or the fleet is deleted. Delete one by hand only if you don't plan to
+  grow back to that ordinal. celld stops depending on a departed member once
+  its leaders re-form their ensembles. With `0.5.1-ewhauser.6` or later that
+  happens within seconds of the removal, even for an idle leader.
+- **A hand edit to the StatefulSet template starts rolling at once.** The
+  operator restores its template on the next reconcile. The member that
+  started rolling then returns to the operator's template on its own disk.
 
 ## Kubernetes objects
 
-The operator converges drift in the StatefulSet template and replica count,
-NetworkPolicy and PodDisruptionBudget it owns; Services stay verify-only. Objects
-without the fleet's UID label, or with owner references, are refused. A missing
-StatefulSet is recreated on the fleet's own claims: claims labeled with the fleet
-UID are reused, and a foreign claim at a member's name reports
-`StorageIdentityConflict`. StatefulSet PVC retention is `Retain` for scale and
-deletion, so only the operator deletes claims.
+The operator applies the StatefulSet (template, replica count, update strategy
+and claim retention), the NetworkPolicy and the PodDisruptionBudget, and
+corrects drift in the fields it owns. Services are verify-only. Objects
+without the fleet's UID label, or with owner references, are refused. A
+missing StatefulSet is recreated on the fleet's existing claims. Claim
+retention is `Retain` for both scale-in and deletion, so only fleet deletion
+removes claims.
 
-The storage reservation's `celld.eric.dev/current-operation` annotation now
-holds bookkeeping only: workload UID, applied count and image, last restart
-token, last disruption time and capacity-policy state. It holds no runtime proof.
+The storage reservation's `celld.eric.dev/current-operation` annotation holds
+only capacity-policy state. It is absent unless the fleet has set
+`spec.capacity`.
 
-## Upgrading from the strict executor
+## Upgrading from earlier releases
 
-An in-flight operation recorded by an earlier release is dropped with
-`status.lifecycle.lastOutcome: Superseded`, and unreadable state is rebuilt
-instead of blocking. Pods held by the launcher scheduling gate are released, and
-members roll onto the new template one at a time under the rules above.
-Launcher retirement markers on existing disks are ignored because no launcher
-runs. The `DiskCleanupPending` condition is removed, and `status.lifecycle` no
-longer shows operation phases.
+This applies to fleets created by v0.0.5, which used the strict executor, and
+by the unreleased one-disruption controller. The operator switches the
+StatefulSet from `OnDelete` to `RollingUpdate` and writes the current
+template. Kubernetes then replaces each earlier Pod, highest ordinal first,
+including Pods still held by the launcher scheduling gate. Claims keep their
+names and identities.
+
+An in-flight strict operation is dropped with an `OperationSuperseded` event.
+The reservation annotation is rewritten to capacity history alone, or removed,
+which drops the claim identities, operations and disruption times earlier
+releases stored there. `status.lifecycle` is left empty.
 
 ## Regression coverage
 
-`internal/fleethealth` covers settlement, stale sweeps, single-member fleets and
-releasability. `internal/controller/persistent_test.go` covers provisioning
-without the launcher, the budget, rolling restart on retained disks, down-member
-updates, legacy runtimes, scale-in release, lost disks, `replace-member`,
-workload recreation, deletion and migration from strict fleets. These are unit
-tests with a fake client; see [qualification](qualification/README.md) for
-cluster evidence.
+`internal/controller/persistent_test.go` covers the rendered StatefulSet, the
+fixed budget, rolling restart and upgrade on retained disks with the operator
+deleting no Pod or claim, scale-in that keeps disks and growth that reattaches
+them, contraction waiting for a rollout, foreign claims, workload recreation,
+deletion, adoption of strict fleets, and each self-healing action together
+with the cases it must leave alone. These are unit tests with a fake
+client. The kind suites run the same behavior against the real fork under
+write load; see [qualification](qualification/README.md).

@@ -14,7 +14,7 @@ make test-linux  # Controller tests cross-compiled and run on Linux (Docker)
 make lint-linux  # golangci-lint analyzing GOOS=linux (catches Linux-only files)
 make build       # Build packages and bin/celld-operator
 make test        # go test -race ./...
-make test-envtest # Current-operation tests against a real kube-apiserver/etcd (envtest)
+make test-envtest # Reconciler tests against a real kube-apiserver/etcd (envtest)
 make integration-faults # Disposable Kind: faults against an explicitly supplied compatible fork image
 make vet         # Standalone go vet
 make fmt         # Apply goimports through the pinned lint tool

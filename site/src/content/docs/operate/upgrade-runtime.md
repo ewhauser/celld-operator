@@ -25,11 +25,11 @@ before running the command. Members are replaced one at a time, so old and new
 versions run together until the rollout completes; qualify that mix. No
 downtime permission is needed.
 
-A PersistentFleet member keeps its disk. The operator replaces a running member
-only once the fleet has [settled](../../concepts/current-operation/), highest
-ordinal first. Settlement needs node-log state from `0.5.1-ewhauser.5` or later;
-an older fleet, such as `.4`, rolls on readiness plus a one-minute stabilization,
-so upgrading `.4` to `.5` works in place.
+A PersistentFleet member keeps its disk. The StatefulSet restarts one member at
+a time, highest ordinal first, and waits for each to be Ready before the next;
+see the [PersistentFleet lifecycle](../../concepts/current-operation/). The
+rollout works the same way whatever fork build the fleet runs, including builds
+before `.5`.
 
 Neither profile has an old release adapter or automatic rollback. Watch the
 conditions and [troubleshoot waits](../../troubleshoot/lifecycle/).
