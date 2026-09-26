@@ -12,7 +12,7 @@ The example is an Ordered Bucket fleet named `my-fleet` in namespace `fleets`.
   placed replicas need three distinct hosts.
 - A compatible fork runtime image and operator image, pinned by verified
   registry digests. All runtime/recovery nodes must use the fork.
-  Stock upstream v0.5.1 is insufficient; see [compatibility](../../reference/compatibility/).
+  Stock upstream celld is insufficient; see [compatibility](../../reference/compatibility/).
 - `kubectl`, Helm, Docker/Buildx, AWS CLI, curl and jq. Use the fork's native CLI
   and esbuild for [application deployment](../first-application/).
 - A dedicated S3 bucket and a runtime ServiceAccount with its bucket permissions.
