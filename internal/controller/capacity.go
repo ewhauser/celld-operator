@@ -49,6 +49,13 @@ func (r *Reconciler) capacityTarget(ctx context.Context, f *fleet.CelldFleet, j 
 		s.Decision = fleet.CapacityStatus{Mode: f.Spec.Capacity.Mode, Reason: "ManualOverride", Message: "Manual replica edit takes precedence; stabilization restarts", DesiredReplicas: s.ManualTarget}
 		return s.ManualTarget, false
 	}
+	if applied < 1 {
+		// A workload an administrator stopped by hand, for a full-stop
+		// runtime upgrade, returns at the declared count. The policy cannot
+		// evaluate a stopped fleet, and it resumes from there. The restart is
+		// not a policy step, so it gets no redistribution baseline.
+		return f.Spec.Replicas, false
+	}
 	observation := capacity.Observation{At: r.capacityNow()}
 	if r.Collector != nil {
 		observation = r.Collector.Collect(ctx, f)
