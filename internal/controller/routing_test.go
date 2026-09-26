@@ -239,28 +239,22 @@ func TestRoutingDeletionCannotRemoveConcurrentReplacement(t *testing.T) {
 	routeGet(t, r, f, routingPolicyGVK)
 }
 
-func TestInvalidRoutingDoesNotBlockIssuedOperation(t *testing.T) {
-	for _, profile := range []string{"PersistentFleet"} {
-		t.Run(profile, func(t *testing.T) {
-			x := newOperationFixture(t, profile)
-			x.desired(2)
-			x.until("Requesting")
-			id := x.state().Operation.ID
-			// Simulate an object admitted by an older schema or bypassing admission.
-			x.edit(func(f *fleet.CelldFleet) {
-				f.Spec.Routing = testRouting()
-				f.Spec.Routing.Ingress.Annotations = map[string]string{"kubernetes.io/ingress.class": "nginx"}
-			})
-			f := reconcile(t, x.r, x.f)
-			c := meta.FindStatusCondition(f.Status.Conditions, "RoutingReady")
-			if c == nil || c.Reason != "InvalidConfiguration" {
-				t.Fatalf("routing error not reported: %+v", c)
-			}
-			x.finish()
-			if s := x.state(); s.Applied != 2 || s.Completion.ID != id {
-				t.Fatal("routing prevented completion of issued removal", s)
-			}
-		})
+func TestInvalidRoutingDoesNotBlockContraction(t *testing.T) {
+	x := newOperationFixture(t, "PersistentFleet")
+	x.desired(2)
+	// Simulate an object admitted by an older schema or bypassing admission.
+	x.edit(func(f *fleet.CelldFleet) {
+		f.Spec.Routing = testRouting()
+		f.Spec.Routing.Ingress.Annotations = map[string]string{"kubernetes.io/ingress.class": "nginx"}
+	})
+	f := reconcile(t, x.r, x.f)
+	c := meta.FindStatusCondition(f.Status.Conditions, "RoutingReady")
+	if c == nil || c.Reason != "InvalidConfiguration" {
+		t.Fatalf("routing error not reported: %+v", c)
+	}
+	x.converge()
+	if s := x.state(); s.Applied != 2 {
+		t.Fatal("routing prevented contraction", s)
 	}
 }
 

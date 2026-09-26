@@ -21,7 +21,7 @@ A healthy first run has the operator Deployment available, three ready runtime P
 | `Blocked=True`, `NamespaceAccessDenied` | Check `fleets` RoleBinding and its subject. For Helm release `celld`, it must name `celld-system/celld-celld-operator`. |
 | `Blocked=True`, NetworkPolicy not attested | Verify CNI enforcement, then set chart `networkPolicyEnforced=true`. |
 | Pods Pending | `kubectl --context YOUR_CONTEXT -n fleets describe pod POD_NAME` shows zone, capacity or pull errors. Strict placement will not silently relax. |
-| Pods start but are not ready | Inspect Pod logs and bucket access. In PersistentFleet a live launcher can have a stopped child; see [runtime recovery](../../troubleshoot/recovery/). |
+| Pods start but are not ready | Inspect Pod logs and bucket access. For PersistentFleet see [runtime recovery](../../troubleshoot/recovery/). |
 | `Ready=True` but application request fails | Confirm `celld deploy` used the fleet bucket, inspect runtime logs, and use an authorized client label for in-cluster traffic. |
 | `Blocked=True`, storage reservation conflict | Use a new, dedicated bucket. A reservation is bound to a fleet UID and is not released by routine deletion. |
 
@@ -35,4 +35,4 @@ kubectl --context YOUR_CONTEXT -n celld-system logs deployment/celld-celld-opera
 
 Events appear when blocker state changes, so a quiet fleet may have no new Events. The [conditions reference](../../reference/conditions/) defines the current types and reasons. Optional Prometheus metrics are configured through [chart values](../../api/helm-values/); Metrics Server is needed for capacity recommendations, not for this first fleet.
 
-The repository's disposable `make integration` harness runs with kind and MinIO. It is useful to test the implementation locally; its Kind storage driver differs from EBS. Do not use `--local-test` against EKS. If a lifecycle operation stays blocked, preserve the storage reservation and affected disks and follow the [safety model](../../concepts/safety-model/).
+The repository's disposable `make integration` harness runs with kind and MinIO. It is useful to test the implementation locally; its Kind storage driver differs from EBS. Do not use `--local-test` against EKS. If a lifecycle change keeps waiting, preserve the storage reservation and affected disks and follow [lifecycle troubleshooting](../../troubleshoot/lifecycle/).

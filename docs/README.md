@@ -4,11 +4,12 @@ The [user guide](../site/src/content/docs/start/overview.md) covers installation
 configuration and operations. The [capability matrix](critical-features.md)
 describes implemented behavior and operational limits.
 
-The implementation has three authority boundaries:
+The implementation has two authority boundaries:
 
-- [celld control plane](runtime-control-plane.md): generation-bound data safety.
-- [Launcher](launcher-supervision.md): exact process exit and restart exclusion (PersistentFleet).
-- [Current operation](current-operation.md): bounded Kubernetes authority and conditional infrastructure changes (PersistentFleet; Bucket fleets roll one member at a time without it).
+- [celld control plane](runtime-control-plane.md): durability, recovery and the node-log reports the operator reads.
+- [One disruption at a time](current-operation.md): the PersistentFleet lifecycle on [retained disks](disposable-disks.md). Bucket fleets roll one member at a time.
+
+The [launcher](launcher-supervision.md) is no longer used by any profile.
 
 Additional contributor references:
 

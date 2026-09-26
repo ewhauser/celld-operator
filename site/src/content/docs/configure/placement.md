@@ -20,16 +20,16 @@ spec:
     mode: Strict
 ~~~
 
-Strict is the default. It uses hard zone spread (maxSkew 1, DoNotSchedule) and distinct hostnames. With three zones and three replicas, supply an eligible node in **each** listed zone. More replicas need enough distinct eligible hosts to satisfy anti-affinity; otherwise Pods remain Pending. For Ordered Bucket and PersistentFleet, scheduling gates assign each ordinal its configured zone before launch. New PersistentFleet volumes bind in that zone.
+Strict is the default. It uses hard zone spread (maxSkew 1, DoNotSchedule) and distinct hostnames. With three zones and three replicas, supply an eligible node in **each** listed zone. More replicas need enough distinct eligible hosts to satisfy anti-affinity; otherwise Pods remain Pending. For Ordered Bucket, a scheduling gate assigns each ordinal its configured zone before launch. PersistentFleet relies on the zone spread; each new volume binds in the zone where its Pod first schedules, and a retained volume keeps its member in that zone.
 
 Relaxed keeps the zone allowlist but makes spread and hostname separation preferences. It can place replicas unevenly or on a shared host, reducing fault isolation. Neither mode provisions nodes or fixes a missing zone. Check node labels, taints, capacity and Pod scheduling events before choosing Relaxed.
 
-If you enable a capacity policy, capacity.minReplicas must be at least azCount. The policy can recommend additions and eligible contractions, but lifecycle evidence gates decide whether a change executes. Manual spec.replicas and capacity policy share the same path: one-member steps for Bucket, the bounded current operation for PersistentFleet. See [capacity policy](../../operate/capacity/) and [safety model](../../concepts/safety-model/).
+If you enable a capacity policy, capacity.minReplicas must be at least azCount. The policy can recommend additions and eligible contractions, but lifecycle evidence gates decide whether a change executes. Manual spec.replicas and capacity policy share the same path: one member per step, and for PersistentFleet only when the fleet is settled. See [capacity policy](../../operate/capacity/) and [safety model](../../concepts/safety-model/).
 
 ## Size each replica before creation
 
 Use `spec.execution` to set CPU and memory requests and limits for the celld container. Defaults are a `250m` CPU request with no CPU limit, a `512Mi` memory request, and a `1Gi` memory limit. Limits must be at least their requests. Optional `maxResidentCells` and `idleEvictSeconds` bound resident cells and idle hibernation; neither is a throughput guarantee.
 
-Use `spec.lifecycle` to set shutdown time: `shutdownSeconds` defaults to 20 and `terminationGraceSeconds` to 30. The Pod termination grace must leave at least five seconds beyond the shutdown budget. These values configure celld's shutdown budget and the Pod's termination grace. They do not change the controller's fixed 30-minute current-operation deadline or establish that shutdown completed safely.
+Use `spec.lifecycle` to set shutdown time: `shutdownSeconds` defaults to 20 and `terminationGraceSeconds` to 30. The Pod termination grace must leave at least five seconds beyond the shutdown budget. These values configure celld's shutdown budget and the Pod's termination grace. They do not establish that shutdown completed safely.
 
 Both blocks are immutable after fleet creation. Choose values using application measurements before creating the fleet; existing fleets cannot adopt new settings through a template rollout. See the [tuned sample](../../api/samples/#tuned) and [API fields](../../api/celldfleet/#specexecution). Capacity policy thresholds use absolute CPU and memory values, so review them separately when choosing resource sizes.

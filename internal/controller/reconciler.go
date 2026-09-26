@@ -11,7 +11,6 @@ import (
 	"time"
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
-	"github.com/ewhauser/celld-operator/internal/launcher"
 	"github.com/ewhauser/celld-operator/internal/runtime/controlplane"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -40,9 +39,9 @@ type Reconciler struct {
 	Options               Options
 	NetworkPolicyEnforced bool
 	Recorder              events.EventRecorder
-	launcherCall          func(context.Context, *fleet.CelldFleet, *corev1.Pod, string, string) (launcher.State, error)
 	Collector             capacityCollector
 	ApplicationRuntime    controlplane.ApplicationReader
+	RuntimeState          RuntimeStateReader
 	now                   func() time.Time
 }
 
@@ -173,9 +172,7 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 	}
 	// Load the one bounded current operation once; status is a projection.
 	h := r.hydrate(ctx, reservation)
-	if f.Spec.Profile == "Bucket" {
-		h = r.bucketLoaded(f, h)
-	}
+	h = r.loadedCurrent(f, h)
 	if h.err != nil {
 		return r.report(ctx, f, h, "OperationInvalid", h.err.Error(), false)
 	}
@@ -193,131 +190,7 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 	if f.Spec.Profile == "Bucket" {
 		return r.reconcileBucket(ctx, f, h)
 	}
-	for _, obj := range prerequisites(f, r.Options) {
-		if err := r.ensure(ctx, obj); err != nil {
-			// A lost field-upgrade race retries from a fresh read instead of
-			// reporting a conflict the next verification may not find.
-			if apierrors.IsConflict(err) {
-				return ctrl.Result{}, err
-			}
-			return r.report(ctx, f, h, "InfrastructureBlocked", err.Error(), false)
-		}
-	}
-	desired := workload(f, r.Options)
-	actual := emptyObject(desired)
-	err := r.Get(ctx, client.ObjectKeyFromObject(desired), actual)
-	if apierrors.IsNotFound(err) {
-		if !knownRuntime(runtimeImage(f)) || r.Options.LauncherImage == "" {
-			return r.report(ctx, f, h, "UnsupportedTransition", "Provisioning requires a verified compatible fork digest and trusted launcher; there is no default compatible image", false)
-		}
-		if reservation.Annotations[attemptAnnotation] != "" {
-			return r.report(ctx, f, h, "LifecycleBlocked", "Workload is missing after a recorded creation attempt; automatic recreation could reuse an unsafe identity or disk", false)
-		}
-		if r.Options.LauncherImage != "" {
-			if err := r.createLauncherKey(ctx, f, reservation); err != nil {
-				return r.report(ctx, f, h, "LauncherIdentityBlocked", err.Error(), false)
-			}
-		}
-		claims := initialClaims(f, desired)
-		if err := r.checkInitialClaims(ctx, claims); err != nil {
-			return r.report(ctx, f, h, "StorageIdentityConflict", err.Error(), false)
-		}
-		// Persist intent BEFORE Create. A crash in this window intentionally blocks for review.
-		if reservation.Annotations == nil {
-			reservation.Annotations = make(map[string]string)
-		}
-		reservation.Annotations[attemptAnnotation] = "true"
-		if err := r.Update(ctx, reservation); err != nil {
-			return ctrl.Result{}, err
-		}
-		createdClaims := map[string]types.UID{}
-		for _, claim := range claims {
-			if err := r.Create(ctx, claim); err != nil {
-				return r.report(ctx, f, h, "StorageIdentityConflict", fmt.Sprintf("Cannot exclusively create PVC %s: %v; retained claims require manual review", claim.Name, err), false)
-			}
-			createdClaims[claim.Name] = claim.UID
-		}
-		claimIDs, err := json.Marshal(createdClaims)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-		reservation.Annotations[creationClaimsKey] = string(claimIDs)
-		if err := r.Update(ctx, reservation); err != nil {
-			return ctrl.Result{}, err
-		}
-		if err := r.Create(ctx, desired); err != nil {
-			return ctrl.Result{}, err
-		}
-		return r.report(ctx, f, h, "Provisioning", "Initial workload created; waiting for runtime readiness and placement", true)
-	}
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	if result, handled, err := r.lifecycle(ctx, f, h, actual); handled || err != nil {
-		return result, err
-	}
-	// In automatic mode, the current state owns applied capacity, while spec.replicas
-	// remains the user's manual command field. Never reconcile it back implicitly.
-	if f.Spec.Capacity != nil {
-		setReplicas(desired, replicas(actual))
-	}
-	if !matches(desired, actual) {
-		return r.report(ctx, f, h, "LifecycleBlocked", "Existing workload differs from the recorded spec; no rollout, adoption or drift repair is authorized", false)
-	}
-	if reservation.Annotations[attemptAnnotation] == "" {
-		return r.report(ctx, f, h, "LifecycleBlocked", "Existing workload has no creation intent; refusing adoption", false)
-	}
-	// Maintenance validates each admitted Pod before trusting its proof. Check the
-	// same contract now so an incompatible admission mutation is reported while
-	// the fleet is steady, not first discovered by a maintenance request.
-	var pods []corev1.Pod
-	if s := h.j; s != nil {
-		pods, err = r.currentPods(ctx, f, s)
-		if err != nil {
-			return r.report(ctx, f, h, "PodCompositionUnsupported", err.Error(), false)
-		}
-		for i := range pods {
-			if p := &pods[i]; p.DeletionTimestamp.IsZero() {
-				if err := validatePersistentPod(appliedRuntime(f, s), p, r.Options); err != nil {
-					return r.report(ctx, f, h, "PodCompositionUnsupported", fmt.Sprintf("Pod %s cannot be maintained: %v", p.Name, err), false)
-				}
-			}
-		}
-	}
-	if readyReplicas(actual) != replicas(actual) {
-		if reason, message := r.blockedLauncher(ctx, f, pods); reason != "" {
-			return r.report(ctx, f, h, reason, message, false)
-		}
-		return r.report(ctx, f, h, "Provisioning", "Waiting for ready replicas; inspect Pod scheduling, PVC binding and runtime readiness. Capacity is externally provisioned", true)
-	}
-	return r.report(ctx, f, h, "Provisioned", "Initial infrastructure and runtime readiness observed", true)
-}
-
-// blockedLauncher explains an unready replica whose launcher will never start
-// its child, which readiness alone reports as indefinite provisioning. It is a
-// bounded, authenticated read with no operation; an unreachable or starting
-// launcher is not evidence of anything and leaves the ordinary reason.
-func (r *Reconciler) blockedLauncher(ctx context.Context, f *fleet.CelldFleet, pods []corev1.Pod) (string, string) {
-	if r.Options.LauncherImage == "" {
-		return "", ""
-	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	for i := range pods {
-		p := &pods[i]
-		if !p.DeletionTimestamp.IsZero() || podReady(p) || p.Status.PodIP == "" {
-			continue
-		}
-		state, err := r.callLauncher(ctx, f, p, "", "")
-		if err != nil || state.Phase != "Blocked" {
-			continue
-		}
-		if state.Error == launcher.ErrDiskRetired.Error() {
-			return "DiskRetired", fmt.Sprintf("Pod %s cannot start: its disk was retired when a previous Pod on it stopped without an operator request, and a retired disk is never reopened. Acknowledged data is retained in the bucket. There is no automatic disk replacement; do not remove the marker or reuse the claim", p.Name)
-		}
-		return "LauncherBlocked", fmt.Sprintf("Pod %s launcher is blocked and will not start the runtime: %s", p.Name, state.Error)
-	}
-	return "", ""
+	return r.reconcilePersistent(ctx, f, h)
 }
 
 func (r *Reconciler) ensure(ctx context.Context, desired client.Object) error {
@@ -423,26 +296,6 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, h *loadedS
 			f.Status.Lifecycle.LastOutcome = s.Completion.Outcome
 			f.Status.Lifecycle.LastCompletionAt = s.Completion.At.UTC().Format(time.RFC3339)
 		}
-		if o := s.Operation; o != nil {
-			f.Status.DesiredReplicas = o.To
-			f.Status.Lifecycle.OperationID = o.ID
-			f.Status.Lifecycle.Phase = o.Phase
-			f.Status.Lifecycle.From = o.From
-			f.Status.Lifecycle.To = o.To
-			f.Status.Lifecycle.RequestID = o.ID
-			f.Status.Lifecycle.RequestKind = o.Kind
-			f.Status.Lifecycle.TargetImage = o.TargetImage
-			f.Status.Lifecycle.Blocker = o.Blocker
-			f.Status.Lifecycle.StartedAt = o.StartedAt.UTC().Format(time.RFC3339)
-			f.Status.Lifecycle.Deadline = o.Deadline.UTC().Format(time.RFC3339)
-			f.Status.Lifecycle.Stalled = !r.capacityNow().Before(o.Deadline)
-			if len(o.Targets) > 0 {
-				t := o.Targets[0]
-				f.Status.Lifecycle.TargetPod = t.Pod
-				f.Status.Lifecycle.TargetUID = string(t.PodUID)
-				f.Status.Lifecycle.TargetGeneration = t.Identity.Generation
-			}
-		}
 	}
 	if provisioned {
 		f.Status.Reservation = reservationName(f)
@@ -483,7 +336,8 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, h *loadedS
 		footprint = measureState(h.res)
 	}
 	set("OperationSizeWarning", footprint.nearCapacity(), "BoundedOperation", stateSizeMessage(footprint))
-	set("DiskCleanupPending", diskCleanupPending(h.j), "CSIDeletionPending", "Current strict proof remains reserved until exact PVC/PV deletion and attachment removal are observed")
+	// The strict executor and its cleanup projection were removed (ADR 0023).
+	meta.RemoveStatusCondition(&f.Status.Conditions, "DiskCleanupPending")
 	if meta.IsStatusConditionTrue(f.Status.Conditions, "Blocked") {
 		if f.Status.BlockedSince == "" || !meta.IsStatusConditionTrue(before.Status.Conditions, "Blocked") {
 			f.Status.BlockedSince = r.capacityNow().UTC().Format(time.RFC3339)

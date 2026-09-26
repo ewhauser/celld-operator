@@ -6,7 +6,7 @@ image:
   digest: ''
   pullPolicy: IfNotPresent
 imagePullSecrets: []
-# Required for PersistentFleet (Bucket fleets run celld directly); pin the matching operator/launcher image by digest.
+# Deprecated and ignored: fleets run celld directly. Kept so existing values still install.
 launcherImage: ''
 networkPolicyEnforced: false
 # Namespaces that will hold CelldFleet resources. The chart renders the

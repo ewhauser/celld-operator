@@ -7,9 +7,8 @@ is the field and admission reference.
 A fleet supplies an explicit compatible runtime digest, an existing runtime
 ServiceAccount, a dedicated bucket, region and zone allowlist. The operator
 creates workloads, private Services, NetworkPolicies and a PodDisruptionBudget.
-PersistentFleet also uses CSI claims, a digest-pinned launcher image and a
-launcher credential. Bucket Pods run celld directly with
-`CELLD_DURABILITY=bucket`.
+Pods run celld directly: Bucket with `CELLD_DURABILITY=bucket`, PersistentFleet
+with `CELLD_DURABILITY=fleet` on retained CSI claims.
 
 Bucket has immutable `Deployment` or `Ordered` layout; both contract one member
 at a time, and Ordered removes the highest ordinal. PersistentFleet uses a
@@ -19,14 +18,20 @@ IAM roles, worker nodes and EBS CSI, remains administrator-owned.
 
 The mutable request fields are `replicas`, `capacity`, `runtimeImage` and
 `maintenance` and `routing`. Storage, layout, placement, execution sizing, lifecycle budgets,
-`env`, and `telemetry` are fixed at creation. `maintenance.paused` stops new and unissued work;
-`allowCoordinatedDowntime` permits a PersistentFleet whole-fleet restart or
-upgrade. A new `restartToken` requests a same-version restart. Bucket restarts
-and upgrades are one-member rolling updates and need no downtime permission.
+`env`, and `telemetry` are fixed at creation. `maintenance.paused` stops new
+workload changes. A new `restartToken` requests a same-version restart. Restarts
+and upgrades are one-member rolling updates for both profiles;
+`allowCoordinatedDowntime` is accepted and ignored.
+
+The `celld.eric.dev/replace-member` annotation on a PersistentFleet names an
+ordinal or Pod name whose existing disk the administrator declares gone. The
+operator replaces that member's Pod and claim under the one-disruption rule and
+removes the annotation. See [one disruption at a time](current-operation.md).
 
 `spec.env` adds up to 32 `CELLD_` variables with either a literal `value` or a
 same-namespace `secretKeyRef` (`name` and `key`). Operator-owned identity,
-network, durability, storage and launcher settings cannot be overridden. The
+network, durability and storage settings and reserved prefixes such as
+`CELLD_REEXEC_` and `CELLD_STRICT_` cannot be overridden. The
 OpenTelemetry namespace is reserved for its dedicated API. Environment entries
 cannot be edited after fleet creation because the operator does not roll out
 ordinary pod-template changes. Secret values never enter the fleet API, status,
@@ -49,8 +54,9 @@ ordinary pod-template changes are not rolled out. Rotate the headers Secret
 with a restart so new Pods read it.
 
 A bucket reservation permanently binds the bucket to the fleet UID. Recreating
-a fleet with the same name does not transfer ownership. Its current-operation
-annotation is controller authority; fleet status is a reconstructible projection.
+a fleet with the same name does not transfer ownership. Its
+`celld.eric.dev/current-operation` annotation holds operator bookkeeping; fleet
+status is a reconstructible projection.
 [Preview configuration](previews.md) lives on an existing fleet under `spec.previews`.
 It reserves a separate preview bucket to that parent fleet UID, then binds each
 child fleet to a disjoint `storage.prefix` and `previewFleetRef`.
@@ -61,7 +67,7 @@ fields are immutable and do not change ordinary dedicated fleet defaults.
 the parent runtime reservation hash. Initialization requests and executor status
 use the existing `CelldStorageReservation`; its lifecycle annotation remains
 operator-owned, while its status subresource holds the retained seed result.
-See [current operations](current-operation.md) before changing lifecycle code.
+See [one disruption at a time](current-operation.md) before changing lifecycle code.
 
 The `/scale` subresource maps desired replicas to `spec.replicas` and observed
 nonterminal Pods to `status.replicas`. External autoscalers target the CelldFleet,
@@ -75,7 +81,7 @@ and [security boundaries](../site/src/content/docs/reference/security-boundaries
 Ingress, named `FLEET-routing`. Both forward `/` for explicit `hostnames` to
 `FLEET:8080`. A required `source` namespace and Pod label selector admit only the
 selected data-plane Pods through a separate NetworkPolicy. Routing never exposes
-8081 or 8083. Gateway mode references an existing Gateway; Ingress mode specifies
+8081. Gateway mode references an existing Gateway; Ingress mode specifies
 an IngressClass and optionally a same-namespace TLS Secret and annotations.
 
 Routing can be added, edited, switched or removed without changing the workload
@@ -108,7 +114,7 @@ provision Gateway, IngressClass, certificate or DNS resources. See the
 `status.application` and the `ApplicationConverged` condition describe application
 code loaded by the runtime. They are independent of the container image digest,
 Kubernetes object generation and fleet lifecycle readiness. Observation never
-publishes code, calls `/reload`, changes replicas or authorizes runtime removal.
+publishes code, calls `/reload`, changes replicas or authorizes disk deletion.
 
 The operator reads the existing private `GET /state` endpoint at most once every
 15 seconds per fleet, with eight concurrent requests, a 10-second collection

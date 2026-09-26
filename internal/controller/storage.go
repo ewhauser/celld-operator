@@ -1,13 +1,11 @@
 package controller
 
 import (
-	"context"
 	"fmt"
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -30,16 +28,17 @@ func initialClaims(f *fleet.CelldFleet, workload client.Object) []*corev1.Persis
 	return claims
 }
 
-func (r *Reconciler) checkInitialClaims(ctx context.Context, claims []*corev1.PersistentVolumeClaim) error {
-	for _, claim := range claims {
-		existing := &corev1.PersistentVolumeClaim{}
-		err := r.Get(ctx, client.ObjectKeyFromObject(claim), existing)
-		if err == nil {
-			return fmt.Errorf("PVC %s already exists; initial provisioning cannot verify retained disk identity or adopt existing claims", claim.Name)
-		}
-		if !apierrors.IsNotFound(err) {
-			return fmt.Errorf("verify PVC %s: %w", claim.Name, err)
-		}
+// launcherGate is the scheduling gate of Pods created from templates written
+// before ADR 0023; releaseLauncherGates admits them.
+const launcherGate = "celld.eric.dev/exclusive-volume"
+
+func persistentAccessModes(opts Options) []corev1.PersistentVolumeAccessMode {
+	if !opts.LocalTest || opts.LocalRWOP {
+		return []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOncePod}
 	}
-	return nil
+	return []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
+}
+
+func (r *Reconciler) supportedCSI(driver string) bool {
+	return driver == "ebs.csi.aws.com" || (r.Options.LocalTest && driver == localCSIDriver)
 }

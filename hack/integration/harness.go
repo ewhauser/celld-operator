@@ -343,14 +343,6 @@ func isReady(o object) bool {
 
 func same(a, b any) bool { return reflect.DeepEqual(a, b) }
 
-func podUIDs(pods []object) map[string]bool {
-	out := map[string]bool{}
-	for _, pod := range pods {
-		out[uidOf(pod)] = true
-	}
-	return out
-}
-
 func nodeNames(pods []object) map[string]bool {
 	out := map[string]bool{}
 	for _, pod := range pods {

@@ -19,7 +19,7 @@ spec:
 
 Point that client's application configuration at my-fleet:8080 in the fleet namespace. If clients run in another namespace, use an ingress or proxy Pod in the fleet namespace with the label; the generated policy does not grant cross-namespace client ingress. A separate policy may be needed to allow the client's **egress**.
 
-Peer traffic on 8081 is limited to same-fleet Pods and operator Pods in the operator namespace. The PersistentFleet launcher port 8083 admits only operator Pods and is not exposed by a Service. Fleet egress includes peers, kube-dns, HTTPS for S3/STS and the EKS Pod Identity Agent endpoint. The policy assumes the kube-dns Pod label k8s-app: kube-dns; check your CNI and DNS deployment.
+Peer traffic on 8081 is limited to same-fleet Pods and operator Pods in the operator namespace. Fleet egress includes peers, kube-dns, HTTPS for S3/STS and the EKS Pod Identity Agent endpoint. The policy assumes the kube-dns Pod label k8s-app: kube-dns; check your CNI and DNS deployment.
 
 PersistentFleet advertises `POD.FLEET-peers.NAMESPACE.svc:8081`, so predecessor
 recovery can resolve the retained peer after its Pod IP changes. The headless
@@ -27,7 +27,7 @@ Service publishes addresses before readiness: peers may need each other's
 follower service to finish startup. Do not replace these addresses with Pod IPs
 or gate peer DNS on application readiness. See [recovery](../../troubleshoot/recovery/).
 
-The operator cannot determine whether the CNI enforces NetworkPolicy. The chart's networkPolicyEnforced flag is an administrator assertion after checking enforcement; provisioning stays blocked until it is true. Read [install](../../start/install/) and [security boundaries](../../reference/security-boundaries/). Do not publish the peer or launcher ports through ingress.
+The operator cannot determine whether the CNI enforces NetworkPolicy. The chart's networkPolicyEnforced flag is an administrator assertion after checking enforcement; provisioning stays blocked until it is true. Read [install](../../start/install/) and [security boundaries](../../reference/security-boundaries/). Do not publish the peer port through ingress.
 
 ## Optional Gateway API routing
 
@@ -87,7 +87,7 @@ annotations are privileged configuration and should follow your admission policy
 Both modes require an explicit, nonempty list of hostnames and a source selector.
 Wildcards such as `*.example.com` are supported. The separate `FLEET-routing`
 NetworkPolicy admits only TCP 8080 from that namespace **and** those Pod labels.
-The existing peer and launcher policies are unchanged. If your edge uses host
+The existing peer policy is unchanged. If your edge uses host
 networking, SNAT or an external load balancer, verify the packet source with your
 CNI and administer any additional required policy yourself; do not broaden peer
 access. The operator does not discover source labels automatically.

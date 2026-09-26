@@ -1,8 +1,6 @@
 package controller
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,9 +21,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 )
 
@@ -133,7 +129,7 @@ func envtestSetupWith(t *testing.T, profile string, edit func(*fleet.CelldFleet)
 	if err := c.Create(ctx, f); err != nil {
 		t.Fatal(err)
 	}
-	r := &Reconciler{Client: c, Options: Options{OperatorNamespace: "celld-system", LauncherImage: fixtureLauncher}, NetworkPolicyEnforced: true}
+	r := &Reconciler{Client: c, Options: Options{OperatorNamespace: "celld-system"}, NetworkPolicyEnforced: true}
 	return r, &envtestFixture{client: c, namespace: ns, fleet: f}
 }
 
@@ -439,97 +435,13 @@ func TestEnvtestScaleSubresource(t *testing.T) {
 // contract against a real HPA; this pins it against a real API server, where the
 // CRD's own scale subresource, defaulting and CEL admission apply.
 
-// A real apiserver, rather than fake-client counters, arbitrates cancellation,
-// persisted issuance and the independently guarded workload effect.
-func TestEnvtestBoundedOperationCASAndLostResponse(t *testing.T) {
-	r, x := envtestSetup(t, "PersistentFleet")
-	x.provision(t, r)
-	f := desiredCount(t, r, x.fleet, 4)
-	reconcile(t, r, f)
-	res := envReservation(t, r, f)
-	stale := r.hydrate(t.Context(), res)
-	if stale.j.Operation == nil || stale.j.Operation.Phase != "Intent" {
-		t.Fatal("missing durable intent")
-	}
-	f = desiredCount(t, r, f, 3)
-	reconcile(t, r, f)
-	stale.j.Operation.Phase = "Requesting"
-	if err := r.saveState(t.Context(), stale.res, stale.j); !apierrors.IsConflict(err) {
-		t.Fatalf("old issuer passed cancellation: %v", err)
-	}
-	f = desiredCount(t, r, f, 4)
-	for range 3 {
-		reconcile(t, r, f)
-	}
-	old := emptyObject(workload(f, r.Options))
-	if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), old); err != nil {
-		t.Fatal(err)
-	}
-	base := r.Client
-	lost := false
-	r.Client = interceptor.NewClient(base.(client.WithWatch), interceptor.Funcs{Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
-		if _, ok := obj.(*appsv1.StatefulSet); ok && replicas(obj) == 4 && !lost {
-			if err := c.Update(ctx, obj, opts...); err != nil {
-				return err
-			}
-			lost = true
-			return errors.New("lost response after durable effect")
-		}
-		return c.Update(ctx, obj, opts...)
-	}})
-	for range 5 {
-		_, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(f)})
-		if err != nil && !strings.Contains(err.Error(), "lost response") {
-			t.Fatal(err)
-		}
-		if lost {
-			break
-		}
-	}
-	if !lost {
-		t.Fatal("effect boundary not exercised")
-	}
-	r = &Reconciler{Client: base, Options: r.Options, NetworkPolicyEnforced: true}
-	reconcile(t, r, f)
-	state := getCurrentState(t, r, f)
-	if state.Operation == nil || state.Operation.Phase != "Observing" {
-		t.Fatalf("lost response not reconstructed: %+v", state.Operation)
-	}
-	actual := emptyObject(old)
-	if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), actual); err != nil {
-		t.Fatal(err)
-	}
-	if replicas(actual) != 4 || actual.GetAnnotations()[operationKey] != state.Operation.ID+"/stop" {
-		t.Fatal("wrong effect identity")
-	}
-	setReplicas(old, 5)
-	if err := r.Update(t.Context(), old); !apierrors.IsConflict(err) {
-		t.Fatalf("delayed workload writer succeeded: %v", err)
-	}
-	// A corrupted projection supplies no infrastructure authority.
-	got := &fleet.CelldFleet{}
-	if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), got); err != nil {
-		t.Fatal(err)
-	}
-	got.Status.Lifecycle = fleet.LifecycleStatus{OperationID: "fabricated", Phase: "Completed"}
-	if err := r.Status().Update(t.Context(), got); err != nil {
-		t.Fatal(err)
-	}
-	reconcile(t, r, f)
-	if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), got); err != nil {
-		t.Fatal(err)
-	}
-	if got.Status.Lifecycle.OperationID != state.Operation.ID || got.Status.Lifecycle.Phase == "Completed" {
-		t.Fatal("status substituted for operation authority")
-	}
-}
-
+// A guarded claim deletion carries the UID it observed, so a delayed delete
+// can never remove a replacement claim that reuses the member's name.
 func TestEnvtestCleanupPreconditionsRejectReplacement(t *testing.T) {
 	r, x := envtestSetup(t, "PersistentFleet")
 	x.provision(t, r)
-	name := "data-" + x.fleet.Name + "-2"
-	old := &corev1.PersistentVolumeClaim{}
-	if err := r.Get(t.Context(), client.ObjectKey{Namespace: x.namespace, Name: name}, old); err != nil {
+	old := initialClaims(x.fleet, workload(x.fleet, r.Options))[2]
+	if err := r.Create(t.Context(), old); err != nil {
 		t.Fatal(err)
 	}
 	uid, rv := old.UID, old.ResourceVersion

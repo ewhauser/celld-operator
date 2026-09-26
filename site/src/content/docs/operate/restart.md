@@ -1,6 +1,6 @@
 ---
 title: Restart a fleet
-description: Roll Bucket fleets one member at a time, or request coordinated PersistentFleet downtime.
+description: Roll a fleet one member at a time with a new restart token.
 ---
 
 Request a restart with a new token:
@@ -10,31 +10,24 @@ kubectl --context YOUR_CONTEXT -n fleets patch celldfleet my-fleet   --type merg
 kubectl --context YOUR_CONTEXT -n fleets get celldfleet my-fleet -o yaml
 ```
 
-A Bucket fleet writes the token to the Pod template annotation
-`celld.eric.dev/restart-token`, and its Deployment or StatefulSet replaces one
-member at a time. Each member drains on SIGTERM within
-`lifecycle.shutdownSeconds`. No downtime permission is needed.
-`maintenance.paused: true` suspends workload changes (`MaintenancePaused`).
+The operator writes the token to the Pod template annotation
+`celld.eric.dev/restart-token`, and members are replaced one at a time. Each
+member drains on SIGTERM within `lifecycle.shutdownSeconds`. No downtime
+permission is needed; `allowCoordinatedDowntime` is ignored. A Bucket fleet's
+Deployment or StatefulSet performs the rolling update.
 
 ## PersistentFleet
 
-A PersistentFleet restart stops the entire current fleet. Plan for interrupted
-requests and connections, and add explicit downtime permission:
+The StatefulSet uses `OnDelete`, so the operator deletes each outdated Pod
+itself: a member that is already down first, then running members from the
+highest ordinal, each only once the fleet has [settled](../../concepts/current-operation/).
+The replacement Pod reattaches the same disk. While waiting, the fleet reports
+`LifecycleProgress` with `Rolling update waits before POD: REASON`.
 
-```bash
-kubectl --context YOUR_CONTEXT -n fleets patch celldfleet my-fleet   --type merge -p '{"spec":{"maintenance":{"allowCoordinatedDowntime":true,"restartToken":"restart-2026-09-20-1"}}}'
-```
+A runtime without node-log state (before `0.5.1-ewhauser.5`) rolls on
+readiness plus a one-minute stabilization after the last disruption.
 
-The executor captures every current target and persists its strict runtime and
-launcher proof before setting workload replicas to zero, then finishes old-disk
-cleanup. Resume uses fresh disks and the recorded image;
-completion waits for the intended Pods to become ready.
-
-The current completed token is not replayed. Use a new token for another restart.
-Do not send a new token to recover a blocked issued operation: it remains pending
-until the original operation resolves.
-
-`maintenance.paused: true` pauses new and unissued actions. An issued shutdown
-cannot be cancelled by pausing, changing its token or extending a timeout.
-See [blocked operations](../../troubleshoot/lifecycle/) for missing proof and
-[the disk contract](../../contracts/disposable-disks/) for cleanup behavior.
+The current token is not replayed; use a new token for another restart.
+`maintenance.paused: true` suspends all workload changes (`MaintenancePaused`),
+including lost-disk replacement. See [lifecycle troubleshooting](../../troubleshoot/lifecycle/)
+if a rollout keeps waiting.

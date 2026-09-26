@@ -3,7 +3,7 @@
 `spec.profile: Bucket` with `spec.bucketWorkload: Ordered` creates a StatefulSet
 with disk-backed `emptyDir`. It creates no PVCs. celld's node identity is still
 the Pod UID. Both Bucket layouts run celld directly with
-`CELLD_DURABILITY=bucket`: no launcher, strict proof or current operation.
+`CELLD_DURABILITY=bucket`.
 
 Strict placement releases a scheduling gate only after assigning ordinal `n` to
 `placement.zones[n % azCount]`. Required hostname anti-affinity keeps members

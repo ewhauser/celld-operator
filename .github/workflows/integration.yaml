@@ -1,5 +1,5 @@
 # Disposable kind integration suites. They need Docker, a three-node kind
-# cluster, registry access and 15-25 minutes each. Every pull request runs the
+# cluster, registry access and 20-45 minutes each. Every pull request runs the
 # lifecycle suite; the full matrix runs nightly, on demand, and on a pull request
 # carrying the `integration` label.
 name: Integration
@@ -29,7 +29,7 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:

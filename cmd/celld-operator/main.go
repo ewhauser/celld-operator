@@ -36,8 +36,7 @@ func run() error {
 	enforced := fs.Bool("network-policy-enforced", false, "Administrator attests NetworkPolicy enforcement has been verified on this cluster")
 	localTest := fs.Bool("local-test", false, "Use disposable local MinIO test configuration; never enable on EKS")
 	localRWOP := fs.Bool("local-rwop", false, "Disposable harness only: request ReadWriteOncePod claims served by the per-node hostpath CSI driver; requires --local-test")
-	faultPoint := fs.String("local-fault-point", "", "Disposable harness only: exit the manager at a named lifecycle boundary (before-effect, after-effect); requires --local-test")
-	launcherImage := fs.String("launcher-image", "", "Digest-pinned operator image containing /celld-launcher; required for PersistentFleet strict supervision (Bucket fleets run celld directly)")
+	_ = fs.String("launcher-image", "", "Deprecated and ignored: fleets run celld directly (ADR 0023). Accepted so existing deployments keep starting")
 	metrics := fs.String("metrics-bind-address", "0", "Optional metrics listener (0 disables)")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -51,9 +50,6 @@ func run() error {
 	if *showVersion {
 		fmt.Println(version)
 		return nil
-	}
-	if *faultPoint != "" && !*localTest {
-		return errors.New("--local-fault-point requires --local-test")
 	}
 	if *localRWOP && !*localTest {
 		return errors.New("--local-rwop requires --local-test")
@@ -82,7 +78,8 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	reconciler := &controller.Reconciler{ApplicationRuntime: controlplane.New(nil), Collector: collector, Client: direct, Options: controller.Options{OperatorNamespace: *namespace, LocalTest: *localTest, LauncherImage: *launcherImage, FaultPoint: *faultPoint, LocalRWOP: *localRWOP}, NetworkPolicyEnforced: *enforced}
+	celld := controlplane.New(nil)
+	reconciler := &controller.Reconciler{ApplicationRuntime: celld, RuntimeState: celld, Collector: collector, Client: direct, Options: controller.Options{OperatorNamespace: *namespace, LocalTest: *localTest, LocalRWOP: *localRWOP}, NetworkPolicyEnforced: *enforced}
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		return err
 	}

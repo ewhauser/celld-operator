@@ -15,7 +15,7 @@ kubectl --context YOUR_CONTEXT -n celld-system logs deployment/celld-celld-opera
 kubectl --context YOUR_CONTEXT -n fleets describe celldfleet my-fleet
 ```
 
-If the CRD is missing, apply `config/crd/` from the same release as the controller and recheck. If the manager Pod is unavailable, use its Pod events and logs to distinguish image pull, configuration, and current-operation protocol errors. The development manifest's `:dev` image is not a published release image; supply an image your cluster can pull. [Install](../../start/install/) has the chart procedure.
+If the CRD is missing, apply `config/crd/` from the same release as the controller and recheck. If the manager Pod is unavailable, use its Pod events and logs to distinguish image pull and configuration errors. The development manifest's `:dev` image is not a published release image; supply an image your cluster can pull. [Install](../../start/install/) has the chart procedure.
 
 `NamespaceAccessDenied` means the fleet namespace lacks its namespaced Role and RoleBinding. For the Helm release `celld`, inspect the current list and upgrade the chart with the **complete** set of fleet namespaces; setting `fleetNamespaces` replaces the previous list even with `--reuse-values`:
 

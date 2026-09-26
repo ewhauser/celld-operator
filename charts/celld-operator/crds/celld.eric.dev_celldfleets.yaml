@@ -353,8 +353,9 @@ spec:
                 description: Maintenance requests share the bounded current operation.
                 properties:
                   allowCoordinatedDowntime:
-                    description: Explicitly permit an operation that stops the entire
-                      fleet.
+                    description: |-
+                      Deprecated and ignored: restarts and upgrades replace one member at a
+                      time and need no downtime permission (ADR 0023).
                     type: boolean
                   paused:
                     description: Pause new actions and unissued operations; continue
