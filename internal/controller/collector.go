@@ -28,7 +28,7 @@ type capacityCollector interface {
 type Collector struct {
 	client  client.Client
 	metrics rest.Interface
-	runtime controlplane.Lifecycle
+	runtime *controlplane.Client
 	now     func() time.Time
 }
 
@@ -98,7 +98,7 @@ func (c *Collector) sample(ctx context.Context, f *fleet.CelldFleet, p *corev1.P
 	if identity == "" || net.ParseIP(p.Status.PodIP) == nil {
 		return s
 	}
-	target, err := runtimeTarget(f, p, "")
+	target, err := runtimeTarget(f, p)
 	if err != nil {
 		return s
 	}
