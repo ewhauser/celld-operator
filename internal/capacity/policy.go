@@ -230,7 +230,9 @@ func RecordAction(s *State, now time.Time, from, to int32) {
 	// Retain the qualified low window while a removal intent awaits issuance.
 	// Any subsequent pressure, missing sample or gap still resets it in Evaluate.
 	if to > from {
-		if len(s.Load) == int(from) {
+		// A fleet that grew from no members, such as one restarted after a
+		// full stop, has no baseline to judge redistribution against.
+		if from > 0 && len(s.Load) == int(from) {
 			s.Addition = &Addition{Before: s.Load, Target: to}
 		}
 		reset(s)

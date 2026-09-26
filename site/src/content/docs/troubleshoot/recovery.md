@@ -96,8 +96,8 @@ kubectl --context YOUR_CONTEXT -n fleets get events \
   --field-selector involvedObject.name=my-fleet,type=Warning
 ```
 
-The StatefulSet creates a fresh claim for the new Pod. celld refuses answers
-from the empty disk until the new member publishes its own lease. After that, it
+The StatefulSet creates a fresh claim for the new Pod. The new member
+answers recovery for its old disk with a conclusive "no fragment", so celld
 seals any session whose only complete copy was on the old disk and records a
 bounded loss in `log/<session>.e<epoch>.loss.json`. A session with another
 complete copy recovers from it. With the rest of the fleet ready for five
@@ -139,7 +139,6 @@ on its own disk.
   on that disk.
 
 Do not edit finalizers, the storage reservation's annotations or claims by
-hand, and do not delete every member's disk. A fresh disk refuses answers until
-its member publishes a lease, and a member publishes its lease only after
-recovering its previous session. With every disk fresh while sessions are
-still open, no member can recover.
+hand, and do not delete every member's disk: every session whose writes were only on
+those disks would be recorded as lost. Runtimes before `0.5.1-ewhauser.7` stall
+recovery instead.

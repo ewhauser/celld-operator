@@ -43,17 +43,18 @@ events and EBS records to verify detach and deletion.
 Run the disposable suite with an actual published fork image digest:
 
 ```sh
-CELLD_RUNTIME_IMAGE=ghcr.io/ewhauser/celld@sha256:07a81e72155890b36529756a3ecbb22045d94679b3001a0341cacc044337549a \
+CELLD_RUNTIME_IMAGE=ghcr.io/ewhauser/celld@sha256:3e6c45392310add318952e45427db3316251a912ea7fd8d2fbff438fd2cc9f7f \
 go run ./hack/integration --suite all
 ```
 
-The command pins the published `.6` fork artifact, the same digest as
+The command pins the published `0.6.0-ewhauser.1` fork artifact, the same digest as
 `hack/runtime-image.txt`, which `make integration` uses. Individual suites are
 `lifecycle`, `maintenance`, `faults`, `external` and `upgrade`. `all` omits
 `upgrade`, which installs the released v0.0.5 operator, lets its launcher
 retire a member's disk, upgrades the operator and requires the member to
 rejoin on that disk with every write readable. The maintenance suite
-upgrades a PersistentFleet from the earlier `.3` digest on retained disks;
+upgrades a PersistentFleet from the earlier `.3` digest on retained disks with
+the documented full-stop procedure (`--upgrade-mode rolling` rolls instead);
 `--upgrade-from` or `CELLD_UPGRADE_FROM_IMAGE` selects another source digest,
 and `none` skips it. Kind uses a real local hostpath CSI driver for RWOP/Delete
 behavior, not EBS.

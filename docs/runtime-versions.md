@@ -4,7 +4,7 @@ Provisioning requires an explicit registry-pinned OCI image ending in
 `@sha256:<64 lowercase hex digits>`. There is no default runtime image and no
 list of stock upstream releases accepted as substitutes.
 
-The required fork is based on upstream v0.5.1 and exposes its state through the
+The required fork is based on upstream v0.6.0 and exposes its state through the
 existing `/state` control plane. Every possible recovery participant must
 understand its native `bucket_complete` proof. See
 [the wire contract](runtime-control-plane.md) and [fork source](https://github.com/ewhauser/celld).
@@ -32,22 +32,38 @@ older fleet can upgrade in place.
 
 ## Published fork artifact
 
-Release `v0.5.1-ewhauser.6` has a Linux amd64/arm64 image index:
+Release `v0.6.0-ewhauser.1` has a Linux amd64/arm64 image index:
 
 ```text
-ghcr.io/ewhauser/celld@sha256:07a81e72155890b36529756a3ecbb22045d94679b3001a0341cacc044337549a
+ghcr.io/ewhauser/celld@sha256:3e6c45392310add318952e45427db3316251a912ea7fd8d2fbff438fd2cc9f7f
 ```
 
-In `.6`, three failed idle probes to a follower degrade the leader's ensemble
+It is upstream v0.6.0 with every fork change through `0.5.1-ewhauser.7`. A
+PersistentFleet on a `0.5.1-ewhauser` build moves to it with a
+[full stop](../site/src/content/docs/operate/upgrade-runtime.md#full-stop-upgrade),
+not a rolling update: a 0.6.0 member recovers its previous session only from
+followers that return the ranged tail format, which 0.5.1 members cannot send.
+Bucket fleets roll.
+
+From `.7`, a member on a replacement disk answers recovery for its own old disk
+with a conclusive "no fragment" instead of refusing it. Members that lose their
+disks at the same time then recover each other's sessions, or record a bounded
+loss, instead of refusing each other forever. Another node at the member's
+address is still refused. Upgrade every member before relying on this: an
+older follower still refuses a replacement's answer.
+
+From `.6`, three failed idle probes to a follower degrade the leader's ensemble
 exactly as a failed write does, so an idle fleet also moves off a departed
 member. Earlier builds move off it only after a failed write, so an idle leader
 can keep depending on a removed member's disk; see the
 [limits](current-operation.md#limits) before deleting one by hand.
 
-The source revision is `801e98307157e962a57d5b0804dcf4a21ced008c`.
-[Release build 36205466928](https://github.com/ewhauser/celld/actions/runs/36205466928)
-and [image build 36205982955](https://github.com/ewhauser/celld/actions/runs/36205982955)
-completed. The binary checksums, build provenance, `celld --version` and the
-image index's build attestation were verified. Native binaries and checksums are
-attached to the [fork release](https://github.com/ewhauser/celld/releases/tag/v0.5.1-ewhauser.6).
+The source revision is `fdd0cf585189c92dd1712c6aba685b4294e65a88`.
+[Release build 36272411173](https://github.com/ewhauser/celld/actions/runs/36272411173)
+and [image build 36273043419](https://github.com/ewhauser/celld/actions/runs/36273043419)
+completed. The native binaries' checksums and recorded source commit,
+`celld --version` on both image platforms, and the image index's build
+attestation, issued to the tag's release workflow, were verified. Native
+binaries and checksums are attached to the
+[fork release](https://github.com/ewhauser/celld/releases/tag/v0.6.0-ewhauser.1).
 Confirm deployment behavior with the exact artifact and storage configuration you use. The operator image is built and pinned separately.

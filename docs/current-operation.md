@@ -29,7 +29,8 @@ the lifecycle ([ADR 0024](decisions/0024-persistentfleet-is-a-statefulset.md)).
 | Scale-in | One member per step, the highest ordinal, and only after the previous change has rolled out. The removed member keeps its PVC. Automatic and External contraction also require survivor-capacity evidence (`CapacityUncertain`). |
 | Growth | Applied in one step. An ordinal that had a member before reattaches its kept PVC, and celld treats that as a restart. New ordinals get new claims. A claim at a member's name without the fleet's UID label reports `StorageIdentityConflict`. |
 | Node drain | The PodDisruptionBudget allows `maxUnavailable: 1`. A member that is not Ready counts against it, so drains proceed one member at a time. |
-| Pause | `maintenance.paused` stops the operator from writing workload changes. A rollout the StatefulSet controller has already started continues. |
+| Pause | `maintenance.paused` stops the operator from writing workload changes and from replacing members. A rollout the StatefulSet controller has already started continues. |
+| Full stop | A runtime pair that cannot run together, such as `0.5.1-ewhauser` to `0.6.0-ewhauser`, is upgraded by pausing the fleet, scaling its StatefulSet to zero, then setting the new image and resuming in one change. Every member returns on its own disk at the declared count, whatever the capacity policy. See [upgrade the runtime](../site/src/content/docs/operate/upgrade-runtime.md#full-stop-upgrade). |
 | Deletion | Foreground StatefulSet deletion (members drain on SIGTERM), then every fleet PVC, including those of removed members, then the finalizer. The bucket reservation is permanent. |
 
 ## Self-healing
@@ -60,10 +61,11 @@ created.
 
 Leaders stop using a departed member within seconds, and every node sweeps
 dead leaders every 30 seconds. Once the rest of the fleet has been ready for
-five minutes, no session depends on the down member's disk. celld refuses
-answers from a fresh disk until its member publishes a lease. After that, it
-seals any session whose only complete copy was on the old disk and records a
-bounded loss in `log/<session>.e<epoch>.loss.json`. With the rest of the fleet
+five minutes, no session depends on the down member's disk. A member on a
+fresh disk declares its old disk lost: it answers recovery for that disk with
+a conclusive "no fragment", and celld seals any session whose only complete
+copy was on the old disk and records a bounded loss in
+`log/<session>.e<epoch>.loss.json`. With the rest of the fleet
 ready, no such session remains unless a second failure happened first.
 
 ## Recovering a fleet
@@ -85,10 +87,10 @@ its own disk and waits for each to be Ready.
   its own disk, and the retired member rejoins on that disk.
 
 Never edit finalizers, the reservation annotation or claims by hand, and never
-delete every member's disk. celld refuses answers from a fresh disk until its
-member publishes a lease, and a member publishes its lease only after it
-recovers its previous session. With every disk fresh while sessions are still
-open, no member can recover.
+delete every member's disk. Every session whose writes were only on those
+disks would be recorded as lost. Runtimes before `0.5.1-ewhauser.7` refuse
+answers from a fresh disk until its member publishes a lease, so on them
+recovery stalls instead.
 
 ## Limits
 

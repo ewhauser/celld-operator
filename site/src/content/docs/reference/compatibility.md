@@ -13,26 +13,30 @@ Use an explicit compatible fork image; the operator supplies no default runtime 
 | Persistent storage | EBS CSI (hostpath CSI in local tests), RWOP, `Delete` reclaim policy and `WaitForFirstConsumer`. |
 | Capacity policy | Metrics Server for built-in observations; Prometheus is optional. |
 
-The [fork release](https://github.com/ewhauser/celld/releases/tag/v0.5.1-ewhauser.6)
-is based on upstream v0.5.1. Its published Linux amd64/arm64 index is:
+The [fork release](https://github.com/ewhauser/celld/releases/tag/v0.6.0-ewhauser.1)
+is based on upstream v0.6.0. Its published Linux amd64/arm64 index is:
 
 ```text
-ghcr.io/ewhauser/celld@sha256:07a81e72155890b36529756a3ecbb22045d94679b3001a0341cacc044337549a
+ghcr.io/ewhauser/celld@sha256:3e6c45392310add318952e45427db3316251a912ea7fd8d2fbff438fd2cc9f7f
 ```
 
-The source revision is `801e98307157e962a57d5b0804dcf4a21ced008c`.
-Verify source, platform and digest for the artifact you deploy. The fork keeps
-an empty replacement disk from answering for a member's previous disk, and it
-lets an idle leader stop depending on a departed member; stock upstream releases
-do neither. A syntactically valid pin does not establish runtime/storage-format
-qualification.
+The source revision is `fdd0cf585189c92dd1712c6aba685b4294e65a88`. Verify
+source, platform and digest for the artifact you deploy. The fork never counts
+an unreachable peer as holding no copy of a write, and it lets an idle leader
+stop depending on a departed member; stock upstream releases do neither. A
+syntactically valid pin does not establish runtime/storage-format qualification.
 
-Use the `.6` artifact above for new fleets. `.1` can stall populated full-stop
+Use the `0.6.0-ewhauser.1` artifact above for new fleets. `.1` can stall populated full-stop
 removal; `.2` fixes that shutdown issue but can lose acknowledged writes when a
 retained recovery peer starts late. `.3` keeps unreachable witnesses undecided
 and fails startup with retained evidence if its bounded retries are exhausted.
 It cannot repair loss already recorded by an older runtime. `.6` adds idle
-probes, so an idle leader stops depending on a departed member. See
+probes, so an idle leader stops depending on a departed member. `.7` lets
+members that lose their disks at the same time recover each other's sessions,
+or record a bounded loss, instead of stalling. `0.6.0-ewhauser.1` carries all of
+this onto upstream v0.6.0. A PersistentFleet on a `0.5.1-ewhauser` build moves
+to it with a [full stop](../../operate/upgrade-runtime/#full-stop-upgrade), not
+a rolling update; Bucket fleets roll. See
 [recovery troubleshooting](../../troubleshoot/recovery/).
 
 The [.2 → .3 upgrade](../../qualification/runtime-upgrade/) and the

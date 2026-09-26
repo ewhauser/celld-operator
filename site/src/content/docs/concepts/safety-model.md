@@ -33,8 +33,8 @@ replaced at once. Otherwise one member must have been down for the replacement
 delay, 10 minutes by default, while every other member has been ready for five
 minutes. Leaders stop using a departed member within seconds, and every member
 sweeps dead leaders every 30 seconds, so by then no session depends on the down
-member's disk. celld refuses answers from the fresh disk until its member
-publishes a lease, then records a bounded loss for any session whose only
+member's disk. A member on a fresh disk answers recovery for its old
+disk with a conclusive "no fragment", and celld records a bounded loss for any session whose only
 complete copy was on the old disk. With the rest of the fleet ready, none
 remains unless a second failure happened first. See
 [self-healing](../current-operation/#self-healing) and
