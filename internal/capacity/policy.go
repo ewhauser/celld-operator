@@ -221,7 +221,9 @@ func Evaluate(p fleet.CapacityPolicy, old State, o Observation, current int32) S
 	return hold("WithinThresholds", fmt.Sprintf("All %d replicas observed; demand lies between thresholds", current))
 }
 
-// RecordAction is persisted atomically with lifecycle intent, never on a shadow recommendation.
+// RecordAction is called once per applied replica change, by the reconcile that
+// writes it, never on a shadow recommendation. An addition is judged for
+// redistribution only when Load is the observation of the from members.
 func RecordAction(s *State, now time.Time, from, to int32) {
 	s.Actionable = false
 	s.LastAction = now

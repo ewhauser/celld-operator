@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
+	"github.com/ewhauser/celld-operator/internal/capacity"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -113,6 +114,18 @@ func (r *Reconciler) reconcileWorkload(ctx context.Context, f *fleet.CelldFleet,
 			return ctrl.Result{}, err
 		}
 		return r.report(ctx, f, h, "InfrastructureBlocked", err.Error(), false)
+	}
+	if target != applied && f.Spec.Capacity != nil && !externalOwner(f) {
+		// Record each step once, in the reconcile whose write made it. The
+		// save follows the write, so a failure can lose a record but never
+		// keep one for a step that was not taken. Manual steps start the
+		// cooldowns too. Only a policy step comes from an evaluation of
+		// exactly the members it changes, so a manual addition gets no
+		// redistribution baseline.
+		if !automatic {
+			s.Capacity.Load = nil
+		}
+		capacity.RecordAction(s.Capacity, r.capacityNow(), applied, target)
 	}
 	if err := r.saveState(ctx, h.res, s); err != nil {
 		return ctrl.Result{}, err
