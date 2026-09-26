@@ -74,6 +74,9 @@ Bucket fleet (`alpha`) and a PersistentFleet (`beta`), and checks:
 - It contracts 3 → 1 with the manager Pod killed between steps, then regrows
   1 → 3 onto fresh claims.
 - Automatic contraction through Metrics Server uses the same one-member step.
+  The fleet is idle during this step, so an idle leader must still move its
+  ensemble off the removed member before that member's disk can be released.
+  v0.5.1-ewhauser.5 does not do this, and the step fails on it.
 
 **maintenance**
 
