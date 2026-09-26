@@ -2,13 +2,15 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
 // exerciseMaintenance qualifies rolling restart and runtime upgrade on
-// retained disks (ADR 0024): one member at a time, highest ordinal first, no
-// coordinated downtime, every PVC/PV/CSI identity unchanged and every
-// acknowledged write readable. It ends with deletion of both profiles.
+// retained disks (ADR 0024): a restart goes one member at a time, highest
+// ordinal first, with no coordinated downtime; an upgrade across an
+// incompatible runtime pair is the documented full stop. Every PVC/PV/CSI
+// identity stays unchanged and every acknowledged write readable. It ends with deletion of both profiles.
 func (h *harness) exerciseMaintenance() {
 	h.exercisePersistentRestart()
 	h.exercisePersistentUpgrade()
@@ -78,17 +80,23 @@ func (h *harness) exercisePersistentUpgrade() {
 	fmt.Println("PASS: a runtime without node_log state provisions like any other")
 	h.writeLedger("legacy")
 	h.startWriter("legacy")
-	h.rollAll("legacy", encode(object{"spec": object{"runtimeImage": h.opts.runtimeImage}}), func() bool {
+	upgraded := func() bool {
 		for _, pod := range h.memberPods("legacy") {
 			if str(list(pod, "spec", "containers")[0], "image") != h.opts.runtimeImage {
 				return false
 			}
 		}
 		return true
-	}, nil)
+	}
+	if h.opts.upgradeMode == "full-stop" {
+		h.fullStopUpgrade("legacy", h.opts.runtimeImage)
+		assert(upgraded(), "a member of legacy returned on another image")
+	} else {
+		h.rollAll("legacy", encode(object{"spec": object{"runtimeImage": h.opts.runtimeImage}}), upgraded, nil)
+	}
 	h.stopWriter("legacy")
 	h.readLedger("legacy")
-	fmt.Println("PASS: runtime upgrade", h.opts.upgradeFrom, "->", h.opts.runtimeImage, "kept every disk and acknowledged write")
+	fmt.Println("PASS: runtime upgrade", h.opts.upgradeFrom, "->", h.opts.runtimeImage, "("+h.opts.upgradeMode+") kept every disk and acknowledged write")
 	h.deleteFleet("legacy")
 }
 
@@ -111,4 +119,25 @@ func (h *harness) exerciseBucketRestart() {
 	h.stopWriter("alpha")
 	h.readLedger("alpha")
 	fmt.Println("PASS: Ordered Bucket rolling restart replaced every member with acknowledged writes intact")
+}
+
+// fullStopUpgrade runs the documented full-stop runtime upgrade, command for
+// command (site/src/content/docs/operate/upgrade-runtime.md): pause, stop
+// every member, then set the new image and resume in one change. Every member
+// must return on its own disk.
+func (h *harness) fullStopUpgrade(fleetName, image string) {
+	count := specReplicas(h.get("statefulset", fleetName))
+	disks := h.claims(fleetName)
+	uid := str(h.get("celldfleet", fleetName), "metadata", "uid")
+	h.merge(fleetName, `{"spec":{"maintenance":{"paused":true}}}`)
+	h.k("-n", "fleets", "wait", "celldfleet/"+fleetName, "--for=condition=MaintenancePaused", "--timeout=2m")
+	h.k("-n", "fleets", "scale", "statefulset", fleetName, "--replicas=0")
+	h.waitFor("every "+fleetName+" member stopped", 15*time.Minute, func() bool {
+		return strings.TrimSpace(h.k("-n", "fleets", "get", "pods", "-l", "celld.eric.dev/fleet-uid="+uid, "-o", "name")) == ""
+	})
+	h.merge(fleetName, encode(object{"spec": object{"runtimeImage": image, "maintenance": object{"paused": false}}}))
+	h.k("-n", "fleets", "wait", "celldfleet/"+fleetName, "--for=condition=Ready", "--timeout=20m")
+	h.waitSettled(fleetName, count, 5*time.Minute)
+	must(sameDisks(disks, h.claims(fleetName)))
+	fmt.Println("PASS:", fleetName, "full-stop upgrade brought every member back on its own disk")
 }

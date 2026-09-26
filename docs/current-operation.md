@@ -29,7 +29,8 @@ the lifecycle ([ADR 0024](decisions/0024-persistentfleet-is-a-statefulset.md)).
 | Scale-in | One member per step, the highest ordinal, and only after the previous change has rolled out. The removed member keeps its PVC. Automatic and External contraction also require survivor-capacity evidence (`CapacityUncertain`). |
 | Growth | Applied in one step. An ordinal that had a member before reattaches its kept PVC, and celld treats that as a restart. New ordinals get new claims. A claim at a member's name without the fleet's UID label reports `StorageIdentityConflict`. |
 | Node drain | The PodDisruptionBudget allows `maxUnavailable: 1`. A member that is not Ready counts against it, so drains proceed one member at a time. |
-| Pause | `maintenance.paused` stops the operator from writing workload changes. A rollout the StatefulSet controller has already started continues. |
+| Pause | `maintenance.paused` stops the operator from writing workload changes and from replacing members. A rollout the StatefulSet controller has already started continues. |
+| Full stop | A runtime pair that cannot run together, such as `0.5.1-ewhauser` to `0.6.0-ewhauser`, is upgraded by pausing the fleet, scaling its StatefulSet to zero, then setting the new image and resuming in one change. Every member returns on its own disk at the declared count, whatever the capacity policy. See [upgrade the runtime](../site/src/content/docs/operate/upgrade-runtime.md#full-stop-upgrade). |
 | Deletion | Foreground StatefulSet deletion (members drain on SIGTERM), then every fleet PVC, including those of removed members, then the finalizer. The bucket reservation is permanent. |
 
 ## Self-healing

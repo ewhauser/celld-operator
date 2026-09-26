@@ -53,7 +53,8 @@ The command pins the published `.7` fork artifact, the same digest as
 `upgrade`, which installs the released v0.0.5 operator, lets its launcher
 retire a member's disk, upgrades the operator and requires the member to
 rejoin on that disk with every write readable. The maintenance suite
-upgrades a PersistentFleet from the earlier `.3` digest on retained disks;
+upgrades a PersistentFleet from the earlier `.3` digest on retained disks with
+the documented full-stop procedure (`--upgrade-mode rolling` rolls instead);
 `--upgrade-from` or `CELLD_UPGRADE_FROM_IMAGE` selects another source digest,
 and `none` skips it. Kind uses a real local hostpath CSI driver for RWOP/Delete
 behavior, not EBS.
