@@ -22,17 +22,26 @@ type Addition struct {
 
 // Positive assessments require complete, fresh, advancing observations; reads
 // between sample intervals can only invalidate a window. A gap resets the window;
-// policy edits, pause and membership changes do not discard a hold.
+// policy edits and pause do not discard a hold.
+//
+// An addition is judged against the incumbents it grew from, by container
+// identity. An incumbent that restarts or is replaced never returns under its
+// identity, and a contraction below the addition's target removes members the
+// judgment needs, so no later observation can judge the addition. It is dropped
+// as neither relief nor an ineffective batch: a changed incumbent is never
+// evidence of improvement, and IneffectiveBatches is kept. The next addition
+// still waits for a new stable window, the cooldown and useful capacity.
 func assessAddition(p fleet.CapacityPolicy, s *State, now time.Time, current int32, count bool) string {
 	a := s.Addition
 	if a == nil {
 		return ""
 	}
-	if current < a.Target {
-		return "ObservingRedistribution"
+	if current < a.Target || !observed(a.Before, s.Load) {
+		s.Addition = nil
+		return ""
 	}
 	var beforeCPU, afterCPU int64
-	hotBefore, hotAfter, newcomers, busyNew := 0, 0, 0, false
+	hotBefore, hotAfter, busyNew := 0, 0, false
 	hot := func(v Load) bool {
 		return v.Pressure || v.CPU >= int64(p.CPUHighMillicores) || v.MemoryMiB >= int64(p.MemoryHighMiB)
 	}
@@ -49,20 +58,8 @@ func assessAddition(p fleet.CapacityPolicy, s *State, now time.Time, current int
 				hotAfter++
 			}
 		} else {
-			newcomers++
 			busyNew = busyNew || v.CPU >= int64(p.CPULowMillicores)
 		}
-	}
-	// Changed/missing incumbent identities cannot be counted as improvement.
-	for id := range a.Before {
-		if _, exists := s.Load[id]; !exists {
-			a.Since = time.Time{}
-			a.Samples = 0
-			return "RedistributionUnknown"
-		}
-	}
-	if newcomers < int(a.Target)-len(a.Before) {
-		return "RedistributionUnknown"
 	}
 	// Absolute floor avoids releasing on tiny CPU noise. Memory growth alone may
 	// be an idle cache and is not evidence of independently increasing demand.
@@ -99,4 +96,14 @@ func assessAddition(p fleet.CapacityPolicy, s *State, now time.Time, current int
 		}
 	}
 	return "LoadNotRedistributed"
+}
+
+// observed reports whether every incumbent is present under its identity.
+func observed(before, load map[string]Load) bool {
+	for id := range before {
+		if _, exists := load[id]; !exists {
+			return false
+		}
+	}
+	return true
 }
