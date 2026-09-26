@@ -440,7 +440,8 @@ func TestEnvtestScaleSubresource(t *testing.T) {
 func TestEnvtestCleanupPreconditionsRejectReplacement(t *testing.T) {
 	r, x := envtestSetup(t, "PersistentFleet")
 	x.provision(t, r)
-	old := initialClaims(x.fleet, workload(x.fleet, r.Options))[2]
+	tmpl := workload(x.fleet, r.Options).(*appsv1.StatefulSet).Spec.VolumeClaimTemplates[0]
+	old := &corev1.PersistentVolumeClaim{Name: claimName(x.fleet, 2), Namespace: x.fleet.Namespace, Labels: tmpl.Labels, Annotations: tmpl.Annotations, Spec: tmpl.Spec}
 	if err := r.Create(t.Context(), old); err != nil {
 		t.Fatal(err)
 	}

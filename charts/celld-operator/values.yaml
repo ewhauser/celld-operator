@@ -9,6 +9,9 @@ imagePullSecrets: []
 # Deprecated and ignored: fleets run celld directly. Kept so existing values still install.
 launcherImage: ''
 networkPolicyEnforced: false
+# How long one PersistentFleet member may stay down, while every other member is
+# ready, before the operator replaces it on a fresh disk. At least 1m.
+memberReplacementDelay: 10m
 # Namespaces that will hold CelldFleet resources. The chart renders the
 # namespaced Role and RoleBinding from config/rbac/fleet-namespace.yaml into
 # each; the cluster role alone cannot reconcile a fleet.

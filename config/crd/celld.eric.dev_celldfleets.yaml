@@ -350,7 +350,8 @@ spec:
                   rule: has(self.shutdownSeconds) || !has(self.terminationGraceSeconds)
                     || self.terminationGraceSeconds >= 25
               maintenance:
-                description: Maintenance requests share the bounded current operation.
+                description: Pause workload changes or request a rolling same-version
+                  restart.
                 properties:
                   allowCoordinatedDowntime:
                     description: |-
@@ -358,13 +359,13 @@ spec:
                       time and need no downtime permission (ADR 0023).
                     type: boolean
                   paused:
-                    description: Pause new actions and unissued operations; continue
-                      recovery of issued actions.
+                    description: Stop applying workload changes. A rollout the workload
+                      controller has already started continues.
                     type: boolean
                   restartToken:
-                    description: Change to a new nonempty token to request a same-version
-                      restart. The current completed token is not replayed. Placement
-                      and verified shutdown prerequisites must pass.
+                    description: Change to a new nonempty token to request a rolling
+                      same-version restart. The token is written to the Pod template,
+                      so a completed restart is not replayed.
                     maxLength: 128
                     type: string
                 type: object
@@ -735,8 +736,8 @@ spec:
                     == size(self.storage.region) + 1 && self.zone.matches('.*[a-z]$')
               profile:
                 description: 'Storage profile: Bucket uses temporary local disk and
-                  S3; PersistentFleet adds peer disks disposed after strict shutdown.
-                  Immutable after creation.'
+                  S3; PersistentFleet gives each member a persistent disk it keeps
+                  until the fleet is deleted. Immutable after creation.'
                 enum:
                 - Bucket
                 - PersistentFleet
@@ -1127,9 +1128,9 @@ spec:
                     type: integer
                   storageClassName:
                     description: Required only for PersistentFleet; must reference
-                      an existing CSI Delete/WaitForFirstConsumer class. Disks are
-                      disposed only after strict shutdown proof; CSI deletion protection
-                      is required.
+                      an existing CSI Delete/WaitForFirstConsumer class. Each member
+                      keeps its disk across restart, upgrade and scale-in; disks are
+                      deleted with the fleet.
                     maxLength: 253
                     minLength: 1
                     pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
@@ -1461,8 +1462,7 @@ spec:
                 - type
                 x-kubernetes-list-type: map
               desiredReplicas:
-                description: Current operation or enabled policy target, otherwise
-                  spec.replicas; zero during deletion.
+                description: Enabled capacity-policy target, otherwise spec.replicas.
                 format: int32
                 type: integer
               joiningReplicas:
@@ -1474,8 +1474,8 @@ spec:
                   the /scale subresource.
                 type: string
               lifecycle:
-                description: Progress and current findings for capacity and maintenance
-                  operations.
+                description: Retained for compatibility with earlier releases; always
+                  empty.
                 properties:
                   blocker:
                     description: Reason the current operation cannot progress.
@@ -1565,7 +1565,7 @@ spec:
                 type: integer
               reservation:
                 description: Name of the cluster-scoped storage reservation holding
-                  this fleet's bucket ownership and current operation.
+                  this fleet's bucket ownership.
                 type: string
               terminatingReplicas:
                 description: Observed Pods with a deletion timestamp.

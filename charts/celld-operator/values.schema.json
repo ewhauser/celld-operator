@@ -49,6 +49,10 @@
     "networkPolicyEnforced": {
       "type": "boolean"
     },
+    "memberReplacementDelay": {
+      "type": "string",
+      "pattern": "^([0-9]+(h|m|s))+$"
+    },
     "fleetNamespaces": {
       "type": "array",
       "uniqueItems": true,

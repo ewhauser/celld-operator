@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/go-logr/logr"
 
@@ -38,6 +39,7 @@ func run() error {
 	localRWOP := fs.Bool("local-rwop", false, "Disposable harness only: request ReadWriteOncePod claims served by the per-node hostpath CSI driver; requires --local-test")
 	_ = fs.String("launcher-image", "", "Deprecated and ignored: fleets run celld directly (ADR 0023). Accepted so existing deployments keep starting")
 	metrics := fs.String("metrics-bind-address", "0", "Optional metrics listener (0 disables)")
+	replaceAfter := fs.Duration("member-replacement-delay", controller.DefaultMemberReplacementDelay, "How long one PersistentFleet member may stay down, while every other member is ready, before it is replaced on a fresh disk")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -53,6 +55,9 @@ func run() error {
 	}
 	if *localRWOP && !*localTest {
 		return errors.New("--local-rwop requires --local-test")
+	}
+	if *replaceAfter < time.Minute {
+		return errors.New("--member-replacement-delay must be at least one minute")
 	}
 	ctrl.SetLogger(logr.FromSlogHandler(slog.NewJSONHandler(os.Stderr, nil)))
 	scheme := runtime.NewScheme()
@@ -79,7 +84,7 @@ func run() error {
 		return err
 	}
 	celld := controlplane.New(nil)
-	reconciler := &controller.Reconciler{ApplicationRuntime: celld, RuntimeState: celld, Collector: collector, Client: direct, Options: controller.Options{OperatorNamespace: *namespace, LocalTest: *localTest, LocalRWOP: *localRWOP}, NetworkPolicyEnforced: *enforced}
+	reconciler := &controller.Reconciler{ApplicationRuntime: celld, Collector: collector, Client: direct, Options: controller.Options{OperatorNamespace: *namespace, LocalTest: *localTest, LocalRWOP: *localRWOP, MemberReplacementDelay: *replaceAfter}, NetworkPolicyEnforced: *enforced}
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		return err
 	}

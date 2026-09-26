@@ -79,8 +79,7 @@ func (r *Reconciler) observeApplication(ctx context.Context, f *fleet.CelldFleet
 		return unknown("WorkloadUnavailable")
 	}
 	out.ExpectedNodes = max(replicas(w), f.Status.DesiredReplicas)
-	s := &fleetState{WorkloadUID: w.GetUID()}
-	pods, err := r.currentPods(ctx, f, s)
+	pods, err := r.currentPods(ctx, f, w.GetUID())
 	if err != nil {
 		return unknown("MembershipUnavailable")
 	}
@@ -143,7 +142,7 @@ func (r *Reconciler) observeApplication(ctx context.Context, f *fleet.CelldFleet
 		return 1
 	})
 	out.UnavailableNodes = max(out.UnavailableNodes, out.ExpectedNodes-out.ObservedNodes)
-	closing, err := r.currentPods(ctx, f, s)
+	closing, err := r.currentPods(ctx, f, w.GetUID())
 	if err != nil || !sameApplicationPods(pods, closing) {
 		return unknown("MembershipChanged")
 	}

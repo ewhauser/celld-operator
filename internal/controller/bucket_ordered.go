@@ -11,6 +11,7 @@ import (
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -31,7 +32,7 @@ func bucketOrdinal(f *fleet.CelldFleet, name string) (int, error) {
 // Assign before scheduling. StatefulSet scale-down removes the highest ordinal;
 // modulo assignment leaves a balanced prefix with every configured AZ represented.
 // No pod deletion-cost hint or scheduler-dependent victim choice is involved.
-func (r *Reconciler) scheduleOrderedBucket(ctx context.Context, f *fleet.CelldFleet, j *fleetState) error {
+func (r *Reconciler) scheduleOrderedBucket(ctx context.Context, f *fleet.CelldFleet, workloadUID types.UID) error {
 	pods := &corev1.PodList{}
 	if err := r.List(ctx, pods, client.InNamespace(f.Namespace), client.MatchingLabels(labels(f))); err != nil {
 		return err
@@ -43,7 +44,7 @@ func (r *Reconciler) scheduleOrderedBucket(ctx context.Context, f *fleet.CelldFl
 		}
 		owner := metav1.GetControllerOf(pod)
 		n, err := bucketOrdinal(f, pod.Name)
-		if err != nil || owner == nil || owner.UID != j.WorkloadUID || owner.Kind != "StatefulSet" || owner.APIVersion != "apps/v1" || owner.Name != f.Name || pod.Spec.NodeName != "" || !pod.DeletionTimestamp.IsZero() {
+		if err != nil || owner == nil || owner.UID != workloadUID || owner.Kind != "StatefulSet" || owner.APIVersion != "apps/v1" || owner.Name != f.Name || pod.Spec.NodeName != "" || !pod.DeletionTimestamp.IsZero() {
 			return errors.New("gated Bucket pod identity changed")
 		}
 		if f.Spec.Placement.Mode != "Relaxed" {

@@ -105,13 +105,16 @@ func TestClusterRoleGrantsTheVerbsTheReconcilerUses(t *testing.T) {
 		{"celld.eric.dev", "celldfleets", "list"},
 		{"celld.eric.dev", "celldfleets", "patch"},
 		{"celld.eric.dev", "celldstoragereservations", "update"},
-		{"", "persistentvolumes", "get"},
-		{"", "nodes", "get"},
 		{"storage.k8s.io", "storageclasses", "get"},
-		{"storage.k8s.io", "volumeattachments", "list"},
 	} {
 		if !grantedByClusterRole(role, want.group, want.resource, want.verb) {
 			t.Errorf("ClusterRole does not grant %q on %s/%s; the reconciler would be Forbidden in a real cluster", want.verb, want.group, want.resource)
+		}
+	}
+	// The operator does not track volumes or nodes (ADR 0024).
+	for _, unused := range []struct{ group, resource string }{{"", "persistentvolumes"}, {"", "nodes"}, {"storage.k8s.io", "volumeattachments"}} {
+		if grantedByClusterRole(role, unused.group, unused.resource, "get") || grantedByClusterRole(role, unused.group, unused.resource, "list") {
+			t.Errorf("ClusterRole grants %s/%s, which the operator no longer reads", unused.group, unused.resource)
 		}
 	}
 	// No Pod access belongs at cluster scope after removal of EC2 fencing.

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"time"
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -24,6 +25,11 @@ const (
 
 type Options struct {
 	OperatorNamespace string
+
+	// MemberReplacementDelay is how long one PersistentFleet member may stay
+	// down, while every other member is ready, before the operator replaces it
+	// with a fresh disk. Zero selects DefaultMemberReplacementDelay.
+	MemberReplacementDelay time.Duration
 
 	// Explicit test-only configuration; never inferred from kubeconfig or AWS environment.
 	LocalTest bool
@@ -259,6 +265,10 @@ func workload(f *fleet.CelldFleet, opts Options) client.Object {
 		// replace one ordinal at a time.
 		return &appsv1.StatefulSet{ObjectMeta: metadata(f, f.Name), Spec: appsv1.StatefulSetSpec{Replicas: new(f.Spec.Replicas), Selector: selector(f), ServiceName: f.Name + "-peers", PodManagementPolicy: appsv1.ParallelPodManagement, PersistentVolumeClaimRetentionPolicy: &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{WhenDeleted: appsv1.RetainPersistentVolumeClaimRetentionPolicyType, WhenScaled: appsv1.RetainPersistentVolumeClaimRetentionPolicyType}, Template: template, UpdateStrategy: appsv1.StatefulSetUpdateStrategy{Type: appsv1.RollingUpdateStatefulSetStrategyType, RollingUpdate: &appsv1.RollingUpdateStatefulSetStrategy{Partition: new(int32(0))}}}}
 	}
+	// PersistentFleet: the StatefulSet controller restarts one member at a
+	// time, highest ordinal first, waiting for each to report healthy. Every
+	// member keeps its claim across restart, upgrade and scale-in; only fleet
+	// deletion removes claims (ADR 0024).
 	return &appsv1.StatefulSet{
 		ObjectMeta: metadata(f, f.Name),
 		Spec: appsv1.StatefulSetSpec{
@@ -267,7 +277,7 @@ func workload(f *fleet.CelldFleet, opts Options) client.Object {
 			ServiceName:         f.Name + "-peers",
 			PodManagementPolicy: appsv1.ParallelPodManagement,
 			Template:            template,
-			UpdateStrategy:      appsv1.StatefulSetUpdateStrategy{Type: appsv1.OnDeleteStatefulSetStrategyType},
+			UpdateStrategy:      appsv1.StatefulSetUpdateStrategy{Type: appsv1.RollingUpdateStatefulSetStrategyType, RollingUpdate: &appsv1.RollingUpdateStatefulSetStrategy{Partition: new(int32(0))}},
 			PersistentVolumeClaimRetentionPolicy: &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{
 				WhenDeleted: appsv1.RetainPersistentVolumeClaimRetentionPolicyType,
 				WhenScaled:  appsv1.RetainPersistentVolumeClaimRetentionPolicyType,
@@ -363,8 +373,8 @@ func prerequisites(f *fleet.CelldFleet, opts Options) []client.Object {
 		policy.Spec.Egress = append(policy.Spec.Egress, destinationRule(t.CollectorURL, t.Egress))
 	}
 	// A fleet tolerates losing any one member, so voluntary evictions such as
-	// node drains proceed one at a time. A recovering PersistentFleet lowers
-	// this to zero until it settles (persistentBudget).
+	// node drains proceed one at a time. A member that is not Ready counts
+	// against the budget, so a drain waits for the previous member to return.
 	unavailable := intstr.FromInt32(1)
 	pdb := &policyv1.PodDisruptionBudget{
 		ObjectMeta: metadata(f, f.Name),

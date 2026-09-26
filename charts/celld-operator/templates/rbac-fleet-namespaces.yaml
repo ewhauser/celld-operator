@@ -18,10 +18,15 @@ rules:
   - apiGroups: ['']
     resources: [services]
     verbs: [get, create, update]
-  # Delete applies only to exact UID/RV-bound claims after captured strict removal proof.
+  # Delete removes a member's claim, bound to its UID, when its volume is gone or
+  # the member cannot come back, and every claim once a deleted fleet's
+  # StatefulSet is gone. The StatefulSet creates claims.
   - apiGroups: ['']
     resources: [persistentvolumeclaims]
-    verbs: [get, list, create, delete]
+    verbs: [get, list, delete]
+  # Update releases the zone scheduling gate of Ordered Bucket Pods. Delete
+  # replaces a PersistentFleet member that cannot come back on its own, and
+  # force-deletes a member Pod left on a node that no longer answers.
   - apiGroups: ['']
     resources: [pods]
     verbs: [get, list, update, delete]
@@ -46,8 +51,7 @@ rules:
   - apiGroups: [gateway.networking.k8s.io]
     resources: [httproutes]
     verbs: [get, create, update, delete]
-  # Update converges Bucket fleet budgets (ADR 0023); PersistentFleet budgets
-  # remain verify-only.
+  # Update converges fleet budgets.
   - apiGroups: [policy]
     resources: [poddisruptionbudgets]
     verbs: [get, create, update]

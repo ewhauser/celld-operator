@@ -9,10 +9,11 @@ import (
 	"github.com/ewhauser/celld-operator/internal/capacity"
 )
 
-// capacityTarget runs inside the existing lifecycle authority after identity/drift
-// checks. Its history and any new intent are committed together on the reservation.
-// It never edits spec.replicas or workload replicas.
-func (r *Reconciler) capacityTarget(ctx context.Context, f *fleet.CelldFleet, j *fleetState) (int32, bool) {
+// capacityTarget returns the replica count to apply given the workload's
+// applied count, and whether it is an automatic step. Its history is kept in j
+// and saved on the reservation. It never edits spec.replicas or workload
+// replicas.
+func (r *Reconciler) capacityTarget(ctx context.Context, f *fleet.CelldFleet, j *fleetState, applied int32) (int32, bool) {
 	if f.Spec.Capacity == nil {
 		// Preserve timing across disable/re-enable. Manual intent remains independent.
 		if j.Capacity != nil {
@@ -31,7 +32,7 @@ func (r *Reconciler) capacityTarget(ctx context.Context, f *fleet.CelldFleet, j 
 		// policy computes nothing, collects nothing, and never writes the field
 		// back; lifecycle gates still decide whether a requested count is applied.
 		s.LastManual, s.ManualTarget, s.Config = f.Spec.Replicas, 0, ""
-		s.Decision = fleet.CapacityStatus{Mode: "External", Reason: "ExternalOwner", Message: fmt.Sprintf("spec.replicas is owned by the /scale writer: desired %d, applied %d", f.Spec.Replicas, j.Applied), DesiredReplicas: f.Spec.Replicas}
+		s.Decision = fleet.CapacityStatus{Mode: "External", Reason: "ExternalOwner", Message: fmt.Sprintf("spec.replicas is owned by the /scale writer: desired %d, applied %d", f.Spec.Replicas, applied), DesiredReplicas: f.Spec.Replicas}
 		return f.Spec.Replicas, false
 	}
 	// Manual edits win one intent, even in automatic mode. Persist the new baseline
@@ -41,7 +42,7 @@ func (r *Reconciler) capacityTarget(ctx context.Context, f *fleet.CelldFleet, j 
 		s.ManualTarget = f.Spec.Replicas
 		s.Config = ""
 	}
-	if s.ManualTarget == j.Applied {
+	if s.ManualTarget == applied {
 		s.ManualTarget = 0
 	}
 	if s.ManualTarget != 0 {
@@ -52,15 +53,15 @@ func (r *Reconciler) capacityTarget(ctx context.Context, f *fleet.CelldFleet, j 
 	if r.Collector != nil {
 		observation = r.Collector.Collect(ctx, f)
 	}
-	*s = capacity.Evaluate(*f.Spec.Capacity, *s, observation, j.Applied)
+	*s = capacity.Evaluate(*f.Spec.Capacity, *s, observation, applied)
 	target := s.Decision.DesiredReplicas
 	if f.Spec.Capacity.Mode == "Shadow" || !s.Actionable {
-		return j.Applied, false
+		return applied, false
 	}
-	if target < j.Applied && f.Spec.Capacity.Mode != "Automatic" {
-		return j.Applied, false
+	if target < applied && f.Spec.Capacity.Mode != "Automatic" {
+		return applied, false
 	}
-	return target, target != j.Applied
+	return target, target != applied
 }
 func (r *Reconciler) capacityNow() time.Time {
 	if r.now != nil {

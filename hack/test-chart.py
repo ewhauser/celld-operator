@@ -51,7 +51,8 @@ fullpod = next(doc for doc in full if doc['kind'] == 'Deployment')['spec']['temp
 assert fullpod['containers'][0]['image'].endswith('@sha256:' + 'a' * 64)
 assert not any(arg.startswith('--launcher-image') for arg in fullpod['containers'][0]['args'])
 assert not any(doc['kind'] == 'PodDisruptionBudget' for doc in render('--set', 'replicaCount=1'))
-for bad in ('fleetNamespaces={Bad_Name}', 'replicaCount=0', 'metrics.serviceMonitor.enabled=true', 'metrics.port=8082', 'launcherImage=mutable:latest', 'image.digest=sha256:bad'):
+assert '--member-replacement-delay=10m' in fullpod['containers'][0]['args']
+for bad in ('fleetNamespaces={Bad_Name}', 'replicaCount=0', 'memberReplacementDelay=soon', 'metrics.serviceMonitor.enabled=true', 'metrics.port=8082', 'launcherImage=mutable:latest', 'image.digest=sha256:bad'):
     result = subprocess.run(['helm', 'template', 'example', CHART, '--set', bad], text=True, capture_output=True)
     assert result.returncode != 0, f'invalid chart values accepted: {bad}'
 print('Helm rendering, canonical RBAC, HA, monitoring and invalid-value checks passed.')

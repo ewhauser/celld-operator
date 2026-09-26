@@ -19,31 +19,31 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-// Bucket fleets run CELLD_DURABILITY=bucket: celld acknowledges no write before
-// the object store holds it, so a member's disk is a cache and losing any one
-// member at any time loses no acknowledged write. They need no launcher, no
-// strict shutdown proof and no current operation (ADR 0023). The workload
-// controller performs scaling, restart and upgrade; the operator renders the
-// desired objects and keeps capacity-policy history.
+// Both profiles are ordinary Kubernetes workloads. celld hands cells off on
+// SIGTERM, recovers a restarted node from its own disk and its peers, and
+// holds a new node's first healthy response until the fleet has absorbed the
+// change, so the workload controller's rolling update is the whole lifecycle
+// (ADR 0023, ADR 0024). The operator renders the desired objects, applies
+// them, steps contraction one member at a time, and replaces a StatefulSet
+// member that cannot come back on its own (persistent.go). It persists
+// nothing but capacity-policy state, once a fleet sets spec.capacity.
+//
+// Bucket fleets run CELLD_DURABILITY=bucket: their disks are caches.
+// PersistentFleet runs CELLD_DURABILITY=fleet on a StatefulSet whose members
+// keep their claims for the life of the fleet (persistent.go).
 
-// bucketLoaded discards 0022 operation state a Bucket fleet no longer uses.
-// Invalid or foreign state is dropped rather than blocking: nothing in it can
-// make a Bucket change unsafe, and the next save replaces it.
-func (r *Reconciler) bucketLoaded(f *fleet.CelldFleet, h *loadedState) *loadedState {
+// currentState returns the persisted capacity history. Invalid or foreign
+// state is dropped rather than blocking: nothing in it can make a workload
+// change unsafe, and the next save replaces it.
+func (r *Reconciler) currentState(f *fleet.CelldFleet, h *loadedState) *loadedState {
 	out := &loadedState{res: h.res, j: h.j}
 	if h.err != nil || (h.j != nil && h.j.FleetUID != f.UID) {
 		out.j = nil
 	}
-	if s := out.j; s != nil && s.Operation != nil {
-		s = new(*s)
-		s.Completion = &operationCompletion{ID: s.Operation.ID, Kind: s.Operation.Kind, Outcome: "Superseded", At: r.capacityNow()}
-		s.Operation = nil
-		out.j = s
-	}
 	return out
 }
 
-func (r *Reconciler) reconcileBucket(ctx context.Context, f *fleet.CelldFleet, h *loadedState) (ctrl.Result, error) {
+func (r *Reconciler) reconcileWorkload(ctx context.Context, f *fleet.CelldFleet, h *loadedState) (ctrl.Result, error) {
 	for _, obj := range prerequisites(f, r.Options) {
 		var err error
 		if _, service := obj.(*corev1.Service); service {
@@ -65,24 +65,18 @@ func (r *Reconciler) reconcileBucket(ctx context.Context, f *fleet.CelldFleet, h
 	}
 	s := h.j
 	if s == nil {
-		s = &fleetState{Version: 1, FleetUID: f.UID, Initial: h.res.Spec.InitialReplicas, Claims: map[string]types.UID{}}
-	}
-	before := stateRendering(s)
-	save := func() error {
-		if sameState(before, s) && h.j != nil {
-			return nil
-		}
-		return r.saveState(ctx, h.res, s)
+		s = &fleetState{Version: 1, FleetUID: f.UID}
 	}
 	desired := workload(f, r.Options)
 	actual := emptyObject(desired)
 	err := r.Get(ctx, client.ObjectKeyFromObject(desired), actual)
 	if apierrors.IsNotFound(err) {
-		if err := r.Create(ctx, desired); err != nil {
+		if conflict, err := r.foreignClaim(ctx, f, replicas(desired)); err != nil {
 			return ctrl.Result{}, err
+		} else if conflict != "" {
+			return r.report(ctx, f, h, "StorageIdentityConflict", conflict, false)
 		}
-		s.WorkloadUID, s.Applied, s.RuntimeImage, s.RestartToken = desired.GetUID(), replicas(desired), runtimeImage(f), restartToken(f)
-		if err := save(); err != nil {
+		if err := r.Create(ctx, desired); err != nil {
 			return ctrl.Result{}, err
 		}
 		return r.report(ctx, f, h, "Provisioning", "Workload created; waiting for runtime readiness and placement", true)
@@ -93,17 +87,25 @@ func (r *Reconciler) reconcileBucket(ctx context.Context, f *fleet.CelldFleet, h
 	if err := owned(f, actual); err != nil {
 		return r.report(ctx, f, h, "LifecycleBlocked", err.Error(), false)
 	}
-	s.WorkloadUID, s.Applied = actual.GetUID(), replicas(actual)
-	target, automatic := r.capacityTarget(ctx, f, s)
-	if target < s.Applied {
-		if reason, err := r.bucketContraction(ctx, f, s, actual, automatic); err != nil {
-			if err := save(); err != nil {
-				return ctrl.Result{}, err
-			}
-			return r.report(ctx, f, &loadedState{res: h.res, j: s}, reason, err.Error(), true)
+	applied := replicas(actual)
+	target, automatic := r.capacityTarget(ctx, f, s, applied)
+	var waitReason, waitMessage string
+	blocked := false
+	switch {
+	case target < applied:
+		if reason, err := r.contraction(ctx, f, desired, actual, automatic); err != nil {
+			// Template changes still apply; only the removal waits.
+			target, waitReason, waitMessage = applied, reason, err.Error()
+		} else {
+			// One member per step, so each contraction is observed before the next.
+			target = applied - 1
 		}
-		// One member per step, so each contraction is observed before the next.
-		target = s.Applied - 1
+	case target > applied:
+		if conflict, err := r.foreignClaim(ctx, f, target); err != nil {
+			return ctrl.Result{}, err
+		} else if conflict != "" {
+			target, waitReason, waitMessage, blocked = applied, "StorageIdentityConflict", conflict, true
+		}
 	}
 	setReplicas(desired, target)
 	if err := r.converge(ctx, desired, actual); err != nil {
@@ -112,19 +114,42 @@ func (r *Reconciler) reconcileBucket(ctx context.Context, f *fleet.CelldFleet, h
 		}
 		return r.report(ctx, f, h, "InfrastructureBlocked", err.Error(), false)
 	}
-	s.Applied, s.RuntimeImage, s.RestartToken = target, runtimeImage(f), restartToken(f)
-	if err := save(); err != nil {
+	if err := r.saveState(ctx, h.res, s); err != nil {
 		return ctrl.Result{}, err
 	}
+	if op := s.Operation; op != nil {
+		// The save above dropped a strict operation an earlier release recorded.
+		r.eventf(f, corev1.EventTypeNormal, "OperationSuperseded", "Dropped %s operation %s recorded by an earlier release; members roll onto the current template instead", op.Kind, op.ID)
+		s.Operation = nil
+	}
 	h = &loadedState{res: h.res, j: s}
+	waiting := ""
+	if sts, ok := actual.(*appsv1.StatefulSet); ok {
+		action, note, err := r.healMembers(ctx, f, sts)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if action != "" {
+			return r.report(ctx, f, h, "LifecycleProgress", action, true)
+		}
+		waiting = note
+	}
+	// Ordered Bucket Pods wait for a zone before scheduling, including those a
+	// rollout creates while a removal waits for it.
 	if orderedBucket(f) {
-		if err := r.scheduleOrderedBucket(ctx, f, s); err != nil {
+		if err := r.scheduleOrderedBucket(ctx, f, actual.GetUID()); err != nil {
 			return r.report(ctx, f, h, "SchedulingBlocked", err.Error(), true)
 		}
+	}
+	if waitReason != "" {
+		return r.report(ctx, f, h, waitReason, waitMessage, !blocked)
 	}
 	current := emptyObject(desired)
 	if err := r.Get(ctx, client.ObjectKeyFromObject(desired), current); err != nil {
 		return ctrl.Result{}, err
+	}
+	if waiting != "" {
+		return r.report(ctx, f, h, "Provisioning", "Waiting for ready replicas; "+waiting, true)
 	}
 	if !rolledOut(current) {
 		return r.report(ctx, f, h, "Provisioning", "Rolling out one member at a time; waiting for updated, ready replicas", true)
@@ -132,13 +157,15 @@ func (r *Reconciler) reconcileBucket(ctx context.Context, f *fleet.CelldFleet, h
 	return r.report(ctx, f, h, "Provisioned", "Workload rolled out and all replicas ready", true)
 }
 
-// bucketContraction decides whether a one-member contraction may start now.
-// A step waits for the previous rollout, and an automatic step also requires
-// the victim's load to fit on the survivors: the highest ordinal of a
+// contraction decides whether a one-member contraction may start now. A step
+// waits until the workload runs the desired template and has rolled out, so a
+// removal never overlaps a restart. An automatic step also requires the
+// victim's load to fit on the survivors: the highest ordinal of a
 // StatefulSet, or every Pod of a Deployment, whose victim Kubernetes chooses.
-// PersistentFleet callers have already required a settled fleet.
-func (r *Reconciler) bucketContraction(ctx context.Context, f *fleet.CelldFleet, s *fleetState, w client.Object, automatic bool) (string, error) {
-	if !rolledOut(w) {
+func (r *Reconciler) contraction(ctx context.Context, f *fleet.CelldFleet, desired, actual client.Object, automatic bool) (string, error) {
+	current := desired.DeepCopyObject().(client.Object)
+	setReplicas(current, replicas(actual))
+	if !matches(current, actual) || !rolledOut(actual) {
 		return "Provisioning", errors.New("waiting for the previous change to roll out before removing a member")
 	}
 	if !automatic && !externalOwner(f) {
@@ -152,7 +179,7 @@ func (r *Reconciler) bucketContraction(ctx context.Context, f *fleet.CelldFleet,
 		policy.Spec.Capacity = &fleet.CapacityPolicy{}
 		policy.Spec.Capacity.Default()
 	}
-	pods, err := r.currentPods(ctx, f, s)
+	pods, err := r.currentPods(ctx, f, actual.GetUID())
 	if err != nil {
 		return "CapacityUncertain", err
 	}
@@ -162,12 +189,13 @@ func (r *Reconciler) bucketContraction(ctx context.Context, f *fleet.CelldFleet,
 			ids = append(ids, id)
 		}
 	}
-	if len(ids) != int(s.Applied) {
+	applied := replicas(actual)
+	if len(ids) != int(applied) {
 		return "CapacityUncertain", errors.New("membership changed before contraction")
 	}
 	victims := ids
-	if _, ordered := w.(*appsv1.StatefulSet); ordered {
-		i := slices.IndexFunc(pods, func(p corev1.Pod) bool { return p.Name == fmt.Sprintf("%s-%d", f.Name, s.Applied-1) })
+	if _, ordered := actual.(*appsv1.StatefulSet); ordered {
+		i := slices.IndexFunc(pods, func(p corev1.Pod) bool { return p.Name == fmt.Sprintf("%s-%d", f.Name, applied-1) })
 		if i < 0 {
 			return "CapacityUncertain", errors.New("highest ordinal is missing")
 		}
@@ -195,8 +223,9 @@ func rolledOut(w client.Object) bool {
 		st := w.Status
 		done := st.ObservedGeneration >= w.Generation && st.Replicas == n && st.UpdatedReplicas == n && st.ReadyReplicas == n
 		// The StatefulSet controller advances currentRevision only for
-		// RollingUpdate. Under OnDelete it keeps the creation revision forever,
-		// so updated replicas are the only completion signal.
+		// RollingUpdate. A StatefulSet written by an earlier release keeps
+		// OnDelete until the operator converges it, and under OnDelete
+		// currentRevision stays at the creation revision forever.
 		if w.Spec.UpdateStrategy.Type == appsv1.OnDeleteStatefulSetStrategyType {
 			return done
 		}
@@ -213,11 +242,11 @@ func owned(f *fleet.CelldFleet, obj client.Object) error {
 	return nil
 }
 
-// converge makes a live Bucket object's operator-owned spec match desired.
+// converge makes a live object's operator-owned spec match desired.
 // Admission mutates Pods, not these templates, so the whole controlled spec is
 // the operator's and drift is corrected rather than blocked. Immutable fields
-// (selectors, service name, pod management policy) are rendered identically by
-// every release and never rewritten. actual may be nil.
+// (selectors, service name, pod management policy, claim templates) are
+// rendered identically by every release and never rewritten. actual may be nil.
 func (r *Reconciler) converge(ctx context.Context, desired, actual client.Object) error {
 	if actual == nil {
 		actual = emptyObject(desired)
@@ -254,32 +283,40 @@ func (r *Reconciler) converge(ctx context.Context, desired, actual client.Object
 	return r.Update(ctx, updated)
 }
 
-// deleteBucket removes compute and then releases the finalizer. Members drain
-// on SIGTERM. The bucket reservation stays permanent and prerequisites are
-// retained, as for every fleet.
-func (r *Reconciler) deleteBucket(ctx context.Context, f *fleet.CelldFleet) (ctrl.Result, error) {
+// deleteWorkload removes compute, then, for PersistentFleet, every disk, and
+// then releases the finalizer. Members drain on SIGTERM. The bucket
+// reservation stays permanent and prerequisites are retained, as for every
+// fleet.
+func (r *Reconciler) deleteWorkload(ctx context.Context, f *fleet.CelldFleet) (ctrl.Result, error) {
 	w := emptyObject(workload(f, r.Options))
 	err := r.Get(ctx, client.ObjectKeyFromObject(f), w)
-	if apierrors.IsNotFound(err) {
-		base := f.DeepCopy()
-		controllerutil.RemoveFinalizer(f, Finalizer)
-		return ctrl.Result{}, r.Patch(ctx, f, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
+	if err == nil {
+		if w.GetLabels()[FleetLabel] != string(f.UID) || len(w.GetOwnerReferences()) != 0 {
+			return r.report(ctx, f, nil, "DeletionBlocked", fmt.Sprintf("%T %s is not owned by this fleet; refusing deletion", w, w.GetName()), false)
+		}
+		if w.GetDeletionTimestamp().IsZero() {
+			if err := r.Delete(ctx, w, client.Preconditions{UID: new(w.GetUID())}, client.PropagationPolicy(metav1.DeletePropagationForeground)); err != nil && !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, err
+			}
+		}
+		return r.report(ctx, f, nil, "LifecycleProgress", "Deleting workload; members drain on SIGTERM", false)
 	}
-	if err != nil {
+	if !apierrors.IsNotFound(err) {
 		return ctrl.Result{}, err
 	}
-	if w.GetLabels()[FleetLabel] != string(f.UID) || len(w.GetOwnerReferences()) != 0 {
-		return r.report(ctx, f, nil, "DeletionBlocked", fmt.Sprintf("%T %s is not owned by this fleet; refusing deletion", w, w.GetName()), false)
+	if remaining, err := r.deleteClaims(ctx, f); err != nil {
+		return ctrl.Result{}, err
+	} else if remaining {
+		return r.report(ctx, f, nil, "LifecycleProgress", "Deleting disks", false)
 	}
-	if w.GetDeletionTimestamp().IsZero() {
-		if err := r.Delete(ctx, w, client.Preconditions{UID: new(w.GetUID())}, client.PropagationPolicy(metav1.DeletePropagationForeground)); err != nil && !apierrors.IsNotFound(err) {
-			return ctrl.Result{}, err
-		}
-	}
-	return r.report(ctx, f, nil, "LifecycleProgress", "Deleting workload; members drain on SIGTERM", false)
+	base := f.DeepCopy()
+	controllerutil.RemoveFinalizer(f, Finalizer)
+	return ctrl.Result{}, r.Patch(ctx, f, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
 }
 
-func (r *Reconciler) currentPods(ctx context.Context, f *fleet.CelldFleet, s *fleetState) ([]corev1.Pod, error) {
+// currentPods lists the fleet's Pods and requires each to belong to the
+// workload with the given UID.
+func (r *Reconciler) currentPods(ctx context.Context, f *fleet.CelldFleet, workloadUID types.UID) ([]corev1.Pod, error) {
 	list := &corev1.PodList{}
 	if err := r.List(ctx, list, client.InNamespace(f.Namespace), client.MatchingLabels(labels(f)), client.Limit(101)); err != nil {
 		return nil, err
@@ -294,7 +331,7 @@ func (r *Reconciler) currentPods(ctx context.Context, f *fleet.CelldFleet, s *fl
 		}
 		switch {
 		case owner.Kind == "StatefulSet":
-			if owner.UID != s.WorkloadUID || owner.Name != f.Name {
+			if owner.UID != workloadUID || owner.Name != f.Name {
 				return nil, errors.New("pod workload identity changed")
 			}
 		case owner.Kind == "ReplicaSet" && f.Spec.Profile == "Bucket" && !orderedBucket(f):
@@ -303,7 +340,7 @@ func (r *Reconciler) currentPods(ctx context.Context, f *fleet.CelldFleet, s *fl
 				return nil, err
 			}
 			parent := metav1.GetControllerOf(rs)
-			if rs.UID != owner.UID || parent == nil || parent.UID != s.WorkloadUID || parent.Name != f.Name || parent.Kind != "Deployment" || !rs.DeletionTimestamp.IsZero() {
+			if rs.UID != owner.UID || parent == nil || parent.UID != workloadUID || parent.Name != f.Name || parent.Kind != "Deployment" || !rs.DeletionTimestamp.IsZero() {
 				return nil, errors.New("ReplicaSet ownership changed")
 			}
 		default:

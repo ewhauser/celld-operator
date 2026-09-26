@@ -55,10 +55,10 @@ type CelldFleetSpec struct {
 	// +optional
 	// +kubebuilder:validation:Pattern=`^([a-z0-9]+([.-][a-z0-9]+)*|localhost)(:[0-9]{1,5})?(/[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*)+@sha256:[a-f0-9]{64}$`
 	RuntimeImage string `json:"runtimeImage,omitempty"`
-	// Maintenance requests share the bounded current operation.
+	// Pause workload changes or request a rolling same-version restart.
 	Maintenance *MaintenanceSpec `json:"maintenance,omitempty"`
 
-	// Storage profile: Bucket uses temporary local disk and S3; PersistentFleet adds peer disks disposed after strict shutdown. Immutable after creation.
+	// Storage profile: Bucket uses temporary local disk and S3; PersistentFleet gives each member a persistent disk it keeps until the fleet is deleted. Immutable after creation.
 	// +kubebuilder:validation:Enum=Bucket;PersistentFleet
 	Profile string `json:"profile"`
 	// Manual replica target. Capacity policy can choose a different applied count without editing this field. Must cover every configured availability zone.
@@ -211,8 +211,8 @@ type ExecutionSpec struct {
 }
 
 // LifecycleSpec bounds shutdown. The runtime's total stop budget must leave room
-// inside the pod's termination grace for signal delivery and the launcher's
-// lock proof; a longer budget is an opportunity to hand off, not proof of it.
+// inside the pod's termination grace for signal delivery; a longer budget is an
+// opportunity to hand off, not proof of it.
 // +kubebuilder:validation:XValidation:rule="!has(self.shutdownSeconds) || !has(self.terminationGraceSeconds) || self.shutdownSeconds + 5 <= self.terminationGraceSeconds",message="terminationGraceSeconds must exceed shutdownSeconds by at least 5"
 // +kubebuilder:validation:XValidation:rule="!has(self.shutdownSeconds) || has(self.terminationGraceSeconds) || self.shutdownSeconds + 5 <= 30",message="shutdownSeconds above 25 requires an explicit terminationGraceSeconds"
 // +kubebuilder:validation:XValidation:rule="has(self.shutdownSeconds) || !has(self.terminationGraceSeconds) || self.terminationGraceSeconds >= 25",message="terminationGraceSeconds must be at least 25 with the default 20 second shutdown"
@@ -275,14 +275,14 @@ func (s *CelldFleetSpec) EffectiveLifecycle() LifecycleSpec {
 	return l
 }
 
-// MaintenanceSpec requests suspension or a qualified planned restart.
+// MaintenanceSpec suspends workload changes or requests a rolling restart.
 type MaintenanceSpec struct {
 	// Deprecated and ignored: restarts and upgrades replace one member at a
 	// time and need no downtime permission (ADR 0023).
 	AllowCoordinatedDowntime bool `json:"allowCoordinatedDowntime,omitempty"`
-	// Pause new actions and unissued operations; continue recovery of issued actions.
+	// Stop applying workload changes. A rollout the workload controller has already started continues.
 	Paused bool `json:"paused,omitempty"`
-	// Change to a new nonempty token to request a same-version restart. The current completed token is not replayed. Placement and verified shutdown prerequisites must pass.
+	// Change to a new nonempty token to request a rolling same-version restart. The token is written to the Pod template, so a completed restart is not replayed.
 	// +kubebuilder:validation:MaxLength=128
 	RestartToken string `json:"restartToken,omitempty"`
 }
@@ -319,7 +319,7 @@ type StorageSpec struct {
 	// +kubebuilder:validation:MaxLength=32
 	// +kubebuilder:validation:Pattern=`^[a-z]{2}(-[a-z]+)+-[0-9]+$`
 	Region string `json:"region"`
-	// Required only for PersistentFleet; must reference an existing CSI Delete/WaitForFirstConsumer class. Disks are disposed only after strict shutdown proof; CSI deletion protection is required.
+	// Required only for PersistentFleet; must reference an existing CSI Delete/WaitForFirstConsumer class. Each member keeps its disk across restart, upgrade and scale-in; disks are deleted with the fleet.
 	// +optional
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:validation:MinLength=1
@@ -350,8 +350,8 @@ type PlacementSpec struct {
 	Mode string `json:"mode,omitempty"`
 }
 
-// LifecycleStatus is an informational projection of the bounded current operation.
-// Clearing status never cancels an operation or removes recovery evidence.
+// LifecycleStatus is retained for compatibility with earlier releases. The
+// operator runs no lifecycle operations of its own and leaves it empty.
 type LifecycleStatus struct {
 	// RFC3339 start time of the active operation, when available.
 	StartedAt string `json:"startedAt,omitempty"`
@@ -401,7 +401,7 @@ type CelldFleetStatus struct {
 	Replicas int32 `json:"replicas"`
 	// Serialized selector for exactly this fleet's Pods, for the /scale subresource.
 	LabelSelector string `json:"labelSelector,omitempty"`
-	// Current operation or enabled policy target, otherwise spec.replicas; zero during deletion.
+	// Enabled capacity-policy target, otherwise spec.replicas.
 	DesiredReplicas int32 `json:"desiredReplicas,omitempty"`
 	// Replica target currently applied to the owned Kubernetes workload.
 	AppliedReplicas int32 `json:"appliedReplicas,omitempty"`
@@ -417,13 +417,13 @@ type CelldFleetStatus struct {
 	BlockedSince string `json:"blockedSince,omitempty"`
 	// Latest capacity policy recommendation and observation coverage.
 	Capacity CapacityStatus `json:"capacity,omitempty"`
-	// Progress and current findings for capacity and maintenance operations.
+	// Retained for compatibility with earlier releases; always empty.
 	Lifecycle LifecycleStatus `json:"lifecycle,omitempty"`
 	// Fleet metadata.generation reflected by this status update.
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 	// Ready count from the owned workload status, provided it covers the current workload generation.
 	ReadyReplicas int32 `json:"readyReplicas,omitempty"`
-	// Name of the cluster-scoped storage reservation holding this fleet's bucket ownership and current operation.
+	// Name of the cluster-scoped storage reservation holding this fleet's bucket ownership.
 	Reservation string `json:"reservation,omitempty"`
 	// Current readiness, progress, blocked, and maintenance conditions.
 	// +listType=map
