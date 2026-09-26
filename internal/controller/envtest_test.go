@@ -473,7 +473,7 @@ func TestEnvtestCleanupPreconditionsRejectReplacement(t *testing.T) {
 
 // Bucket objects converge to the rendered spec. Against a real API server the
 // server's defaulting must not make every reconcile rewrite the workload, and
-// a template written by an earlier release migrates in place.
+// a workload written by an earlier release migrates in place.
 func TestEnvtestBucketConvergenceIsStable(t *testing.T) {
 	for _, layout := range []string{"Deployment", "Ordered"} {
 		t.Run(layout, func(t *testing.T) {
@@ -487,20 +487,11 @@ func TestEnvtestBucketConvergenceIsStable(t *testing.T) {
 			if !matches(workload(f, r.Options), w) {
 				t.Fatal("defaulted workload does not match its rendering")
 			}
-			// Simulate an 0022 template: launcher init container and command.
-			legacy := f.DeepCopy()
-			legacy.Spec.Profile = "PersistentFleet"
-			strict := podTemplate(legacy, r.Options).Spec
+			// Simulate the update strategy an 0022 workload was written with.
 			switch w := w.(type) {
 			case *appsv1.Deployment:
-				w.Spec.Template.Spec.InitContainers = strict.InitContainers
-				w.Spec.Template.Spec.Containers[0].Command = strict.Containers[0].Command
-				w.Spec.Template.Spec.Volumes = append(w.Spec.Template.Spec.Volumes, strict.Volumes...)
 				w.Spec.Strategy = appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}
 			case *appsv1.StatefulSet:
-				w.Spec.Template.Spec.InitContainers = strict.InitContainers
-				w.Spec.Template.Spec.Containers[0].Command = strict.Containers[0].Command
-				w.Spec.Template.Spec.Volumes = append(w.Spec.Template.Spec.Volumes, strict.Volumes...)
 				w.Spec.UpdateStrategy = appsv1.StatefulSetUpdateStrategy{Type: appsv1.OnDeleteStatefulSetStrategyType}
 			}
 			if err := r.Update(t.Context(), w); err != nil {
@@ -512,7 +503,7 @@ func TestEnvtestBucketConvergenceIsStable(t *testing.T) {
 				t.Fatal(err)
 			}
 			if !matches(workload(f, r.Options), migrated) {
-				t.Fatal("legacy template not migrated")
+				t.Fatal("legacy strategy not migrated")
 			}
 			version := migrated.GetResourceVersion()
 			for range 3 {

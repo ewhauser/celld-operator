@@ -49,8 +49,6 @@ func TestFleetObservabilityTransitions(t *testing.T) {
 	}
 }
 
-// The warning fires at half of either budget that fails closed, and never one
-// byte earlier.
 func TestObservedReplicaInventory(t *testing.T) {
 	f := fixture("inventory", "inventory", "Bucket")
 	at := metav1.Now()

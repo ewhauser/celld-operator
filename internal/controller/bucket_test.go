@@ -234,16 +234,11 @@ func TestBucketRecreatesMissingWorkload(t *testing.T) {
 }
 
 func TestBucketMigratesStrictFleet(t *testing.T) {
-	// A fleet created under 0022 has a launcher template, a Recreate strategy
-	// and a zero-disruption budget. Convergence replaces all three in place.
+	// A fleet created under 0022 has a Recreate strategy and a zero-disruption
+	// budget. Convergence replaces both in place; its launcher template is
+	// ordinary drift (TestBucketDriftIsCorrected).
 	x := bucketFleet(t, "Deployment")
-	legacy := x.f.DeepCopy()
-	legacy.Spec.Profile = "PersistentFleet"
-	strict := podTemplate(legacy, x.r.Options)
-	strict.Spec.SchedulingGates = nil
 	d := x.workload().(*appsv1.Deployment)
-	d.Spec.Template.Spec.InitContainers = strict.Spec.InitContainers
-	d.Spec.Template.Spec.Containers[0].Command = strict.Spec.Containers[0].Command
 	d.Spec.Strategy = appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}
 	if err := x.r.Update(t.Context(), d); err != nil {
 		t.Fatal(err)
@@ -258,8 +253,8 @@ func TestBucketMigratesStrictFleet(t *testing.T) {
 	}
 	x.step()
 	d = x.workload().(*appsv1.Deployment)
-	if len(d.Spec.Template.Spec.InitContainers) != 0 || d.Spec.Template.Spec.Containers[0].Command != nil || d.Spec.Strategy.Type != appsv1.RollingUpdateDeploymentStrategyType {
-		t.Fatal("launcher template not migrated")
+	if d.Spec.Strategy.Type != appsv1.RollingUpdateDeploymentStrategyType {
+		t.Fatal("strategy not migrated")
 	}
 	if err := x.r.Get(t.Context(), client.ObjectKeyFromObject(x.f), pdb); err != nil {
 		t.Fatal(err)

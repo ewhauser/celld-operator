@@ -20,16 +20,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// csiDeletionFinalizer is the external-provisioner finalizer a conforming CSI
-// driver keeps on a Delete PV until its backing storage is gone.
-const csiDeletionFinalizer = "external-provisioner.volume.kubernetes.io/finalizer"
-
 // revisionLabel is the label the StatefulSet controller puts on each Pod,
 // naming the template revision it was created from.
 const revisionLabel = "controller-revision-hash"
 
 // operationFixture simulates the Kubernetes workload controller, scheduler and
-// CSI binding around one fleet.
+// claim binding around one fleet.
 type operationFixture struct {
 	t     *testing.T
 	r     *Reconciler
@@ -135,14 +131,13 @@ func (x *operationFixture) pod(name string) *corev1.Pod {
 	return p
 }
 
-// Simulate only the Kubernetes workload controller, scheduler and CSI binding.
-// A StatefulSet creates each missing Pod at the update revision. Under
+// Simulate only the Kubernetes workload controller, scheduler and claim
+// binding. A StatefulSet creates each missing Pod at the update revision. Under
 // RollingUpdate it replaces one outdated Pod per sync, highest ordinal first;
 // under OnDelete it never replaces a Pod that nothing deleted.
 func (x *operationFixture) syncWorkload() {
 	t := x.t
 	ctx := t.Context()
-	x.syncStorage()
 	w := x.workload()
 	n := replicas(w)
 	revision := ""
@@ -188,14 +183,9 @@ func (x *operationFixture) syncWorkload() {
 			t.Fatal(err)
 		}
 		updated++
-		host := fmt.Sprintf("host-%d", i)
-		node := &corev1.Node{Name: host, UID: types.UID(host), Labels: map[string]string{corev1.LabelTopologyZone: "us-east-1a", corev1.LabelHostname: host}, Status: corev1.NodeStatus{NodeInfo: corev1.NodeSystemInfo{BootID: "boot"}, Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
-		if err := x.r.Create(ctx, node); err != nil && !apierrors.IsAlreadyExists(err) {
-			t.Fatal(err)
-		}
 		spec := podTemplate(x.f, x.r.Options).Spec
 		spec.SchedulingGates = nil
-		spec.NodeName = host
+		spec.NodeName = fmt.Sprintf("host-%d", i)
 		owner := metav1.OwnerReference{APIVersion: "apps/v1", Kind: "StatefulSet", Name: x.f.Name, UID: w.GetUID(), Controller: new(true)}
 		podLabels := labels(x.f)
 		switch w := w.(type) {
@@ -226,18 +216,8 @@ func (x *operationFixture) syncWorkload() {
 			} else if err != nil {
 				t.Fatal(err)
 			}
-			if claim.Spec.VolumeName == "" {
-				claim.Spec.VolumeName = "pv-" + string(claim.UID)
-				if err := x.r.Update(ctx, claim); err != nil {
-					t.Fatal(err)
-				}
-			}
 			claim.Status.Phase = corev1.ClaimBound
 			if err := x.r.Status().Update(ctx, claim); err != nil {
-				t.Fatal(err)
-			}
-			pv := &corev1.PersistentVolume{Name: claim.Spec.VolumeName, UID: types.UID("volume-" + string(claim.UID)), Finalizers: []string{csiDeletionFinalizer}, Annotations: map[string]string{"pv.kubernetes.io/provisioned-by": "ebs.csi.aws.com"}, Spec: corev1.PersistentVolumeSpec{PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimDelete, StorageClassName: x.f.Spec.Storage.StorageClassName, ClaimRef: &corev1.ObjectReference{Name: claim.Name, Namespace: claim.Namespace, UID: claim.UID}, PersistentVolumeSource: corev1.PersistentVolumeSource{CSI: &corev1.CSIPersistentVolumeSource{Driver: "ebs.csi.aws.com", VolumeHandle: "vol-" + string(claim.UID)}}}}
-			if err := x.r.Create(ctx, pv); err != nil && !apierrors.IsAlreadyExists(err) {
 				t.Fatal(err)
 			}
 			spec.Volumes = append(spec.Volumes, corev1.Volume{Name: "data", PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: claim.Name}})
@@ -273,41 +253,6 @@ func (x *operationFixture) syncWorkload() {
 		t.Fatal(err)
 	}
 	x.clock = x.clock.Add(time.Second)
-}
-
-// syncStorage simulates a conforming CSI provisioner, not the operator. It
-// removes backend storage and releases the deletion finalizer after PVC absence.
-func (x *operationFixture) syncStorage() {
-	x.t.Helper()
-	pvs := &corev1.PersistentVolumeList{}
-	if err := x.r.List(x.t.Context(), pvs); err != nil {
-		x.t.Fatal(err)
-	}
-	for _, pv := range pvs.Items {
-		ref := pv.Spec.ClaimRef
-		if ref == nil {
-			continue
-		}
-		c := &corev1.PersistentVolumeClaim{}
-		if err := x.r.Get(x.t.Context(), client.ObjectKey{Namespace: ref.Namespace, Name: ref.Name}, c); !apierrors.IsNotFound(err) {
-			continue
-		}
-		if pv.Spec.PersistentVolumeReclaimPolicy != corev1.PersistentVolumeReclaimDelete {
-			continue
-		}
-		if err := x.r.Delete(x.t.Context(), &pv); err != nil {
-			x.t.Fatal(err)
-		}
-		if err := x.r.Get(x.t.Context(), client.ObjectKeyFromObject(&pv), &pv); apierrors.IsNotFound(err) {
-			continue
-		} else if err != nil {
-			x.t.Fatal(err)
-		}
-		pv.Finalizers = nil
-		if err := x.r.Update(x.t.Context(), &pv); err != nil {
-			x.t.Fatal(err)
-		}
-	}
 }
 
 func envReservation(t *testing.T, r *Reconciler, f *fleet.CelldFleet) *fleet.CelldStorageReservation {
