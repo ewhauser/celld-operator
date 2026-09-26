@@ -20,7 +20,7 @@ Use Ordered Bucket when you need deterministic zone assignment by ordinal.
 Restart and upgrade roll one member at a time for both profiles.
 PersistentFleet keeps each member's disk across restart and upgrade and waits
 for celld to report the fleet settled before disrupting the next member. It adds
-CSI requirements and needs runtime `0.5.1-ewhauser.5` or later for scale-in.
+CSI requirements and needs runtime `0.5.1-ewhauser.6` or later for scale-in.
 
 Profiles, Bucket layout, storage and placement are fixed at creation. There is no
 migration or adoption path for old fleets or previously retained disks. See

@@ -25,30 +25,28 @@ source/target format compatibility; the operator cannot infer it from two valid
 digest strings.
 
 PersistentFleet settlement and disk release read celld's `/state.node_log`,
-first published in `0.5.1-ewhauser.5`. Earlier runtimes, such as `.4`, still
-roll restarts and upgrades on readiness plus a one-minute stabilization, so a
-`.4` fleet can upgrade to `.5` in place. They never authorize disk deletion:
-scale-in of a PersistentFleet requires `.5` or later on every member.
+first published in `0.5.1-ewhauser.5`. Earlier runtimes still roll restarts and
+upgrades on readiness plus a one-minute stabilization, so an older fleet can
+upgrade in place. They never authorize disk deletion. On `.5`, an idle leader
+never lets go of a removed follower, so a removed member's disk is never
+released; scale-in of a PersistentFleet requires `.6` or later on every member.
 
 ## Published fork artifact
 
-Release `v0.5.1-ewhauser.3` has a Linux amd64/arm64 image index:
+Release `v0.5.1-ewhauser.6` has a Linux amd64/arm64 image index:
 
 ```text
-ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29
+ghcr.io/ewhauser/celld@sha256:07a81e72155890b36529756a3ecbb22045d94679b3001a0341cacc044337549a
 ```
 
-Version `.3` fixes retained-witness startup skew: unreachable witnesses stay
-undecided regardless of lease age, and exhausted startup retries fail without
-sealing the predecessor merely because a peer is unavailable. Do not use `.2`
-for retained-disk recovery. It also includes the `.2` populated full-stop fix:
-strict shutdown completes after
-durability, runtime stop and ownership release without waiting for successor
-adoption. Do not use `.1` for coordinated maintenance.
+`.6` adds to `.5`'s node-log state: three failed idle probes to a follower
+degrade the leader's ensemble exactly as a failed write does, so an idle fleet
+moves off a departed member and releases its obligations.
 
-The source revision is `739f2baa87a5bfc4bfe04e317adf6d774edf8740`.
-[Release build 35547238694](https://github.com/ewhauser/celld/actions/runs/35547238694)
-and [image build 35548054541](https://github.com/ewhauser/celld/actions/runs/35548054541)
-completed; the published index was verified anonymously. Native binaries and
-checksums are attached to the [fork release](https://github.com/ewhauser/celld/releases/tag/v0.5.1-ewhauser.3).
+The source revision is `801e98307157e962a57d5b0804dcf4a21ced008c`.
+[Release build 36205466928](https://github.com/ewhauser/celld/actions/runs/36205466928)
+and [image build 36205982955](https://github.com/ewhauser/celld/actions/runs/36205982955)
+completed. The binary checksums, build provenance, `celld --version` and the
+image index's build attestation were verified. Native binaries and checksums are
+attached to the [fork release](https://github.com/ewhauser/celld/releases/tag/v0.5.1-ewhauser.6).
 Confirm deployment behavior with the exact artifact and storage configuration you use. The operator image is built and pinned separately.

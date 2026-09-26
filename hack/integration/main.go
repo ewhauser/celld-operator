@@ -23,8 +23,8 @@ type options struct {
 	runtimeLocalImage                               string
 }
 
-// legacyRuntimeImage is v0.5.1-ewhauser.4, the last fork release without
-// `/state.node_log`. The maintenance suite upgrades a PersistentFleet from it
+// legacyRuntimeImage is v0.5.1-ewhauser.3, the previously pinned fork release,
+// which predates `/state.node_log`. The maintenance suite upgrades a PersistentFleet from it
 // on retained disks, which exercises the operator's readiness-plus-
 // stabilization path for legacy runtimes.
 const legacyRuntimeImage = "ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29"

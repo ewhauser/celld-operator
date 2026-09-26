@@ -25,7 +25,7 @@ Its claim is kept until a fresh celld sweep lists no session that needs it;
 meanwhile status reads `Retaining disk data-my-fleet-3 of removed member my-fleet-3:
 still needed by ...`. The next step waits for that disk and for the fleet to
 settle again. Growth waits until retained disks of removed members are deleted
-and never reuses them. Scale-in needs runtime `0.5.1-ewhauser.5` or later.
+and never reuses them. Scale-in needs runtime `0.5.1-ewhauser.6` or later; `.5` reports node-log state, but an idle `.5` leader never lets go of a removed follower, so its disk is never released.
 
 Read conditions while scaling runs. An external autoscaler must target the
 CelldFleet `/scale` subresource using `capacity.mode: External`. It uses the same

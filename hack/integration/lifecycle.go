@@ -103,8 +103,8 @@ func (h *harness) exercisePersistentScaling() {
 	// Automatic contraction through Metrics Server uses the same settled,
 	// one-member removal. The fleet is deliberately idle here: an idle
 	// leader must still move its ensemble off a departed follower, or the
-	// removed member's disk is never released (fixed in celld after
-	// v0.5.1-ewhauser.5).
+	// removed member's disk is never released (fixed in celld
+	// v0.5.1-ewhauser.6).
 	h.merge("beta", `{"spec":{"capacity":`+fmt.Sprintf(automaticCapacity, 2)+`}}`)
 	h.waitSettled("beta", 2, 10*time.Minute)
 	h.merge("beta", `{"spec":{"capacity":null,"replicas":2}}`)

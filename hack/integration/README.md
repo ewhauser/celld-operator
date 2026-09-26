@@ -20,8 +20,8 @@ make integration-external
 ```
 
 The Make targets use the verified fork digest in `hack/runtime-image.txt`. It
-must report `/state.node_log` (v0.5.1-ewhauser.5 or later), because
-PersistentFleet settlement is read from it. `CELLD_RUNTIME_IMAGE` or
+must be v0.5.1-ewhauser.6 or later: PersistentFleet settlement is read from
+`/state.node_log`, and idle contraction needs `.6`'s follower-loss detection. `CELLD_RUNTIME_IMAGE` or
 `--runtime-image` selects another immutable fork digest. There is no upstream or
 unpinned fallback. To qualify an already published operator image without
 rebuilding the manager, pass
@@ -76,7 +76,7 @@ Bucket fleet (`alpha`) and a PersistentFleet (`beta`), and checks:
 - Automatic contraction through Metrics Server uses the same one-member step.
   The fleet is idle during this step, so an idle leader must still move its
   ensemble off the removed member before that member's disk can be released.
-  v0.5.1-ewhauser.5 does not do this, and the step fails on it.
+  v0.5.1-ewhauser.5 does not do this and fails the step; `.6` does.
 
 **maintenance**
 
@@ -85,7 +85,7 @@ Bucket fleet (`alpha`) and a PersistentFleet (`beta`), and checks:
   one at a time, highest ordinal first, and every PVC/PV/CSI identity stays
   the same. After a manager restart the token does not run again.
 - A runtime upgrade on retained disks moves a three-member PersistentFleet from
-  the legacy v0.5.1-ewhauser.4 digest to the pinned runtime. The legacy digest
+  the legacy v0.5.1-ewhauser.3 digest to the pinned runtime. The legacy digest
   lacks `node_log`, so the operator rolls it on readiness plus stabilization,
   and it never reports `Provisioned`. Pass `--upgrade-from` or
   `CELLD_UPGRADE_FROM_IMAGE` to use another source digest, or `none` to skip.

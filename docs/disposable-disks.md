@@ -33,7 +33,7 @@ the Pod and reattach the same claim. The operator deletes a claim only when:
   complete celld sweep observed after the last disruption lists no session that
   still needs it. Until then the fleet reports `LifecycleProgress` with
   `Retaining disk data-FLEET-N of removed member FLEET-N: still needed by ...`.
-  Runtimes without node-log state (before `0.5.1-ewhauser.5`) never release one.
+  Runtimes without node-log state (before `0.5.1-ewhauser.5`) never release one, and on `.5` an idle leader keeps naming a removed follower, so release needs `0.5.1-ewhauser.6`.
 - **Lost disk:** the claim is `Lost`, its bound PV no longer exists, or the
   member's Pod is Pending with no claim. The Pod and claim are replaced at once.
 - **Administrator request:** the `celld.eric.dev/replace-member` annotation

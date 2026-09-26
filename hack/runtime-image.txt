@@ -1,1 +1,1 @@
-ghcr.io/ewhauser/celld@sha256:b86b115f1af776eb90f086934c6cffba5e470e0bc99dcfe76cef79bf6ce3fbac
+ghcr.io/ewhauser/celld@sha256:07a81e72155890b36529756a3ecbb22045d94679b3001a0341cacc044337549a
