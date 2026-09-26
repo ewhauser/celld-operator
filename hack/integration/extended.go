@@ -150,23 +150,29 @@ const nodeLogReader = "node-log-reader"
 
 // nodeLogs reads /state.node_log from every ready member, keyed by Pod name.
 // A member that does not answer is omitted.
-func (h *harness) nodeLogs(fleetName string) map[string]object {
-	out := map[string]object{}
+// nodeLogsWithErrors also reports why a member's node-log state was not read,
+// so a timed-out assertion can say whether a member was unreadable or short.
+func (h *harness) nodeLogsWithErrors(fleetName string) (map[string]object, map[string]string) {
+	out, errs := map[string]object{}, map[string]string{}
 	for _, pod := range h.memberPods(fleetName) {
 		ip := str(pod, "status", "podIP")
 		if !podReady(pod) || ip == "" {
+			errs[nameOf(pod)] = "not ready"
 			continue
 		}
 		body, err := h.try(command{args: h.kubectl("-n", operatorNS, "exec", nodeLogReader, "--", "curl", "--fail", "--silent", "--show-error", "--max-time", "3", "http://"+ip+":8081/state"), timeout: 20 * time.Second})
 		if err != nil {
+			errs[nameOf(pod)] = strings.TrimSpace(err.Error())
 			continue
 		}
 		var state object
-		if json.Unmarshal([]byte(body), &state) == nil && sub(state, "node_log") != nil {
-			out[nameOf(pod)] = sub(state, "node_log")
+		if json.Unmarshal([]byte(body), &state) != nil || sub(state, "node_log") == nil {
+			errs[nameOf(pod)] = "no node_log in /state"
+			continue
 		}
+		out[nameOf(pod)] = sub(state, "node_log")
 	}
-	return out
+	return out, errs
 }
 
 // assertFollowers waits until every member of a settled fleet reports fleet
@@ -178,23 +184,29 @@ func (h *harness) assertFollowers(fleetName string, want int) {
 	defer h.k("-n", operatorNS, "delete", "pod", nodeLogReader, "--wait=true")
 	count := specReplicas(h.get("celldfleet", fleetName))
 	var last map[string][]string
-	h.waitFor(fmt.Sprintf("every %s leader reports %d follower(s)", fleetName, want), 4*time.Minute, func() bool {
-		logs := h.nodeLogs(fleetName)
-		last = map[string][]string{}
-		for node, log := range logs {
-			last[node] = strs(log, "own", "ensemble")
-		}
-		if int64(len(logs)) != count {
-			return false
-		}
+	var unread map[string]string
+	description := fmt.Sprintf("every %s leader reports %d follower(s)", fleetName, want)
+	deadline := time.Now().Add(4 * time.Minute)
+	for {
+		logs, errs := h.nodeLogsWithErrors(fleetName)
+		last, unread = map[string][]string{}, errs
+		settled := int64(len(logs)) == count
 		for node, log := range logs {
 			ensemble := strs(log, "own", "ensemble")
+			last[node] = ensemble
 			if str(log, "posture") != "fleet" || len(ensemble) != want || slices.Contains(ensemble, node) {
-				return false
+				settled = false
 			}
 		}
-		return true
-	})
+		if settled {
+			fmt.Println("PASS:", description)
+			break
+		}
+		if !time.Now().Before(deadline) {
+			fail("Timed out: %s; ensembles %v; unread %v", description, last, unread)
+		}
+		h.sleep(2 * time.Second)
+	}
 	fmt.Printf("PASS: %s ensembles %v\n", fleetName, last)
 }
 
