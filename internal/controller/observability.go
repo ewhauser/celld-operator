@@ -26,10 +26,8 @@ func init() {
 		"terminating_replicas":      "Observed pods with a deletion timestamp.",
 		"replica_observation_valid": "One when the fleet Pod inventory is complete.",
 		"blocked":                   "One when the latest reconcile reports a blocker.",
-		"operation_stalled":         "One when the persisted lifecycle operation exceeded its deadline.",
-		"operation_age_seconds":     "Age of the current durable operation, zero when none.",
 		"blocked_age_seconds":       "Age of the current continuously reported blocker, zero when none.",
-		"operation_bytes":           "Bounded current operation and policy state bytes, capped at 180 KiB.",
+		"operation_bytes":           "Bytes of the operator's bounded fleet state on the storage reservation.",
 	} {
 		gauge := prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "celld_fleet_" + name, Help: help}, []string{"namespace", "fleet"})
 		metrics.Registry.MustRegister(gauge)
@@ -63,8 +61,6 @@ func publishFleetMetrics(f *fleet.CelldFleet, state stateFootprint, now time.Tim
 		"joining_replicas": float64(f.Status.JoiningReplicas), "terminating_replicas": float64(f.Status.TerminatingReplicas),
 		"replica_observation_valid": boolean(f.Status.ReplicaObservationValid),
 		"blocked":                   boolean(meta.IsStatusConditionTrue(f.Status.Conditions, "Blocked")),
-		"operation_stalled":         boolean(f.Status.Lifecycle.Stalled),
-		"operation_age_seconds":     secondsSince(f.Status.Lifecycle.StartedAt, now),
 		"blocked_age_seconds":       secondsSince(f.Status.BlockedSince, now),
 	}
 	for name, value := range values {

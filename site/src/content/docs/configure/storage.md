@@ -1,13 +1,13 @@
 ---
 title: Storage
-description: Configure fresh CSI disks that can be deleted after verified strict shutdown.
+description: Configure retained CSI disks for PersistentFleet.
 ---
 
 :::caution[Local storage requires the celld fork]
 If you use celld with persistent local storage (`PersistentFleet`), you must use
 the [ewhauser/celld fork](https://github.com/ewhauser/celld). The operator relies
-on its strict shutdown and recovery contract before deleting local disks; stock
-upstream celld does not provide that contract. All runtime and recovery nodes
+on its node-log state to pace changes and decide when a local disk may be
+deleted; stock upstream celld does not provide that state. All runtime and recovery nodes
 must use a compatible fork. The fork is also required for `Bucket` fleets. See
 [compatibility](../../reference/compatibility/) for the required release and image digest.
 :::
@@ -29,25 +29,23 @@ reclaimPolicy: Delete
 volumeBindingMode: WaitForFirstConsumer
 ```
 
-Install and configure a supported EBS CSI driver before creating the fleet. Its
-provisioned PVs must carry the external-provisioner deletion finalizer and the
-exact expected driver, claim UID and volume handle. The controller blocks
-unrecognized, static, retained or ambiguously owned storage.
+Install and configure a supported EBS CSI driver before creating the fleet.
+`StorageClassMissing` and `InvalidStorageClass` report a missing or incompatible
+class. Each member's claim survives restart and upgrade; the replacement Pod
+reattaches it.
 
 StatefulSet PVC retention remains `Retain` so Kubernetes cannot delete a claim
-as an automatic side effect of replica reduction. The operator exclusively
-initiates claim deletion after capturing strict runtime and launcher proof and
-observing compute removal. The **StorageClass/PV reclaim policy is `Delete`**.
+as a side effect of replica reduction. The operator alone deletes claims, with
+UID preconditions: a removed member's claim once no session needs it, a lost
+disk's claim, a member named by `celld.eric.dev/replace-member`, and every claim
+after fleet deletion removes the Pods. The **StorageClass/PV reclaim policy is
+`Delete`**, so CSI deletes the backing volume. The operator does not call AWS
+APIs or remove finalizers.
 
-Cleanup waits for the captured claim and PV to disappear and for their
-VolumeAttachments to clear. Kubernetes CSI finalizer behavior supplies the
-backend-deletion guarantee; the operator does not call AWS APIs or remove
-finalizers. An absent PVC alone is insufficient.
+Growth allocates fresh claims and waits until any removed member's retained
+claim is deleted; it never reuses one. Claims labeled with the fleet's UID are
+reused if the StatefulSet itself is recreated. A claim from elsewhere at a
+member's name reports `StorageIdentityConflict`.
 
-Contraction releases the old ordinal's claim name. Growth and coordinated
-restart allocate fresh disks and recover through celld. Previously retained PVs
-and EBS disks are never adopted or retroactively deleted.
-
-Read [the exact disk contract](../../contracts/disposable-disks/) and
-[storage contract](../../contracts/disposable-disks/). Verify that your EBS CSI
-driver completes physical deletion in your cluster.
+Read the [retained disk contract](../../contracts/disposable-disks/). Verify that
+your EBS CSI driver completes physical deletion in your cluster.

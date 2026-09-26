@@ -1,6 +1,6 @@
 ---
 title: Upgrade the operator
-description: Use matching API, controller and launcher artifacts.
+description: Apply matching CRDs and chart, and let existing fleets converge.
 ---
 
 This implementation replaces the former lifecycle journal and private-S3
@@ -12,14 +12,14 @@ When upgrading from v0.0.2, remove `spec.qualification` from saved fleet
 manifests. Apply the new CRD before the chart; the controller clears the old
 `ProductionQualified` and `LifecycleBlocked` status conditions as fleets reconcile.
 
-For subsequent compatible releases, verify the exact controller and launcher
-artifacts against the runtime fork before rollout. Apply the release's CRDs
+For subsequent compatible releases, verify the exact controller artifact
+against the runtime fork before rollout. Apply the release's CRDs
 explicitly, because Helm does not update CRDs from its `crds/` directory, and
 install the matching chart:
 
 ```bash
 kubectl --context YOUR_CONTEXT apply -f config/crd/
-helm --kube-context YOUR_CONTEXT upgrade celld charts/celld-operator   --namespace celld-system --reuse-values   --set image.digest=sha256:YOUR_OPERATOR_DIGEST   --set launcherImage=YOUR_REGISTRY/celld-operator@sha256:YOUR_OPERATOR_DIGEST
+helm --kube-context YOUR_CONTEXT upgrade celld charts/celld-operator   --namespace celld-system --reuse-values   --set image.digest=sha256:YOUR_OPERATOR_DIGEST
 ```
 
 The controller declares `appProtocol: tcp` on each fleet's peer Service port.
@@ -39,10 +39,14 @@ recorded with outcome `Superseded`. Updating the budget needs the
 PodDisruptionBudget `update` verb; reapply `config/rbac/fleet-namespace.yaml`
 first if you manage that Role yourself.
 
-Inspect PersistentFleet current operations and the release's workload-template
-compatibility before changing the launcher image. The operator does not silently
-roll out a drifted PersistentFleet template. Do not erase current authority or force a workload update
-to work around a blocker.
+PersistentFleets created by earlier releases also converge in place. An
+in-flight strict operation is recorded as `Superseded`, unreadable state is
+rebuilt, launcher-gated Pods are released, and members roll onto the new template
+one at a time on their existing disks, each after the fleet settles. Launcher
+retirement markers on those disks are ignored. The `DiskCleanupPending`
+condition is removed and `status.lifecycle` no longer shows operation phases.
+The operator accepts `--launcher-image` and ignores it; `launcherImage` can be
+dropped from chart values.
 
-A controller restart resumes captured current operations; status can be rebuilt.
-A binary downgrade is not a storage or protocol rollback procedure.
+A binary downgrade is not a storage or protocol rollback procedure: an earlier
+release expects launcher-supervised PersistentFleet Pods.

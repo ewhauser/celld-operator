@@ -49,12 +49,12 @@ spec:
   groups:
     - name: celld-fleets
       rules:
-        - alert: CelldFleetRecoveryStalled
-          expr: celld_fleet_operation_stalled == 1
+        - alert: CelldFleetBlocked
+          expr: celld_fleet_blocked_age_seconds > 900
           for: 5m
           labels: {severity: warning}
           annotations:
-            summary: Fleet lifecycle exceeded its operation deadline
+            summary: Fleet has reported a blocker for over 15 minutes
         - alert: CelldFleetUnavailable
           expr: (celld_fleet_ready_replicas == 0) and (celld_fleet_applied_replicas > 0)
           for: 5m

@@ -1,40 +1,36 @@
 ---
-title: How operations resume
-description: One bounded current operation survives controller restarts and guards each Kubernetes effect.
+title: One disruption at a time
+description: PersistentFleet changes one member at a time and waits until celld reports that the fleet has absorbed it.
 ---
 
-This applies to PersistentFleet. Bucket fleets have no current operation: the
-workload controller rolls one member at a time, and the reservation keeps only
-applied count, image, restart token and capacity-policy state.
+celld tolerates the loss of any one member, so the operator's safety job is to
+disrupt one member at a time and never delete a disk a session still needs.
+Bucket fleets follow the same pacing through their workload controller; their
+disks are caches.
 
-For PersistentFleet, the storage reservation holds one current operation, its fixed deadline and
-exact target identities. It also holds current workload and claim bindings,
-bounded capacity-policy state and one last completion projection. It keeps no
-append-only session or completion archive.
+For PersistentFleet the operator reads celld's node-log state from every member.
+The fleet is **settled** when every member is Ready in `fleet` durability with a
+follower ensemble, and a complete dead-leader sweep made after the last
+disruption plus one lease TTL lists no unrecovered session. Unknown state is
+never settled.
 
-1. **Intent:** record the target and desired request. Pause or a changed request
-   can cancel only while issuance has not been authorized.
-2. **Requesting:** a reservation resource-version comparison authorizes the
-   operation. Reconcile retries the same operation and generation without
-   extending its deadline.
-3. **Proof captured:** persist celld's strict completion and the launcher's
-   independent process/exclusion proofs.
-4. **Apply and observe:** compare the workload UID, resource version and
-   predecessor effect marker before changing replicas. The exact marker
-   reconstructs a successful write whose response was lost.
-5. **Storage cleanup:** delete only the captured claim with UID/version
-   preconditions and wait for the captured CSI volume and attachments to clear.
-6. **Resume or complete:** maintenance starts on fresh disks. Complete after
-   observing the intended workload result, then discard the operation's proof.
+1. **Restart or upgrade:** the operator deletes one outdated Pod at a time,
+   highest ordinal first, and waits to settle before the next. A member already
+   down is replaced at once. Disks are kept.
+2. **Scale-in:** when settled, the highest ordinal is removed. Its disk is
+   deleted only once no fresh sweep lists a session that needs it.
+3. **Lost disk:** a member whose claim is `Lost`, whose PV is gone or whose Pod
+   waits for a deleted claim is replaced at once. celld recovers each session
+   from another copy or records a bounded loss; status names those sessions.
+4. **Node drain:** the PodDisruptionBudget allows one eviction while settled
+   and none while recovering.
 
-After Requesting, pause, a new token, reversal or deadline expiry cannot erase
-an uncertain issued request. Missing completion remains blocked. New requests
-wait for the current one to finish.
+The reservation keeps applied count, image, restart token, last disruption and
+capacity-policy state. Editing status cannot authorize anything. Runtimes before
+`0.5.1-ewhauser.5` report no node-log state; they can still roll restarts on
+readiness plus a one-minute stabilization but never release a disk.
 
-A successor claim with the same name has a different UID and cannot be deleted
-by an old cleanup request. Status, Pod absence and HTTP acceptance cannot replace
-captured proof. Do not edit reservation annotations to clear a blocker.
-
-See [the implementation contract](../../contracts/current-operation/) and
-[disposable disks](../../contracts/disposable-disks/) for exact state and cleanup
-rules. The encoded current authority has a hard 180 KiB limit.
+Earlier releases used a bounded current operation with strict launcher proof.
+An operation left in flight by them is recorded as `Superseded`. See
+[the lifecycle contract](../../contracts/current-operation/) and
+[retained disks](../../contracts/disposable-disks/).

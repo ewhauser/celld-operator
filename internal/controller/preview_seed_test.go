@@ -44,7 +44,7 @@ func seededSetup(t *testing.T) (*PreviewReconciler, *Reconciler, *fleet.CelldPre
 		}
 		return c.Create(ctx, o, opts...)
 	}}).Build()
-	return &PreviewReconciler{Client: c}, &Reconciler{Client: c, NetworkPolicyEnforced: true, Options: Options{OperatorNamespace: "celld-system", LauncherImage: fixtureLauncher}}, p
+	return &PreviewReconciler{Client: c}, &Reconciler{Client: c, NetworkPolicyEnforced: true, Options: Options{OperatorNamespace: "celld-system"}}, p
 }
 
 func getSeedAndFleet(t *testing.T, c client.Client, p *fleet.CelldPreview) (*fleet.CelldStorageReservation, *fleet.CelldFleet) {
@@ -369,7 +369,7 @@ func TestEnvtestPreviewSeedAdmissionAndCompletion(t *testing.T) {
 	if err := c.Update(t.Context(), empty); !apierrors.IsInvalid(err) {
 		t.Fatalf("late seeding admitted: %v", err)
 	}
-	fr := &Reconciler{Client: c, NetworkPolicyEnforced: true, Options: Options{OperatorNamespace: "celld-system", LauncherImage: fixtureLauncher}}
+	fr := &Reconciler{Client: c, NetworkPolicyEnforced: true, Options: Options{OperatorNamespace: "celld-system"}}
 	assertSeedGated(t, fr, f)
 	completeSeed(t, c, s, f)
 	for _, mutate := range []func(*fleet.CelldStorageReservation){

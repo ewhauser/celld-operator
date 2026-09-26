@@ -6,8 +6,8 @@ description: Understand celld's durability model, then configure its Kubernetes 
 :::caution[Local storage requires the celld fork]
 If you use celld with persistent local storage (`PersistentFleet`), you must use
 the [ewhauser/celld fork](https://github.com/ewhauser/celld). The operator relies
-on its strict shutdown and recovery contract before deleting local disks; stock
-upstream celld does not provide that contract. All runtime and recovery nodes
+on its node-log state to pace changes and decide when a local disk may be
+deleted; stock upstream celld does not provide that state. All runtime and recovery nodes
 must use a compatible fork. The fork is also required for `Bucket` fleets. See
 [compatibility](../../reference/compatibility/) for the required release and image digest.
 :::
@@ -18,28 +18,27 @@ to understand how it uses object storage and peer disks, when writes are
 acknowledged, and how recovery works. Those runtime tradeoffs should guide your
 choice of profile.
 
-This page covers the Kubernetes configuration for that choice. PersistentFleet
-also requires the strict launcher; upstream documentation does not replace the
-operator's disk-removal contract.
+This page covers the Kubernetes configuration for that choice. Both profiles
+run celld directly and change one member at a time.
 
 `profile: Bucket` runs `CELLD_DURABILITY=bucket`: every acknowledged write is in
-the bucket first, so the temporary local disk is a cache. Pods run celld
-directly, without the launcher, and Bucket does not need CSI or PVCs. Choose
+the bucket first, so the temporary local disk is a cache. Bucket does not need
+CSI or PVCs. Choose
 `bucketWorkload: Ordered` if you need deterministic zone assignment and
 highest-ordinal scale-in.
 
 Choose `profile: PersistentFleet` when the runtime should use persistent local
-peer disks. Configure `storage.storageClassName` with a supported dynamic CSI
+peer disks (`CELLD_DURABILITY=fleet`). Configure `storage.storageClassName` with a supported dynamic CSI
 class using `Delete`, `WaitForFirstConsumer` and RWOP claims. See
 [storage](../storage/) for the full contract.
 
 | Setting | Bucket | PersistentFleet |
 | --- | --- | --- |
-| Local disk | Disk-backed `emptyDir`, bounded by `sizeGiB`. | One new RWOP claim per current ordinal. |
+| Local disk | Disk-backed `emptyDir`, bounded by `sizeGiB`. | One RWOP claim per ordinal, retained across restart and upgrade. |
 | Layout | Immutable Deployment or Ordered StatefulSet. | StatefulSet. |
-| Scale-in | One member per step; highest ordinal for Ordered. | Highest ordinal after strict proof. |
-| Restart/upgrade | Rolling, one member at a time; no downtime permission. | Whole captured working set with downtime permission, followed by old-disk cleanup and fresh claims. |
-| PodDisruptionBudget | `maxUnavailable: 1`; node drains evict one member at a time. | `maxUnavailable: 0`. |
+| Scale-in | One member per step; highest ordinal for Ordered. | Highest ordinal when settled; its disk is deleted once no session needs it. |
+| Restart/upgrade | Rolling, one member at a time. | Rolling, one member at a time on the same disk, each after the fleet settles. |
+| PodDisruptionBudget | `maxUnavailable: 1`; node drains evict one member at a time. | `maxUnavailable: 1` while settled, `0` while recovering. |
 
 Neither profile provisions your bucket, runtime AWS identity, worker nodes or
 ingress controller. Optional [routing](../networking/) can configure a public

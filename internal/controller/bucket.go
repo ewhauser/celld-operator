@@ -81,7 +81,7 @@ func (r *Reconciler) reconcileBucket(ctx context.Context, f *fleet.CelldFleet, h
 		if err := r.Create(ctx, desired); err != nil {
 			return ctrl.Result{}, err
 		}
-		s.WorkloadUID, s.Applied, s.RuntimeImage, s.RestartToken = desired.GetUID(), replicas(desired), runtimeImage(f), bucketRestartToken(f)
+		s.WorkloadUID, s.Applied, s.RuntimeImage, s.RestartToken = desired.GetUID(), replicas(desired), runtimeImage(f), restartToken(f)
 		if err := save(); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -112,7 +112,7 @@ func (r *Reconciler) reconcileBucket(ctx context.Context, f *fleet.CelldFleet, h
 		}
 		return r.report(ctx, f, h, "InfrastructureBlocked", err.Error(), false)
 	}
-	s.Applied, s.RuntimeImage, s.RestartToken = target, runtimeImage(f), bucketRestartToken(f)
+	s.Applied, s.RuntimeImage, s.RestartToken = target, runtimeImage(f), restartToken(f)
 	if err := save(); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -133,9 +133,10 @@ func (r *Reconciler) reconcileBucket(ctx context.Context, f *fleet.CelldFleet, h
 }
 
 // bucketContraction decides whether a one-member contraction may start now.
-// Data safety needs no check. A step waits for the previous rollout, and an
-// automatic step also requires every possible victim's load to fit on the
-// survivors, because Kubernetes, not the operator, chooses a Deployment victim.
+// A step waits for the previous rollout, and an automatic step also requires
+// the victim's load to fit on the survivors: the highest ordinal of a
+// StatefulSet, or every Pod of a Deployment, whose victim Kubernetes chooses.
+// PersistentFleet callers have already required a settled fleet.
 func (r *Reconciler) bucketContraction(ctx context.Context, f *fleet.CelldFleet, s *fleetState, w client.Object, automatic bool) (string, error) {
 	if !rolledOut(w) {
 		return "Provisioning", errors.New("waiting for the previous change to roll out before removing a member")
@@ -165,7 +166,7 @@ func (r *Reconciler) bucketContraction(ctx context.Context, f *fleet.CelldFleet,
 		return "CapacityUncertain", errors.New("membership changed before contraction")
 	}
 	victims := ids
-	if orderedBucket(f) {
+	if _, ordered := w.(*appsv1.StatefulSet); ordered {
 		i := slices.IndexFunc(pods, func(p corev1.Pod) bool { return p.Name == fmt.Sprintf("%s-%d", f.Name, s.Applied-1) })
 		if i < 0 {
 			return "CapacityUncertain", errors.New("highest ordinal is missing")
@@ -192,7 +193,14 @@ func rolledOut(w client.Object) bool {
 		return st.ObservedGeneration >= w.Generation && st.Replicas == n && st.UpdatedReplicas == n && st.ReadyReplicas == n
 	case *appsv1.StatefulSet:
 		st := w.Status
-		return st.ObservedGeneration >= w.Generation && st.Replicas == n && st.UpdatedReplicas == n && st.ReadyReplicas == n && st.CurrentRevision == st.UpdateRevision
+		done := st.ObservedGeneration >= w.Generation && st.Replicas == n && st.UpdatedReplicas == n && st.ReadyReplicas == n
+		// The StatefulSet controller advances currentRevision only for
+		// RollingUpdate. Under OnDelete it keeps the creation revision forever,
+		// so updated replicas are the only completion signal.
+		if w.Spec.UpdateStrategy.Type == appsv1.OnDeleteStatefulSetStrategyType {
+			return done
+		}
+		return done && st.CurrentRevision == st.UpdateRevision
 	}
 	return false
 }
@@ -269,4 +277,38 @@ func (r *Reconciler) deleteBucket(ctx context.Context, f *fleet.CelldFleet) (ctr
 		}
 	}
 	return r.report(ctx, f, nil, "LifecycleProgress", "Deleting workload; members drain on SIGTERM", false)
+}
+
+func (r *Reconciler) currentPods(ctx context.Context, f *fleet.CelldFleet, s *fleetState) ([]corev1.Pod, error) {
+	list := &corev1.PodList{}
+	if err := r.List(ctx, list, client.InNamespace(f.Namespace), client.MatchingLabels(labels(f)), client.Limit(101)); err != nil {
+		return nil, err
+	}
+	if list.Continue != "" || len(list.Items) > 100 {
+		return nil, errors.New("pod working set exceeds fleet limit")
+	}
+	for _, p := range list.Items {
+		owner := metav1.GetControllerOf(&p)
+		if owner == nil || owner.APIVersion != "apps/v1" {
+			return nil, errors.New("pod owner missing")
+		}
+		switch {
+		case owner.Kind == "StatefulSet":
+			if owner.UID != s.WorkloadUID || owner.Name != f.Name {
+				return nil, errors.New("pod workload identity changed")
+			}
+		case owner.Kind == "ReplicaSet" && f.Spec.Profile == "Bucket" && !orderedBucket(f):
+			rs := &appsv1.ReplicaSet{}
+			if err := r.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: owner.Name}, rs); err != nil {
+				return nil, err
+			}
+			parent := metav1.GetControllerOf(rs)
+			if rs.UID != owner.UID || parent == nil || parent.UID != s.WorkloadUID || parent.Name != f.Name || parent.Kind != "Deployment" || !rs.DeletionTimestamp.IsZero() {
+				return nil, errors.New("ReplicaSet ownership changed")
+			}
+		default:
+			return nil, errors.New("unexpected pod controller")
+		}
+	}
+	return list.Items, nil
 }

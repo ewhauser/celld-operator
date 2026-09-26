@@ -1,17 +1,9 @@
 ---
-title: Blocked operations
-description: Find the missing proof or infrastructure observation without bypassing authority.
+title: Waiting and blocked changes
+description: Find what a rollout, scale-in, replacement or deletion is waiting for without bypassing it.
 ---
 
-Bucket fleets have no current operation. Their blocking reasons are
-`CapacityUncertain` (survivor metrics missing or insufficient for an automatic
-contraction), `SchedulingBlocked`, `InfrastructureBlocked` or `LifecycleBlocked`
-(an object lacks this fleet's UID label or carries owner references; the
-operator refuses to adopt it), `MaintenancePaused` and `UnsupportedTransition`
-(runtime is not a digest-pinned fork pin). `Provisioning` while rolling out is
-normal; check the workload's rollout status and Pod events.
-
-For PersistentFleet, inspect the requested operation and its target:
+Read the reason and message first:
 
 ```bash
 kubectl --context YOUR_CONTEXT -n fleets get celldfleet my-fleet   -o json | jq '.status | {conditions, lifecycle, desiredReplicas, appliedReplicas, readyReplicas}'
@@ -19,28 +11,35 @@ kubectl --context YOUR_CONTEXT -n fleets get pods,pvc -o wide
 kubectl --context YOUR_CONTEXT -n fleets get events --sort-by=.lastTimestamp
 ```
 
-| Boundary | Check |
+Blocking reasons for both profiles are `CapacityUncertain` (survivor metrics
+missing or insufficient for an automatic contraction), `SchedulingBlocked`,
+`InfrastructureBlocked` or `LifecycleBlocked` (an object lacks this fleet's UID
+label or carries owner references; the operator refuses to adopt it),
+`MaintenancePaused` and `UnsupportedTransition` (runtime is not a digest-pinned
+fork pin). `Provisioning` while rolling out is normal.
+
+## PersistentFleet waits
+
+`LifecycleProgress` means the operator is proceeding one member at a time. The
+message names the next step and why it waits:
+
+| Message | Meaning and next step |
 | --- | --- |
-| Intent | Current desired request, pause, placement, runtime capability and exact target identity. |
-| Requesting | Launcher reachability and exact operation/generation. HTTP acceptance is not completion. |
-| Proof capture | celld data-safe result plus exact child exit, lock release and restart denial. |
-| Workload effect | Original workload UID, replica count and effect marker; unexpected manual edits block progress. |
-| Disk cleanup | Exact PVC/PV/driver/handle, PVC protection, CSI deletion finalizer and attachments. |
-| Joining | Fresh claims, scheduling gates, Pod events and readiness. |
+| `Rolling update waits before POD: ...`, `Contraction waits for the fleet to settle: ...`, `Fleet is recovering: ...` | The fleet has not [settled](../../concepts/current-operation/) since the last disruption. The suffix names the first unmet condition: a member not ready, node-log state unavailable, no follower ensemble, no complete sweep yet, or an unrecovered session. Most clear within seconds of the lease TTL. |
+| `member POD node-log state unavailable: runtime reports no node-log state` | The runtime predates `0.5.1-ewhauser.5`. Restarts and upgrades still roll after a one-minute stabilization; scale-in and disk release wait until every member runs `.5` or later. |
+| `Retaining disk data-FLEET-N of removed member FLEET-N: still needed by ...` | celld's latest sweep lists sessions whose current epoch still needs that disk. The operator deletes it once none do. Growth waits for it too. Keep the removed member's peers healthy; do not delete the PVC by hand. |
+| `... fleet node-log state unknown` | No fresh complete sweep exists, so the answer is unknown. Check member readiness and `/state` reachability on port 8081. |
+| `Replacement of POD waits for the fleet to settle: ...` | A `celld.eric.dev/replace-member` request runs under the one-disruption rule. |
 
-The current-operation deadline is fixed at 30 minutes from intent. It is not
-`spec.lifecycle.shutdownSeconds`, and a later reconcile cannot extend it.
+A session stuck as unrecovered keeps the fleet unsettled. Inspect its named
+state in the runtime logs of every member; the operator does not override
+celld's recovery decision.
 
-A timed-out Requesting operation may have reached the runtime. The controller
-observes it without granting a fresh deadline; it cannot safely forget it. A
-launcher crash before persisted proof can require manual recovery investigation.
-Missing Pods and exit codes cannot repair lost proof.
+`ReplaceMemberInvalid` means the annotation names no current member; use an
+ordinal such as `2` or a Pod name such as `my-fleet-2`. `StorageIdentityConflict`
+means a PVC at a member's name lacks this fleet's UID label; it is never adopted.
+`DeletionBlocked` means the StatefulSet to delete is not owned by this fleet.
 
-Paused or changed requests cancel only before issuance. After issuance, finish
-or diagnose the recorded operation before expecting another token, image or
-replica target to apply.
-
-Preserve current authority and affected storage while investigating. Do not edit
-reservation annotations, manufacture replacement claims, remove finalizers or
-force detach. See [the safety model](../../concepts/safety-model/) and
-[the exact storage contract](../../contracts/disposable-disks/).
+Do not edit reservation annotations, manufacture replacement claims, remove
+finalizers or force detach. For a disk that is gone or unusable, see
+[lost disks](../recovery/#lost-disks).

@@ -1,10 +1,10 @@
 ---
 title: Security boundaries
-description: Separate runtime data authority, launcher process authority and Kubernetes effects.
+description: Separate runtime data authority from Kubernetes effects.
 ---
 
-The operator uses Kubernetes RBAC, private runtime control-plane access and an
-authenticated launcher channel. It has no S3 SDK or EC2 termination authority.
+The operator uses Kubernetes RBAC and private runtime control-plane access. It
+has no S3 SDK or EC2 termination authority.
 celld alone holds the fleet's runtime bucket identity.
 
 ## Kubernetes access
@@ -14,7 +14,7 @@ current PV/StorageClass/node inspection and attachment observations. Each fleet
 namespace has a separate Role for workloads, Pods, Services, policies, credentials
 and guarded PVC creation/deletion. Service updates only fill unset fields a newer
 release declares on operator-created Services. PodDisruptionBudget updates
-converge Bucket fleet budgets only. The controller's leader-election
+converge fleet budgets. The controller's leader-election
 lease is scoped to its own namespace.
 
 Use the shipped chart and `config/rbac/fleet-namespace.yaml` as the exact permission
@@ -28,30 +28,29 @@ reclaim policy or grant itself cloud credentials.
 | --- | --- |
 | 8080 application | Same-namespace Pods labeled `celld.eric.dev/client-of: <fleet>`, plus explicitly selected routing data-plane Pods when enabled. |
 | 8081 celld internal | Same-fleet peers and trusted operator-namespace Pods. |
-| 8083 launcher (PersistentFleet) | Trusted operator-namespace Pods; HMAC authenticates every request and response. No Service exposes it. |
 | 8082 health / 8084 metrics | Operator probes and configured monitoring; restrict with your cluster policy. |
 
 Generated NetworkPolicy requires an enforcing CNI. The operator's enforcement
 flag is an administrator attestation, not a network implementation. Never expose
 the unauthenticated celld internal listener through public ingress.
 
-## Proof and trust
+## Runtime state and trust
 
-Bucket fleets have no launcher, key or proof: their writes are in S3 before
-acknowledgement. For PersistentFleet, an immutable per-fleet Secret supplies the
-launcher HMAC key. Exact Pod,
-container, host/boot, invocation, generation and disk identities bind the response
-to the captured target. The runtime result is positive data-safety authority;
-the launcher's lock and restart denial independently establish process exclusion.
+No fleet uses a launcher, key Secret or proof channel. celld owns durability:
+Bucket writes are in S3 before acknowledgement, and PersistentFleet writes are on
+every follower's disk. The operator reads each member's unauthenticated
+`/state.node_log` over port 8081 to decide when the fleet has settled and when a
+removed member's disk may be deleted. Anyone who can forge that response inside
+the fleet's network boundary could delay changes or release a disk early, which
+is why the internal listener must stay private.
 
-The contract assumes administrators do not rewrite current-operation authority
-or bypass storage protection, and native runtime processes retain their inherited
-lock while they can access the disk. Local locks cannot fence a different kernel;
-cross-host/boot reuse is refused.
+The contract assumes administrators do not bypass storage protection. The
+`celld.eric.dev/replace-member` annotation deletes a member's existing disk, so
+treat CelldFleet edit access as authority over fleet data.
 
 All recovery participants must understand the fork's proof. Pin and qualify the
-runtime and launcher artifacts. See [current operations](../../contracts/current-operation/),
-[disposable disks](../../contracts/disposable-disks/) and
+runtime artifact. See [one disruption at a time](../../contracts/current-operation/),
+[retained disks](../../contracts/disposable-disks/) and
 [qualification](../../qualification/) for boundaries and tests.
 
 ## Admission mutations
@@ -59,20 +58,10 @@ runtime and launcher artifacts. See [current operations](../../contracts/current
 Mutating admission such as service-mesh sidecars, workload-identity credentials,
 telemetry injection, registry mirrors and policy-engine hardening may add
 containers, init containers, environment, volumes and mounts. No injector is
-named or allow-listed. For PersistentFleet, before trusting a Pod's proof, and
-again while the fleet is steady, the operator refuses only changes that could make that proof wrong:
-
-- a container other than the operator's own mounting the data disk, launcher
-  binary or launcher key, or any extra mount of those volumes
-- a different image digest, command, args or working directory for the runtime
-  or launcher (a registry rewrite that keeps the digest is accepted)
-- an override or removal of an operator-set environment variable
-- a mount that shadows or nests inside an operator mount path
-- `hostPID`, `hostIPC`, `hostNetwork`, `shareProcessNamespace` or an ephemeral
-  debug container
-
-Admission that can add privileged or hostPath containers is trusted with the
-node, and the operator does not attempt to detect it.
+named or allow-listed, and the operator no longer validates admitted Pod shape.
+Mutations that change the runtime image, command, operator-set environment or
+data-disk mounts can break celld; keep them out of fleet namespaces. Admission
+that can add privileged or hostPath containers is trusted with the node.
 
 ## Optional routing
 

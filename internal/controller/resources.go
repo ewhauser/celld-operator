@@ -3,7 +3,6 @@ package controller
 import (
 	"fmt"
 	"net/url"
-	"os"
 	"strconv"
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
@@ -25,13 +24,9 @@ const (
 
 type Options struct {
 	OperatorNamespace string
-	LauncherImage     string
 
 	// Explicit test-only configuration; never inferred from kubeconfig or AWS environment.
 	LocalTest bool
-	// FaultPoint names a lifecycle boundary at which the disposable harness manager
-	// exits (see faultPoint). Ignored unless LocalTest is set.
-	FaultPoint string
 	// LocalRWOP requests ReadWriteOncePod claims in local test mode, served by the
 	// per-node hostpath CSI driver, so the shipped access mode is exercised on kind.
 	// Ignored unless LocalTest is set. It is not EBS or attachment qualification.
@@ -40,18 +35,6 @@ type Options struct {
 
 // localCSIDriver is the kubernetes-csi hostpath driver the harness deploys per node.
 const localCSIDriver = "hostpath.csi.k8s.io"
-
-// faultPoint terminates the manager at a named lifecycle boundary so the kind
-// harness can prove crash-consistency of the current operation and workload CAS. It is a
-// test-only injector honored solely with --local-test; controller-runtime
-// recovers panics, so a real process exit is required.
-func (r *Reconciler) faultPoint(name string) {
-	if !r.Options.LocalTest || r.Options.FaultPoint != name {
-		return
-	}
-	fmt.Fprintf(os.Stderr, "celld-operator: injected crash at lifecycle fault point %q\n", name)
-	os.Exit(3)
-}
 
 func labels(f *fleet.CelldFleet) map[string]string {
 	return map[string]string{FleetLabel: string(f.UID)}
@@ -226,31 +209,6 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 		pod.Containers[0].Resources.Requests[corev1.ResourceEphemeralStorage] = request
 		pod.Containers[0].Resources.Limits[corev1.ResourceEphemeralStorage] = size
 	}
-	if usesLauncher(f, opts) {
-		pod.SchedulingGates = []corev1.PodSchedulingGate{{Name: launcherGate}}
-		pod.InitContainers = []corev1.Container{{Name: "install-launcher", Image: opts.LauncherImage, ImagePullPolicy: corev1.PullIfNotPresent, Command: []string{"/celld-launcher", "install", "/launcher/celld-launcher"}, VolumeMounts: []corev1.VolumeMount{{Name: "launcher", MountPath: "/launcher"}}, SecurityContext: pod.Containers[0].SecurityContext.DeepCopy()}}
-		pod.Volumes = append(pod.Volumes, corev1.Volume{Name: "launcher", EmptyDir: &corev1.EmptyDirVolumeSource{}}, corev1.Volume{Name: "launcher-key", Secret: &corev1.SecretVolumeSource{SecretName: launcherSecretName(f), DefaultMode: new(int32(0o440))}})
-		c := &pod.Containers[0]
-		c.Command = []string{"/launcher/celld-launcher"}
-		c.LivenessProbe = &corev1.Probe{
-			HTTPGet:          &corev1.HTTPGetAction{Path: "/livez", Port: intstr.FromInt32(8083)},
-			PeriodSeconds:    5,
-			TimeoutSeconds:   1,
-			FailureThreshold: 3,
-			SuccessThreshold: 1,
-		}
-		c.Env = append(c.Env, corev1.EnvVar{Name: "POD_UID", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.uid"}}}, corev1.EnvVar{Name: "NODE_NAME", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "spec.nodeName"}}})
-		if lifecycle.TerminationGraceSeconds != fleet.DefaultTerminationGrace {
-			// Hand the launcher the pod's grace period; it splits that into the
-			// SIGTERM wait and the inherited-lock proof, leaving a five second
-			// margin, so an unrequested termination finishes before kubelet's
-			// SIGKILL. A fleet on the default grace is told nothing and the
-			// launcher assumes the same 30 seconds this template sets.
-			c.Env = append(c.Env, corev1.EnvVar{Name: "LAUNCHER_TERMINATION_GRACE_SECONDS", Value: strconv.Itoa(int(lifecycle.TerminationGraceSeconds))})
-		}
-		c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: "launcher", MountPath: "/launcher", ReadOnly: true}, corev1.VolumeMount{Name: "launcher-key", MountPath: "/launcher-key", ReadOnly: true})
-		c.Ports = append(c.Ports, corev1.ContainerPort{Name: "launcher", ContainerPort: 8083})
-	}
 	if orderedBucket(f) {
 		pod.SchedulingGates = []corev1.PodSchedulingGate{{Name: bucketZoneGate}}
 		if s.Placement.Mode != "Relaxed" {
@@ -258,7 +216,7 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 		}
 	}
 	template := corev1.PodTemplateSpec{Labels: labels(f), Spec: pod}
-	if token := bucketRestartToken(f); token != "" {
+	if token := restartToken(f); token != "" {
 		// A changed token rolls the template; the workload controller replaces
 		// one member at a time.
 		template.Annotations = map[string]string{restartTokenAnnotation: token}
@@ -268,15 +226,10 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 
 const restartTokenAnnotation = "celld.eric.dev/restart-token"
 
-// usesLauncher reports whether the fleet's pods run under the strict launcher.
-// Only PersistentFleet does: Bucket fleets acknowledge no write before the
-// object store holds it, so their disks are caches (ADR 0023).
-func usesLauncher(f *fleet.CelldFleet, opts Options) bool {
-	return f.Spec.Profile == "PersistentFleet" && opts.LauncherImage != ""
-}
-
-func bucketRestartToken(f *fleet.CelldFleet) string {
-	if f.Spec.Profile != "Bucket" || f.Spec.Maintenance == nil {
+// restartToken is the requested restart. It rolls the Pod template, and the
+// operator replaces one member at a time.
+func restartToken(f *fleet.CelldFleet) string {
+	if f.Spec.Maintenance == nil {
 		return ""
 	}
 	return f.Spec.Maintenance.RestartToken
@@ -392,9 +345,6 @@ func prerequisites(f *fleet.CelldFleet, opts Options) []client.Object {
 			},
 		},
 	}
-	if usesLauncher(f, opts) {
-		policy.Spec.Ingress = append(policy.Spec.Ingress, networkingv1.NetworkPolicyIngressRule{From: []networkingv1.NetworkPolicyPeer{operator}, Ports: []networkingv1.NetworkPolicyPort{port(8083)}})
-	}
 	if opts.LocalTest {
 		policy.Spec.Egress = append(policy.Spec.Egress, networkingv1.NetworkPolicyEgressRule{
 			To: []networkingv1.NetworkPolicyPeer{
@@ -412,13 +362,10 @@ func prerequisites(f *fleet.CelldFleet, opts Options) []client.Object {
 	if t := f.Spec.Telemetry; t != nil {
 		policy.Spec.Egress = append(policy.Spec.Egress, destinationRule(t.CollectorURL, t.Egress))
 	}
-	// A Bucket fleet tolerates losing any one member, so voluntary evictions
-	// such as node drains proceed one at a time. PersistentFleet removal still
-	// requires strict proof and blocks eviction.
-	unavailable := intstr.FromInt32(0)
-	if f.Spec.Profile == "Bucket" {
-		unavailable = intstr.FromInt32(1)
-	}
+	// A fleet tolerates losing any one member, so voluntary evictions such as
+	// node drains proceed one at a time. A recovering PersistentFleet lowers
+	// this to zero until it settles (persistentBudget).
+	unavailable := intstr.FromInt32(1)
 	pdb := &policyv1.PodDisruptionBudget{
 		ObjectMeta: metadata(f, f.Name),
 		Spec:       policyv1.PodDisruptionBudgetSpec{MaxUnavailable: &unavailable, Selector: selector(f)},

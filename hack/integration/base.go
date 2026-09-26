@@ -75,7 +75,7 @@ func (h *harness) exerciseIsolation() {
 		assert(len(nodeNames(selected)) == 2, "%s replicas share a node", fleetName)
 		addresses[fleetName] = str(selected[0], "status", "podIP")
 	}
-	fmt.Println("PASS: strict replicas use distinct nodes within the configured zone")
+	fmt.Println("PASS: replicas use distinct nodes within the configured zone")
 	unavailable := h.bucketFleet("unavailable", "bucket-unavailable")
 	unavailable.Spec.BucketWorkload = "Deployment"
 	unavailable.Spec.Placement.AZCount = 2
@@ -110,9 +110,6 @@ func (h *harness) exerciseIsolation() {
 	fmt.Println("PASS: application writes readable only in their own fleet storage scope")
 	fmt.Println("PASS: same-fleet/operator peer access, cross-fleet/untrusted/client peer denial, ClusterIP health routing")
 	h.k("-n", "fleets", "delete", "pod", "same-fleet", "--wait=true")
-	// This probe uses the operator's network label and therefore also matches
-	// its Deployment selector. It must not shadow later manager log selection.
-	h.k("-n", operatorNS, "delete", "pod", "operator", "--wait=true")
 	h.apply(h.newFleet("conflict", "bucket-alpha", "Bucket", "other"))
 	h.wait("cross-namespace storage conflict blocked", func() bool {
 		return hasReason(h.getIn("other", "celldfleet", "conflict"), "StorageScopeConflict")
@@ -139,20 +136,51 @@ func (h *harness) exerciseIsolation() {
 		assert(strings.Contains(strings.ToLower(err.Error()), "invalid"), "%v", err)
 	}
 	fmt.Println("PASS: schema rejects invalid specs and lifecycle mutations")
-	// OnDelete keeps runtime Pods unchanged while testing drift detection.
-	originalTemplate := sub(h.get("statefulset", "beta"), "spec", "template")
+	h.assertDirectRuntime("alpha")
+	h.assertDirectRuntime("beta")
+	nodeLog := sub(decode(h.curl(request{pod: "operator", address: addresses["beta"], ns: operatorNS})), "node_log")
+	assert(str(nodeLog, "posture") == "fleet", "PersistentFleet runtime does not report fleet node_log state: %v", nodeLog)
+	// This probe uses the operator's network label and therefore also matches
+	// its Deployment selector. It must not shadow later manager Pod selection.
+	h.k("-n", operatorNS, "delete", "pod", "operator", "--wait=true")
+	fmt.Println("PASS: PersistentFleet members report /state.node_log in fleet posture")
+	h.waitSettled("beta", 2, 5*time.Minute)
+	assert(h.budget("beta") == 1 && h.budget("alpha") == 1, "settled fleets do not allow one disruption")
+	// Template drift in the operator's own fields is converged, not blocked,
+	// and OnDelete keeps running members as they are while it happens.
 	betaPodUIDs := h.ordinalUIDs("beta", 2)
 	h.k("-n", "fleets", "patch", "statefulset", "beta", "--type=json", "-p", encode([]object{
 		{"op": "add", "path": "/spec/template/spec/containers/0/livenessProbe", "value": object{"exec": object{"command": []string{"false"}}}},
 		{"op": "add", "path": "/spec/template/spec/containers/0/env/-", "value": object{"name": "CELLD_BUCKET", "value": "s3://other-fleet"}},
 	}))
-	h.wait("additional probe and bucket override are reported as unsafe drift", func() bool {
-		c := condition(h.get("celldfleet", "beta"), "Ready")
-		return c != nil && str(c, "reason") == "LifecycleBlocked"
+	h.wait("operator converges drifted StatefulSet template", func() bool {
+		container := list(h.get("statefulset", "beta"), "spec", "template", "spec", "containers")[0]
+		buckets := 0
+		for _, env := range list(container, "env") {
+			if str(env, "name") == "CELLD_BUCKET" {
+				buckets++
+			}
+		}
+		return field(container, "livenessProbe") == nil && buckets == 1
 	})
-	assert(same(h.ordinalUIDs("beta", 2), betaPodUIDs), "drift detection replaced runtime pods")
-	h.k("-n", "fleets", "patch", "statefulset", "beta", "--type=json", "-p", encode([]object{{"op": "replace", "path": "/spec/template", "value": originalTemplate}}))
-	h.wait("restored original template matches normalized API defaults", func() bool { return h.ready("beta") })
+	h.waitSettled("beta", 2, 5*time.Minute)
+	assert(same(h.ordinalUIDs("beta", 2), betaPodUIDs), "template drift correction replaced runtime pods")
+	fmt.Println("PASS: drift corrected without replacing members")
+}
+
+// assertDirectRuntime requires fleet Pods to run celld itself: no launcher
+// binary or port, and no scheduling gate left on a running Pod.
+func (h *harness) assertDirectRuntime(fleetName string) {
+	for _, pod := range h.fleetPods(fleetName) {
+		assert(len(list(pod, "spec", "schedulingGates")) == 0, "%s keeps a scheduling gate", nameOf(pod))
+		for _, container := range list(pod, "spec", "containers") {
+			assert(!strings.Contains(encode(container), "celld-launcher"), "%s runs the launcher", nameOf(pod))
+			for _, port := range list(container, "ports") {
+				assert(num(port, "containerPort") != 8083, "%s exposes the launcher port", nameOf(pod))
+			}
+		}
+	}
+	fmt.Println("PASS:", fleetName, "runs celld directly")
 }
 
 func (h *harness) ordinalUIDs(fleetName string, count int) []string {
@@ -172,13 +200,4 @@ func (h *harness) reservation(fleetName string) object {
 	}
 	fail("no reservation for fleet %s", fleetName)
 	return nil
-}
-
-// currentState decodes the bounded current-operation annotation.
-func (h *harness) currentState(fleetName string) object {
-	text := annotation(h.reservation(fleetName), "celld.eric.dev/current-operation")
-	if text == "" {
-		return nil
-	}
-	return decode(text)
 }

@@ -20,8 +20,8 @@ hero:
 :::caution[Local storage requires the celld fork]
 If you use celld with persistent local storage (`PersistentFleet`), you must use
 the [ewhauser/celld fork](https://github.com/ewhauser/celld). The operator relies
-on its strict shutdown and recovery contract before deleting local disks; stock
-upstream celld does not provide that contract. All runtime and recovery nodes
+on its node-log state to pace changes and decide when a local disk may be
+deleted; stock upstream celld does not provide that state. All runtime and recovery nodes
 must use a compatible fork. The fork is also required for `Bucket` fleets. See
 [compatibility](./reference/compatibility/) for the required release and image digest.
 :::
@@ -46,6 +46,6 @@ must use a compatible fork. The fork is also required for `Bucket` fleets. See
 
 ## Choose storage for your workload
 
-**Bucket** uses S3 for durable writes and temporary local disk. **PersistentFleet** adds disposable CSI disks and peer-disk durability. The choice affects setup, maintenance, and recovery: [compare the profiles](./configure/profiles/) before creating a fleet.
+**Bucket** uses S3 for durable writes and temporary local disk. **PersistentFleet** adds retained CSI disks and peer-disk durability. The choice affects setup, maintenance, and recovery: [compare the profiles](./configure/profiles/) before creating a fleet.
 
 For configuration fields, see the [Fleet API](./api/celldfleet/) and [Helm values](./api/helm-values/). To work on the operator itself, start with [Contribute](./contribute/).

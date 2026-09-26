@@ -155,16 +155,14 @@ func TestApplicationMembershipRace(t *testing.T) {
 		})
 	}
 }
-func TestApplicationObservationCannotBlockIssuedRemoval(t *testing.T) {
+func TestApplicationObservationCannotBlockContraction(t *testing.T) {
 	x := newOperationFixture(t, "PersistentFleet")
-	x.desired(2)
-	x.until("Requesting")
-	id := x.state().Operation.ID
 	x.r.ApplicationRuntime = applicationReaderFunc(func(context.Context, controlplane.Target) (controlplane.Application, error) {
 		return controlplane.Application{}, errors.New("offline")
 	})
-	x.finish()
-	if s := x.state(); s.Applied != 2 || s.Completion.ID != id {
+	x.desired(2)
+	x.converge()
+	if s := x.state(); s.Applied != 2 {
 		t.Fatal("application observation stalled removal")
 	}
 	f := reconcile(t, x.r, x.f)

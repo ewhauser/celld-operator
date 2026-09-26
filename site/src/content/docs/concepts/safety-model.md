@@ -1,33 +1,31 @@
 ---
 title: How removal is checked
-description: Data safety, process exclusion and disk cleanup are separate proofs.
+description: celld tolerates one lost member; the operator disrupts one at a time and keeps disks a session still needs.
 ---
 
-A Bucket fleet acknowledges no write before S3 holds it, so removing any one
-member is data-safe without proof: members drain on SIGTERM, and the operator
-only paces changes one member at a time.
+celld tolerates the loss of any one member. A Bucket fleet acknowledges no write
+before S3 holds it. A PersistentFleet acknowledges a write only after every
+follower in the leader's ensemble has fsynced it, and recovers a dead leader
+from one complete follower copy. The operator's job is to keep voluntary
+disruption to one member at a time.
 
-PersistentFleet removal passes three independent boundaries:
-
-| Boundary | Required proof |
+| Check | PersistentFleet rule |
 | --- | --- |
-| Runtime | celld reports schema 1, exact operation and generation, `data_safe`, control-only mode and no blocker. |
-| Process | The launcher captured that result before termination, observed its exact child exit, reacquired the inherited lock and durably denied restart. |
-| Infrastructure | The controller persisted the bound result and conditionally changes only the captured workload, claim and volume identities. |
+| Settled | Every member Ready in `fleet` durability with a follower ensemble, and a complete sweep after the last disruption plus one lease TTL lists no unrecovered session. |
+| Next disruption | A running member is restarted, upgraded or removed only when settled. A member already down is replaced at once. |
+| Disk release | A removed member's disk is deleted only when a fresh complete sweep lists no session that needs it. |
+| Lost disk | A disk that is gone is replaced at once; celld recovers each session from another copy or records a bounded loss. |
 
-An HTTP 202 response means the runtime accepted a request. Exit code zero means
-a process ended. Neither proves data safety. A deadline, expired lease or missing
-Pod also cannot replace a positive strict result.
+Readiness, exit codes, expired leases and missing Pods are not settlement.
+Unknown node-log state, including a runtime before `0.5.1-ewhauser.5`, delays
+voluntary changes and never releases a disk. It never stops the running fleet.
 
-A launcher crash before Kubernetes captures completion may leave removal blocked
-indefinitely. Its restart-deny marker is negative authority: it prevents a launch
-but cannot recreate a positive runtime result. After proof is captured, the
-controller can recover workload effects without contacting that launcher again.
+The operator never deletes an existing disk with obligations on its own. An
+administrator can declare one gone with the `celld.eric.dev/replace-member`
+annotation; the operator then replaces that member under the same
+one-disruption rule. No EC2 fence, force-detach or storage-finalizer removal
+exists.
 
-The launcher blocks cross-host/boot reuse because local file locks cannot prove
-exclusion across kernels. Growth uses fresh disks. No timeout, EC2 fence,
-force-detach or storage-finalizer removal bypass exists.
-
-Read [current operations](../current-operation/), [disk cleanup](../../contracts/disposable-disks/)
-and [operational limits](../../reference/limitations/). A ready fleet reflects
-current availability; inspect the current operation before removing storage.
+Read [one disruption at a time](../current-operation/),
+[retained disks](../../contracts/disposable-disks/) and
+[operational limits](../../reference/limitations/).

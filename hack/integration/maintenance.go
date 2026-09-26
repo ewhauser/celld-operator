@@ -5,77 +5,120 @@ import (
 	"time"
 )
 
+// exerciseMaintenance qualifies rolling restart and runtime upgrade on
+// retained disks (ADR 0023): one member at a time, highest ordinal first, no
+// coordinated downtime, every PVC/PV/CSI identity unchanged and every
+// acknowledged write readable. It ends with deletion of both profiles.
 func (h *harness) exerciseMaintenance() {
-	for _, f := range []struct{ name, probe string }{{"alpha", "client"}, {"beta", "client-beta"}} {
-		h.writeLedger(f.probe, f.name)
-		before := podUIDs(h.fleetPods(f.name))
-		oldClaims := h.claims(f.name)
-		token := "strict-restart-" + f.name
-		h.merge(f.name, encode(object{"spec": object{"maintenance": object{"restartToken": token, "allowCoordinatedDowntime": true}}}))
-		h.waitFor("coordinated restart accepted: "+f.name, 3*time.Minute, func() bool {
-			s := h.currentState(f.name)
-			return str(s, "RestartToken") == token || str(s, "Operation", "Kind") == "Restart"
-		})
-		h.restartOperator()
-		h.waitFor("restart completes across manager replacement: "+f.name, 10*time.Minute, func() bool { return h.settled(f.name, 2) && str(h.currentState(f.name), "RestartToken") == token })
-		after := podUIDs(h.fleetPods(f.name))
-		assert(disjoint(before, after), "restart retained old Pod UID")
-		h.goneVolumes(oldClaims)
-		for name, current := range h.claims(f.name) {
-			old := oldClaims[name]
-			assert(current.UID != old.UID && current.VolumeUID != old.VolumeUID && current.Handle != old.Handle, "restart reused retired disk")
-		}
-		h.readLedger(f.probe, f.name)
-		h.restartOperator()
-		h.hold(12*time.Second, "completed token does not replay: "+f.name, func() bool { return same(podUIDs(h.fleetPods(f.name)), after) })
-		if h.opts.upgradeImage != "" {
-			upgradePods := podUIDs(h.fleetPods(f.name))
-			upgradeClaims := h.claims(f.name)
-			h.merge(f.name, encode(object{"spec": object{"runtimeImage": h.opts.upgradeImage}}))
-			h.waitFor("fork digest upgrade: "+f.name, 10*time.Minute, func() bool {
-				return h.settled(f.name, 2) && str(h.currentState(f.name), "RuntimeImage") == h.opts.upgradeImage
-			})
-			for _, pod := range h.fleetPods(f.name) {
-				assert(str(list(pod, "spec", "containers")[0], "image") == h.opts.upgradeImage, "old runtime digest remains")
-			}
-			assert(disjoint(upgradePods, podUIDs(h.fleetPods(f.name))), "upgrade retained an old Pod UID")
-			h.goneVolumes(upgradeClaims)
-			freshClaims := h.claims(f.name)
-			assert(len(freshClaims) == len(upgradeClaims), "upgrade changed the expected claim count")
-			for name, current := range freshClaims {
-				old, captured := upgradeClaims[name]
-				assert(captured, "upgrade introduced an unexpected claim: %s", name)
-				assert(current.UID != old.UID && current.VolumeUID != old.VolumeUID && current.Handle != old.Handle, "upgrade reused retired PVC/PV/CSI identity: %s", name)
-			}
-			h.readLedger(f.probe, f.name)
-			fmt.Println("PASS:", f.name, "different-digest upgrade replaced every Pod and disk; old PVs and attachments gone; all acknowledged writes preserved")
-		}
-		oldClaims = h.claims(f.name)
-		fleetUID := uidOf(h.get("celldfleet", f.name))
-		resUID := uidOf(h.reservation(f.name))
-		h.k("-n", "fleets", "delete", "celldfleet", f.name, "--wait=false")
-		h.waitFor("strict final deletion: "+f.name, 10*time.Minute, func() bool {
-			return h.k("-n", "fleets", "get", "celldfleet", f.name, "--ignore-not-found", "-o", "name") == ""
-		})
-		assert(len(h.listIn("pods", "-l", "celld.eric.dev/fleet-uid="+fleetUID)) == 0, "runtime Pods survived deletion")
-		h.goneVolumes(oldClaims)
-		for name := range oldClaims {
-			assert(h.k("-n", "fleets", "get", "pvc", name, "--ignore-not-found", "-o", "name") == "", "PVC survived final deletion")
-		}
-		assert(uidOf(h.reservation(f.name)) == resUID, "bucket reservation lost")
-		assert(str(h.currentState(f.name), "Completion", "Kind") == "Delete", "current completion does not record deletion")
-		fmt.Println("PASS:", f.name, "compute and disks deleted; bucket reservation retained")
-	}
-	if h.opts.upgradeImage == "" {
-		fmt.Println("NOT RUN: different-digest runtime upgrade; set CELLD_UPGRADE_IMAGE to qualify an actual upgrade")
-	}
+	h.exercisePersistentRestart()
+	h.exercisePersistentUpgrade()
+	h.exerciseBucketRestart()
+	h.deleteFleet("beta")
+	h.deleteFleet("alpha")
 }
 
-func disjoint(a, b map[string]bool) bool {
-	for key := range a {
-		if b[key] {
-			return false
+// rollAll applies patch to a PersistentFleet and waits until every member
+// has a new Pod on its old disk, watching the one-disruption invariant.
+// midway, when set, runs once after the first member has been replaced.
+func (h *harness) rollAll(fleetName, patch string, done func() bool, midway func()) {
+	count := specReplicas(h.get("statefulset", fleetName))
+	disks := h.claims(fleetName)
+	before := nameUIDs(h.memberPods(fleetName))
+	d := h.watchDisruptions(fleetName)
+	h.merge(fleetName, patch)
+	h.waitWatching("rolling "+fleetName+" on retained disks", 20*time.Minute, d, func() bool {
+		if midway != nil && len(d.replaced) > 0 {
+			midway()
+			midway = nil
 		}
+		after := nameUIDs(h.memberPods(fleetName))
+		for name, uid := range before {
+			if after[name] == uid {
+				return false
+			}
+		}
+		return h.settled(fleetName, count) && (done == nil || done())
+	})
+	must(sameDisks(disks, h.claims(fleetName)))
+	want := make([]string, 0, count)
+	for i := count - 1; i >= 0; i-- {
+		want = append(want, fmt.Sprintf("%s-%d", fleetName, i))
 	}
-	return true
+	assert(same(d.replaced, want), "%s members were not replaced highest ordinal first: %v", fleetName, d.replaced)
+	fmt.Println("PASS:", fleetName, "rolled one member at a time, highest ordinal first; every disk retained")
+}
+
+func (h *harness) exercisePersistentRestart() {
+	h.scale("beta", 3)
+	h.writeLedger("beta")
+	h.startWriter("beta")
+	before := nameUIDs(h.memberPods("beta"))
+	token := "rolling-restart-beta"
+	// A paused fleet accepts the token but changes nothing.
+	h.merge("beta", encode(object{"spec": object{"maintenance": object{"paused": true, "restartToken": token}}}))
+	h.hold(15*time.Second, "pause holds a requested restart", func() bool { return same(nameUIDs(h.memberPods("beta")), before) })
+	h.rollAll("beta", `{"spec":{"maintenance":{"paused":false}}}`, nil, nil)
+	h.stopWriter("beta")
+	h.readLedger("beta")
+	after := nameUIDs(h.memberPods("beta"))
+	h.restartOperator()
+	h.hold(20*time.Second, "completed restart token does not replay", func() bool { return same(nameUIDs(h.memberPods("beta")), after) })
+}
+
+func (h *harness) exercisePersistentUpgrade() {
+	if h.opts.upgradeFrom == "" {
+		fmt.Println("NOT RUN: runtime upgrade on retained disks; --upgrade-from none")
+		return
+	}
+	legacy := h.newFleet("legacy", "bucket-legacy", "PersistentFleet", "fleets")
+	legacy.Spec.RuntimeImage = h.opts.upgradeFrom
+	legacy.Spec.Replicas = 3
+	h.apply(legacy)
+	h.waitFor("legacy runtime serves on retained disks", 8*time.Minute, func() bool {
+		ready := 0
+		for _, pod := range h.memberPods("legacy") {
+			if podReady(pod) {
+				ready++
+			}
+		}
+		return h.ready("legacy") && ready == 3
+	})
+	reason, message := h.fleetReason("legacy")
+	assert(reason != "Provisioned", "a runtime without node_log state reported a settled fleet: %s", message)
+	fmt.Println("PASS: legacy runtime is served but never reported settled:", reason, message)
+	h.writeLedger("legacy")
+	h.startWriter("legacy")
+	h.rollAll("legacy", encode(object{"spec": object{"runtimeImage": h.opts.runtimeImage}}), func() bool {
+		for _, pod := range h.memberPods("legacy") {
+			if str(list(pod, "spec", "containers")[0], "image") != h.opts.runtimeImage {
+				return false
+			}
+		}
+		return true
+	}, nil)
+	h.stopWriter("legacy")
+	h.readLedger("legacy")
+	fmt.Println("PASS: runtime upgrade", h.opts.upgradeFrom, "->", h.opts.runtimeImage, "kept every disk and acknowledged write")
+	h.deleteFleet("legacy")
+}
+
+func (h *harness) exerciseBucketRestart() {
+	h.scale("alpha", 2)
+	h.writeLedger("alpha")
+	h.startWriter("alpha")
+	before := nameUIDs(h.memberPods("alpha"))
+	h.merge("alpha", encode(object{"spec": object{"maintenance": object{"restartToken": "rolling-restart-alpha"}}}))
+	h.waitFor("Ordered Bucket rolling restart", 10*time.Minute, func() bool {
+		after := nameUIDs(h.memberPods("alpha"))
+		for name, uid := range before {
+			if after[name] == uid {
+				return false
+			}
+		}
+		return h.settled("alpha", 2)
+	})
+	assert(h.budget("alpha") == 1, "Bucket PDB does not allow one disruption")
+	h.stopWriter("alpha")
+	h.readLedger("alpha")
+	fmt.Println("PASS: Ordered Bucket rolling restart replaced every member with acknowledged writes intact")
 }

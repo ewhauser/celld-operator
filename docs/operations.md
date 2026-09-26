@@ -5,21 +5,21 @@ Use the task-oriented [installation guide](../site/src/content/docs/start/instal
 [maintenance guide](../site/src/content/docs/operate/restart.md) and
 [deletion guide](../site/src/content/docs/operate/deletion.md).
 
-Both Bucket and PersistentFleet need a compatible digest-pinned fork runtime;
-only PersistentFleet uses the launcher. The operator has Kubernetes credentials only; celld receives the runtime
+Both Bucket and PersistentFleet need a compatible digest-pinned fork runtime and
+run celld directly. The operator has Kubernetes credentials only; celld receives the runtime
 bucket identity. The manager does not read S3 recovery metadata or terminate EC2
 instances. The fleet namespace Role includes guarded PVC deletion; storage
 finalizers remain under Kubernetes and CSI control. Its Service `update` verb only
 fills fields a newer release declares on an otherwise exactly matching
 operator-created Service; any other difference remains `InfrastructureBlocked`.
-Its PodDisruptionBudget `update` verb converges Bucket fleet budgets; Bucket
-workloads and NetworkPolicies are likewise converged, while PersistentFleet
-objects stay verify-only.
+Its PodDisruptionBudget `update` verb converges fleet budgets; workloads and
+NetworkPolicies are likewise converged for both profiles.
 
-For implementation details use [current operations](current-operation.md),
-[launcher supervision](launcher-supervision.md) and [typed control plane](runtime-control-plane.md).
-A blocked PersistentFleet operation must preserve current authority and storage. Removing an
-annotation, claim finalizer or fleet finalizer is not a recovery procedure.
+For implementation details use [one disruption at a time](current-operation.md),
+[retained disks](disposable-disks.md) and [typed control plane](runtime-control-plane.md).
+Removing a reservation annotation, claim finalizer or fleet finalizer is not a
+recovery procedure. To declare an existing PersistentFleet disk gone, use the
+`celld.eric.dev/replace-member` annotation.
 
 ## Build and validate
 
@@ -27,13 +27,11 @@ annotation, claim finalizer or fleet finalizer is not a recovery procedure.
 `make test-envtest` exercises the real API server's admission and resource-version
 conflicts. `make test-linux` executes Linux process-lock tests with Docker.
 `make chart-check` and `make manifests-check` verify shipped configuration.
-The [test records](qualification/README.md) document strict-runtime integration
-and the environments exercised.
+The [test records](qualification/README.md) document the environments exercised.
 
 ## Releases
 
-Publish an immutable operator image and use its digest for both the manager and
-launcher. Verify the exact compatible celld fork image separately; native binary
+Publish an immutable operator image and use its digest for the manager. Verify the exact compatible celld fork image separately; native binary
 artifacts do not identify a container digest. Chart packaging and registry
 verification are release workflow responsibilities. A local build is not a published release.
 

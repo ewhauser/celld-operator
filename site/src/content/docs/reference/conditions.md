@@ -1,9 +1,9 @@
 ---
 title: Conditions and blockers
-description: Use conditions and current-operation status to locate the blocked boundary.
+description: Use conditions, reasons and messages to locate what a fleet waits for.
 ---
 
-Inspect conditions and the current operation together:
+Inspect conditions and lifecycle status together:
 
 ```bash
 kubectl --context YOUR_CONTEXT -n fleets get celldfleet my-fleet   -o json | jq '.status | {conditions, lifecycle, capacity}'
@@ -11,59 +11,50 @@ kubectl --context YOUR_CONTEXT -n fleets get celldfleet my-fleet   -o json | jq 
 
 | Signal | Meaning |
 | --- | --- |
-| `Ready` | The observed workload generation has ready replicas. Availability is not deletion proof. |
+| `Ready` | The observed workload generation has ready replicas. Availability is not settlement. |
 | `RoutingReady` | Optional route status: current Gateway acceptance or an Ingress address. Independent of fleet readiness; not a DNS/TLS/connectivity test. |
 | `InfrastructureReady` | Required Kubernetes objects match; Pods may still be Pending. |
 | `Blocked` | A requested action cannot proceed; read its reason and message. |
-| `Progressing` | Provisioning or a current operation is advancing. |
-| `MaintenancePaused` | New and unissued work is paused; issued work remains recoverable. |
-| `Deleting` | A fleet deletion request is waiting for verified cleanup. |
-| `DiskCleanupPending` | Current DeleteClaims phase is waiting for exact CSI cleanup; not historical deletion authority. |
-| `OperationSizeWarning` | Current authority is nearing its bounded encoded-state limit. |
+| `Progressing` | `Provisioning` or `LifecycleProgress`: a change is rolling out or waiting for the fleet to settle. |
+| `MaintenancePaused` | Workload changes are suspended. |
+| `Deleting` | A fleet deletion request is removing compute and, for PersistentFleet, disks. |
+| `OperationSizeWarning` | Reservation bookkeeping is nearing its bounded encoded-state limit. |
 
-`status.lifecycle` gives the operation ID, phase, fixed deadline, target and
-blocker. `lastOutcome` is an informational last completion projection. Editing
-status cannot alter current authority.
+Earlier releases also set `DiskCleanupPending`; it is removed as fleets
+reconcile. `status.lifecycle` no longer shows operation phases; `lastOutcome`
+may read `Superseded` for an operation dropped on upgrade from an earlier
+release. Editing status authorizes nothing.
 
 Configuration blockers include `NamespaceAccessDenied`, `ServiceAccountMissing`,
 `StorageClassMissing`, `InvalidStorageClass`, `IsolationUnverified` and
 `StorageScopeConflict`. Fix the named prerequisite; do not bypass identity checks.
 
-`PodCompositionUnsupported` means an admitted Pod could not be maintained
-safely, and the message names the Pod, container and field. The fleet can
-still serve (`Ready` is unchanged), but a restart, upgrade or scale-in would
-block. Adjust the admission policy that caused it; see
-[admission mutations](../security-boundaries/#admission-mutations).
-
-`InfrastructureBlocked` means a generated Service, NetworkPolicy or
-PodDisruptionBudget differs from the operator's spec, has an owner, belongs to
-another fleet or is being deleted. For PersistentFleet the operator does not
-adopt or repair it. The one exception is a field a newer release declares that the live object leaves
-unset, such as the peer port's `appProtocol`; the operator fills only that field,
-pinned to the resourceVersion it verified. A value someone else set, including a
-different `appProtocol`, still blocks until the generated spec is restored.
-
-Bucket fleets converge drift in the workload, NetworkPolicy and
-PodDisruptionBudget back to the operator's spec; Services stay verify-only.
-Objects without this fleet's UID label, or with owner references, are refused:
+Both profiles converge drift in the workload template and replicas,
+NetworkPolicy and PodDisruptionBudget back to the operator's spec. Services stay
+verify-only; the one in-place change fills a field a newer release declares that
+the live object leaves unset, such as the peer port's `appProtocol`. Objects
+without this fleet's UID label, or with owner references, are refused:
 `LifecycleBlocked` for the workload, `InfrastructureBlocked` for prerequisites.
-Bucket status uses `Provisioning` while one member at a time rolls out,
-`Provisioned`, `CapacityUncertain`, `SchedulingBlocked`, `MaintenancePaused`,
-`LifecycleProgress` during deletion and `UnsupportedTransition` for a runtime
-that is not a digest-pinned fork pin. Bucket fleets have no current operation;
-`status.lifecycle` may show a `Superseded` outcome for an operation dropped on
-upgrade from an earlier release.
 
-`DiskRetired` and `LauncherBlocked` (PersistentFleet only) replace
-`Provisioning` when an unready replica's launcher reports that it will never start the runtime. The message
-names the Pod. `DiskRetired` means the Pod's disk was retired after an earlier
-Pod on it stopped without an operator request; see
-[recovery](../../troubleshoot/recovery/).
+| Reason | Meaning |
+| --- | --- |
+| `Provisioning` | Workload created or members rolling out; waiting for updated, ready replicas. |
+| `Provisioned` | All members ready; for PersistentFleet, the fleet is also settled. |
+| `LifecycleProgress` | A change is proceeding or waiting: a rolling update, contraction or replacement waiting to settle, a retained disk still needed by named sessions, a lost-disk replacement, or deletion. |
+| `InfrastructureBlocked` | A prerequisite object could not be created or converged. |
+| `LifecycleBlocked` | The workload or its Pods are not owned by this fleet. |
+| `StorageIdentityConflict` | A PVC at a member's name does not carry this fleet's UID label; it is never adopted. |
+| `ReplaceMemberInvalid` | `celld.eric.dev/replace-member` names no current member. |
+| `CapacityUncertain` | Automatic or External contraction lacks survivor-capacity evidence. |
+| `SchedulingBlocked` | A scheduling gate could not be released. |
+| `MaintenancePaused` | `maintenance.paused` suspends workload changes. |
+| `UnsupportedTransition` | The runtime is not a digest-pinned fork pin. |
+| `DeletionBlocked` | The StatefulSet to delete is not owned by this fleet. |
 
-PersistentFleet operational blockers identify incomplete runtime
-or launcher proof, changed workload/storage identity, pending CSI cleanup and
-expired operations. An expired deadline never proves a shutdown was unissued or
-safe. Failed or ambiguous completion preserves disks and the current operation.
+PersistentFleet also emits Warning Events `MemberDiskLost` and `MemberReplaced`
+when it replaces a member's disk; the message names sessions celld may record as
+lost. Earlier releases reported `DiskRetired`, `LauncherBlocked` and
+`PodCompositionUnsupported`; current releases do not.
 
 Capacity reasons such as `IncompleteMetrics`, `RepeatedSamples`, `PendingCapacity`,
 `IneffectiveCapacity`, `StabilizingOut`, `StabilizingIn`, `ObservingRedistribution`

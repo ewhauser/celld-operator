@@ -277,7 +277,8 @@ func (s *CelldFleetSpec) EffectiveLifecycle() LifecycleSpec {
 
 // MaintenanceSpec requests suspension or a qualified planned restart.
 type MaintenanceSpec struct {
-	// Explicitly permit an operation that stops the entire fleet.
+	// Deprecated and ignored: restarts and upgrades replace one member at a
+	// time and need no downtime permission (ADR 0023).
 	AllowCoordinatedDowntime bool `json:"allowCoordinatedDowntime,omitempty"`
 	// Pause new actions and unissued operations; continue recovery of issued actions.
 	Paused bool `json:"paused,omitempty"`
