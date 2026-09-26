@@ -56,10 +56,20 @@ windows. `ObservingRedistribution` waits for newcomer activity or measured relie
 alone is not evidence of useful redistribution. Explicit minimum capacity and
 manual replica requests retain their documented precedence.
 
+An addition is judged against the members it grew from. If one of them restarts
+or is replaced, or the fleet contracts below the size the addition reached,
+before the addition is judged, it can no longer be judged and is dropped. It
+counts as neither relief nor an ineffective addition. The next addition still
+waits for a new stable window, the cooldown and ready capacity. If two additions
+have been judged ineffective since the last effective one, the next reports
+`LoadNotRedistributed` while it is observed, and the hold resumes if it is
+ineffective too.
+
 Maintenance pause stops new workload changes and invalidates positive demand
 windows. A membership change, such as a restarted member, restarts stable
 windows. Controller restart or status clearing does not reset policy state.
-Never edit reservation annotations to remove a policy hold.
+Holds are released by later observations. Never edit reservation annotations to
+remove a policy hold.
 
 External autoscalers target `CelldFleet` using its `/scale` subresource, never the
 managed workload. The subresource reports nonterminal observed Pods, including
