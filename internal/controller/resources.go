@@ -233,7 +233,7 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 const restartTokenAnnotation = "celld.eric.dev/restart-token"
 
 // restartToken is the requested restart. It rolls the Pod template, and the
-// operator replaces one member at a time.
+// workload controller replaces one member at a time.
 func restartToken(f *fleet.CelldFleet) string {
 	if f.Spec.Maintenance == nil {
 		return ""
@@ -259,17 +259,12 @@ func workload(f *fleet.CelldFleet, opts Options) client.Object {
 			},
 		}
 	}
-	if orderedBucket(f) {
-		// Ordinal identity keeps zone assignment deterministic. Pod management
-		// policy is immutable, so fleets keep Parallel; rolling updates still
-		// replace one ordinal at a time.
-		return &appsv1.StatefulSet{ObjectMeta: metadata(f, f.Name), Spec: appsv1.StatefulSetSpec{Replicas: new(f.Spec.Replicas), Selector: selector(f), ServiceName: f.Name + "-peers", PodManagementPolicy: appsv1.ParallelPodManagement, PersistentVolumeClaimRetentionPolicy: &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{WhenDeleted: appsv1.RetainPersistentVolumeClaimRetentionPolicyType, WhenScaled: appsv1.RetainPersistentVolumeClaimRetentionPolicyType}, Template: template, UpdateStrategy: appsv1.StatefulSetUpdateStrategy{Type: appsv1.RollingUpdateStatefulSetStrategyType, RollingUpdate: &appsv1.RollingUpdateStatefulSetStrategy{Partition: new(int32(0))}}}}
-	}
-	// PersistentFleet: the StatefulSet controller restarts one member at a
-	// time, highest ordinal first, waiting for each to report healthy. Every
-	// member keeps its claim across restart, upgrade and scale-in; only fleet
-	// deletion removes claims (ADR 0024).
-	return &appsv1.StatefulSet{
+	// Ordered Bucket and PersistentFleet: the StatefulSet controller restarts
+	// one member at a time, highest ordinal first, waiting for each to report
+	// healthy. Ordinal identity keeps Ordered Bucket zone assignment
+	// deterministic. Pod management policy is immutable, so fleets keep
+	// Parallel; rolling updates still replace one ordinal at a time.
+	sts := &appsv1.StatefulSet{
 		ObjectMeta: metadata(f, f.Name),
 		Spec: appsv1.StatefulSetSpec{
 			Replicas:            new(f.Spec.Replicas),
@@ -282,20 +277,25 @@ func workload(f *fleet.CelldFleet, opts Options) client.Object {
 				WhenDeleted: appsv1.RetainPersistentVolumeClaimRetentionPolicyType,
 				WhenScaled:  appsv1.RetainPersistentVolumeClaimRetentionPolicyType,
 			},
-			VolumeClaimTemplates: []corev1.PersistentVolumeClaim{
-				{
-					Name:        "data",
-					Labels:      labels(f),
-					Annotations: map[string]string{"celld.eric.dev/storage-reservation": reservationName(f)},
-					Spec: corev1.PersistentVolumeClaimSpec{
-						AccessModes:      persistentAccessModes(opts),
-						StorageClassName: new(f.Spec.Storage.StorageClassName),
-						Resources:        corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse(fmt.Sprintf("%dGi", f.Spec.Storage.SizeGiB))}},
-					},
-				},
-			},
 		},
 	}
+	if f.Spec.Profile == "PersistentFleet" {
+		// Every member keeps its claim across restart, upgrade and scale-in;
+		// only fleet deletion removes claims (ADR 0024).
+		sts.Spec.VolumeClaimTemplates = []corev1.PersistentVolumeClaim{
+			{
+				Name:        "data",
+				Labels:      labels(f),
+				Annotations: map[string]string{"celld.eric.dev/storage-reservation": reservationName(f)},
+				Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes:      persistentAccessModes(opts),
+					StorageClassName: new(f.Spec.Storage.StorageClassName),
+					Resources:        corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse(fmt.Sprintf("%dGi", f.Spec.Storage.SizeGiB))}},
+				},
+			},
+		}
+	}
+	return sts
 }
 
 func prerequisites(f *fleet.CelldFleet, opts Options) []client.Object {

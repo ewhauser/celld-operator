@@ -170,14 +170,9 @@ func TestRolledOutRequiresObservedUpdatedReadyReplicas(t *testing.T) {
 	if rolledOut(sts) {
 		t.Fatal("rolling statefulset revision change reported complete")
 	}
-	// OnDelete never advances currentRevision; updated replicas decide.
-	sts.Spec.UpdateStrategy.Type = appsv1.OnDeleteStatefulSetStrategyType
+	sts.Status.CurrentRevision = "b"
 	if !rolledOut(sts) {
-		t.Fatal("OnDelete rollout with every replica updated never completes")
-	}
-	sts.Status.UpdatedReplicas = 1
-	if rolledOut(sts) {
-		t.Fatal("OnDelete rollout with an outdated replica reported complete")
+		t.Fatal("complete statefulset rollout not recognized")
 	}
 }
 
