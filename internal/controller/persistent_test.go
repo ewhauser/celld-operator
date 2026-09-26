@@ -20,8 +20,9 @@ import (
 )
 
 // PersistentFleet (ADR 0024) is a StatefulSet the operator renders and
-// applies. The StatefulSet controller restarts members; the operator never
-// deletes a Pod or a claim while the fleet exists, and stores nothing.
+// applies. The StatefulSet controller restarts members; the operator deletes a
+// Pod or a claim only to heal a member that cannot come back, and stores
+// nothing.
 
 func persistentFleet(t *testing.T) *operationFixture {
 	t.Helper()

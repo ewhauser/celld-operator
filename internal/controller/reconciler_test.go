@@ -61,12 +61,7 @@ func setup(t *testing.T, objects ...client.Object) *Reconciler {
 		VolumeBindingMode: ptr.To(storagev1.VolumeBindingWaitForFirstConsumer),
 	})
 	return &Reconciler{
-		// The production client is direct, so the API server serves the
-		// spec.nodeName field selector natively; the fake client only honors
-		// selectors backed by a registered index.
-		Client: fake.NewClientBuilder().WithScheme(s).WithStatusSubresource(&fleet.CelldFleet{}, &appsv1.Deployment{}, &appsv1.StatefulSet{}).WithIndex(&corev1.Pod{}, "spec.nodeName", func(obj client.Object) []string {
-			return []string{obj.(*corev1.Pod).Spec.NodeName}
-		}).WithObjects(objects...).WithInterceptorFuncs(interceptor.Funcs{Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+		Client: fake.NewClientBuilder().WithScheme(s).WithStatusSubresource(&fleet.CelldFleet{}, &appsv1.Deployment{}, &appsv1.StatefulSet{}).WithObjects(objects...).WithInterceptorFuncs(interceptor.Funcs{Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
 			if obj.GetUID() == "" {
 				obj.SetUID(types.UID("created-" + obj.GetName()))
 			}

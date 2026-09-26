@@ -30,7 +30,7 @@ func (r *Reconciler) applicationSample(ctx context.Context, f *fleet.CelldFleet,
 	s := applicationSample{node: fleet.ApplicationNodeStatus{Name: pod.Name, UID: string(pod.UID), Reason: "Unavailable"}}
 	_, started := podIdentity(pod)
 	s.started = started
-	target, err := runtimeTarget(f, pod, "")
+	target, err := runtimeTarget(f, pod)
 	if err != nil || !podReady(pod) {
 		return s
 	}

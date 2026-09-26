@@ -233,16 +233,10 @@ func rolledOut(w client.Object) bool {
 		st := w.Status
 		return st.ObservedGeneration >= w.Generation && st.Replicas == n && st.UpdatedReplicas == n && st.ReadyReplicas == n
 	case *appsv1.StatefulSet:
+		// Only a converged workload is checked, so the strategy is always
+		// RollingUpdate, which advances currentRevision when the roll completes.
 		st := w.Status
-		done := st.ObservedGeneration >= w.Generation && st.Replicas == n && st.UpdatedReplicas == n && st.ReadyReplicas == n
-		// The StatefulSet controller advances currentRevision only for
-		// RollingUpdate. A StatefulSet written by an earlier release keeps
-		// OnDelete until the operator converges it, and under OnDelete
-		// currentRevision stays at the creation revision forever.
-		if w.Spec.UpdateStrategy.Type == appsv1.OnDeleteStatefulSetStrategyType {
-			return done
-		}
-		return done && st.CurrentRevision == st.UpdateRevision
+		return st.ObservedGeneration >= w.Generation && st.Replicas == n && st.UpdatedReplicas == n && st.ReadyReplicas == n && st.CurrentRevision == st.UpdateRevision
 	}
 	return false
 }

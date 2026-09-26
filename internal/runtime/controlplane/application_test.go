@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"strings"
@@ -21,15 +22,12 @@ func TestApplicationReadOnlyContract(t *testing.T) {
 		}
 		writeJSON(w, string(data))
 	})
-	a, err := c.Application(t.Context(), Target{IP: target.IP})
+	a, err := c.Application(t.Context(), target)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !a.Fresh(time.Now(), now.Add(-time.Minute), 90*time.Second) || a.Loaded.Version != "v2" || a.PendingCells != 1 || a.ResidentCells != 2 {
 		t.Fatalf("valid observation lost: %+v", a)
-	}
-	if _, err := c.Application(t.Context(), Target{IP: target.IP, Generation: "another-process"}); err == nil {
-		t.Fatal("accepted unverifiable incarnation")
 	}
 }
 func TestApplicationRejectsMalformedOrUnsupportedSnapshots(t *testing.T) {
@@ -70,7 +68,7 @@ func TestApplicationRejectsMalformedOrUnsupportedSnapshots(t *testing.T) {
 				d["prefix"] = ""
 			}
 			data, _ := json.Marshal(m)
-			if _, err := decodeApplication(data, "", time.Now()); err == nil {
+			if _, err := decodeApplication(data, time.Now()); err == nil {
 				t.Fatal("invalid observation accepted")
 			}
 		})
@@ -79,7 +77,7 @@ func TestApplicationRejectsMalformedOrUnsupportedSnapshots(t *testing.T) {
 func TestApplicationFreshness(t *testing.T) {
 	now := time.Now()
 	data, _ := json.Marshal(applicationWire())
-	good, err := decodeApplication(data, "", now)
+	good, err := decodeApplication(data, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,16 +107,17 @@ func TestApplicationLocalGenerationsAndOptionalIdentity(t *testing.T) {
 	d["cells"] = map[string]any{}
 	m["shutdown"] = map[string]any{"runtime_generation": "process-a"}
 	data, _ := json.Marshal(m)
-	a, err := decodeApplication(data, "process-a", time.Now())
+	a, err := decodeApplication(data, time.Now())
 	if err != nil || a.PendingCells != 0 || a.RuntimeGeneration != "process-a" {
 		t.Fatalf("empty resident census: %+v, %v", a, err)
 	}
-	if _, err := decodeApplication(data, "process-b", time.Now()); err == nil {
-		t.Fatal("accepted wrong identity")
+	oversized, _ := json.Marshal(map[string]any{"deployment": d, "shutdown": map[string]any{"runtime_generation": strings.Repeat("a", 129)}})
+	if _, err := decodeApplication(oversized, time.Now()); !errors.Is(err, ErrIdentity) {
+		t.Fatalf("accepted oversized identity: %v", err)
 	}
 	d["cells"] = map[string]any{"unknown": 0}
 	data, _ = json.Marshal(m)
-	a, err = decodeApplication(data, "", time.Now())
+	a, err = decodeApplication(data, time.Now())
 	if err != nil || a.PendingCells != 1 {
 		t.Fatalf("unknown cell generation must remain pending: %+v, %v", a, err)
 	}
@@ -138,7 +137,7 @@ func TestApplicationNativeRuntimeFixtures(t *testing.T) {
 	for name, data := range samples {
 		t.Run(name, func(t *testing.T) {
 			now := time.Now()
-			a, err := decodeApplication(data, "", now)
+			a, err := decodeApplication(data, now)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/http"
 	"time"
 )
 
@@ -27,21 +26,18 @@ type Application struct {
 }
 
 func (c *Client) Application(ctx context.Context, target Target) (Application, error) {
-	data, code, err := c.call(ctx, target, http.MethodGet, "/state", nil)
+	data, err := c.readState(ctx, target)
 	if err != nil {
 		return Application{}, err
 	}
-	if code != http.StatusOK {
-		return Application{}, errors.New("unexpected application state status")
-	}
-	return decodeApplication(data, target.Generation, time.Now())
+	return decodeApplication(data, time.Now())
 }
 
 // Decode the existing deployment object. Application generations are local to
 // each process and must never be compared between nodes. The actor census and
 // current generation are sampled separately by celld; this is an observation,
 // not an atomic rollout-completion receipt or a view of the S3 deployment pointer.
-func decodeApplication(data []byte, generation string, received time.Time) (Application, error) {
+func decodeApplication(data []byte, received time.Time) (Application, error) {
 	m, err := decodeObject(data)
 	if err != nil {
 		return Application{}, err
@@ -80,8 +76,8 @@ func decodeApplication(data []byte, generation string, received time.Time) (Appl
 		}
 	}
 	out.ResidentCells = int64(len(cells))
-	// Older runtimes need not expose the lifecycle extension for this read. When
-	// available, retain the identity as diagnostics and honor an explicit target.
+	// Older runtimes need not expose the shutdown object for this read. When
+	// available, retain its runtime identity as diagnostics.
 	if raw, ok := m["shutdown"]; ok {
 		var shutdown struct {
 			RuntimeGeneration string `json:"runtime_generation"`
@@ -91,7 +87,7 @@ func decodeApplication(data []byte, generation string, received time.Time) (Appl
 		}
 		out.RuntimeGeneration = shutdown.RuntimeGeneration
 	}
-	if len(out.RuntimeGeneration) > 128 || (generation != "" && generation != out.RuntimeGeneration) {
+	if len(out.RuntimeGeneration) > 128 {
 		return Application{}, ErrIdentity
 	}
 	return out, nil

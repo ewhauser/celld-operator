@@ -148,6 +148,12 @@ happened first.
   administrator could do that.
 - Two members that cannot come back at the same time wait until one returns,
   unless their volumes are lost. celld's guarantee covers the loss of one node.
+- The fleet rebuild that 0023 left as an explicit administrative operation is
+  not needed. A fleet recovers from any outage on its members' own disks, and a
+  rolling restart is the only lever an administrator needs. Replacing every
+  disk at once would deadlock celld: a fresh disk refuses answers until its
+  member publishes a lease, which it does only after recovering its previous
+  session.
 - The ClusterRole no longer needs PersistentVolume, Node or VolumeAttachment
   reads, and the namespaced Role no longer needs to create claims.
 
@@ -178,4 +184,8 @@ every acknowledged write to be readable afterwards:
 - scale-in that keeps the removed member's disk, and scale-out that reattaches
   it;
 - fleet deletion that removes compute, then disks, and keeps the bucket
-  reservation.
+  reservation;
+- `SIGKILL` of celld on every member at once, and every member Pod deleted at
+  once;
+- an upgrade from v0.0.5 after its launcher retired a member's disk. The member
+  rejoins on that disk ([#60](https://github.com/ewhauser/celld-operator/issues/60)).
