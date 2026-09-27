@@ -63,6 +63,8 @@ func reset(s *State) {
 	if s.Addition != nil {
 		s.Addition.Since = time.Time{}
 		s.Addition.Samples = 0
+		s.Addition.ObservedSince = time.Time{}
+		s.Addition.ObservedSamples = 0
 	}
 }
 

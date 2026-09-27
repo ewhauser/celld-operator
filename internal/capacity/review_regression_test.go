@@ -139,6 +139,74 @@ func TestUnjudgeableAdditionIsDropped(t *testing.T) {
 		}
 	}
 }
+
+// An addition is judged once one outcome holds for a whole window. Evidence
+// that has not settled after twice the observation a judgment needs is mixed:
+// the addition counts as ineffective, never as relief. The bound covers
+// continuous complete observation, so an incomplete observation restarts it.
+func TestMixedRedistributionIsIneffective(t *testing.T) {
+	// The newcomer alternates each minute either side of cpuLowMillicores.
+	alternating := func(elapsed time.Duration) bool { return elapsed/time.Minute%2 == 0 }
+	for _, tc := range []struct {
+		name       string
+		batches    int32
+		busy       func(time.Duration) bool
+		incomplete time.Duration
+		sparse     bool
+		// judged is when the addition is judged, zero if it stays held.
+		judged time.Duration
+		want   int32
+	}{
+		{name: "mixed/0", batches: 0, busy: alternating, judged: 240 * time.Second, want: 1},
+		{name: "mixed/1", batches: 1, busy: alternating, judged: 240 * time.Second, want: 2},
+		{name: "mixed/2", batches: 2, busy: alternating, want: 2},
+		// Relief that starts within the first window still settles in time.
+		{name: "late relief", batches: 1, busy: func(e time.Duration) bool { return e >= 90*time.Second }, judged: 210 * time.Second, want: 0},
+		{name: "interrupted", batches: 0, busy: alternating, incomplete: 195 * time.Second, judged: 450 * time.Second, want: 1},
+		// Twice the samples a judgment needs, not only twice the window.
+		{name: "sparse", batches: 0, busy: func(e time.Duration) bool { return e/(45*time.Second)%2 == 0 }, sparse: true, judged: 225 * time.Second, want: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := policy()
+			interval := 15 * time.Second
+			if tc.sparse {
+				p.RedistributionObservationSeconds = 30
+				p.SampleIntervalSeconds = 45
+				interval = 45 * time.Second
+			}
+			now := time.Unix(10000, 0)
+			before := loads(observation(now, 3, 0))
+			v := before["0"]
+			v.CPU = 1000
+			before["0"] = v
+			s := State{IneffectiveBatches: tc.batches, Addition: &Addition{Before: before, Target: 4}}
+			var judged time.Duration
+			for i := range 480 {
+				elapsed := time.Duration(i) * interval
+				o := observation(now.Add(elapsed), 4, 0)
+				o.Samples[0].CPU = 1000
+				o.Samples[3].CPU = 70
+				if tc.busy(elapsed) {
+					o.Samples[3].CPU = 90
+				}
+				if tc.incomplete != 0 && elapsed == tc.incomplete {
+					o.Complete = false
+				}
+				s = Evaluate(p, s, o, 4)
+				if s.Addition == nil || s.IneffectiveBatches != tc.batches {
+					judged = elapsed
+					break
+				}
+			}
+			if judged != tc.judged || s.IneffectiveBatches != tc.want || (s.Addition != nil) != (tc.want == 2) {
+				t.Fatalf("judged at %v with %d ineffective, want %v with %d (0s is never): %+v", judged, s.IneffectiveBatches, tc.judged, tc.want, s)
+			}
+			if tc.want == 2 && s.Decision.Reason != "LoadNotRedistributed" {
+				t.Fatalf("not held: %+v", s.Decision)
+			}
+		})
+	}
+}
 func TestRedistributionDoesNotBlockMinimum(t *testing.T) {
 	p := policy()
 	p.MinReplicas = 6
