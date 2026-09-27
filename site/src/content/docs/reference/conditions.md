@@ -41,13 +41,14 @@ references, are refused: `LifecycleBlocked` for the workload,
 
 | Reason | Meaning |
 | --- | --- |
-| `Provisioning` | Workload created, members rolling out, or a scale-in step waiting for the previous change to roll out. For PersistentFleet, also one member down and waiting for the replacement delay; the message gives the time it will be replaced on a fresh disk unless it returns. |
+| `Provisioning` | Workload created, members rolling out, or a scale-in step waiting for the previous change to roll out. For PersistentFleet, also one member down and waiting for the replacement delay; the message gives the time it will be replaced on a fresh disk unless it returns. A member the scheduler cannot place is named with the scheduler's reason. |
 | `Provisioned` | The workload has rolled out and all replicas are ready. |
 | `LifecycleProgress` | The operator took a self-healing action, named in the message: it force-deleted a Pod left on a node that no longer answers, or it is replacing a member on a fresh disk. Also reported while fleet deletion removes the workload and then, for PersistentFleet, every fleet PVC. |
 | `InfrastructureBlocked` | A prerequisite object or the workload could not be created or converged. |
 | `LifecycleBlocked` | The workload is not owned by this fleet. |
 | `StorageIdentityConflict` | A PVC at a member's name does not carry this fleet's UID label; it is never adopted. Creation and growth wait. |
 | `CapacityUncertain` | Automatic or External contraction lacks survivor-capacity evidence. |
+| `MemberUnschedulable` | A PersistentFleet member has gone unscheduled for the replacement delay, and the operator does not replace it: another member is also down, or a fresh disk would not help. `Blocked` is true while the workload's objects stay in place. The message quotes the scheduler. See [a member that cannot be scheduled](../../troubleshoot/scheduling/#a-member-that-cannot-be-scheduled). |
 | `SchedulingBlocked` | An Ordered Bucket zone scheduling gate could not be released. |
 | `MaintenancePaused` | `maintenance.paused` suspends workload changes. |
 | `UnsupportedTransition` | The runtime is not a digest-pinned fork pin. |

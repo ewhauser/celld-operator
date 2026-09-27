@@ -13,6 +13,8 @@ kubectl --context YOUR_CONTEXT -n fleets get events --sort-by=.lastTimestamp
 
 Blocking reasons for both profiles are `CapacityUncertain` (survivor metrics
 missing or insufficient for an automatic contraction), `SchedulingBlocked`,
+`MemberUnschedulable` (a PersistentFleet member the scheduler has not placed
+for the replacement delay and that the operator does not replace),
 `InfrastructureBlocked` or `LifecycleBlocked` (an object lacks this fleet's UID
 label or carries owner references; the operator refuses to adopt it),
 `MaintenancePaused` and `UnsupportedTransition` (runtime is not a digest-pinned
@@ -31,6 +33,9 @@ report the same rollout and scale-in messages.
 | `Rolling out one member at a time; waiting for updated, ready replicas` | Kubernetes restarts one member at a time, highest ordinal first, and waits for each to be Ready. A member that stays unready holds the rollout. Inspect its Pod, events and logs; see [runtime recovery](../recovery/). |
 | `waiting for the previous change to roll out before removing a member` | Scale-in removes one member per step, only after the previous change has rolled out. Template changes still apply meanwhile. |
 | `Waiting for ready replicas; member my-fleet-2 is down; it is replaced on a fresh disk at TIME unless it returns` | `Provisioning`: one member is down and every other member has been ready for five minutes. If the member is not Ready by `TIME`, the operator replaces it on a fresh disk. No action is needed; fix what keeps it down before then if you want it to keep its disk. See [lost disks](../recovery/#lost-disks). |
+| `Waiting for ready replicas; member my-fleet-2 cannot be scheduled (REASON)`, with or without `; it is replaced on a fresh disk at TIME unless it returns` | `Provisioning`: the scheduler has found no node for the member, for the quoted reason. With a time, it is replaced then, as above. See [a member that cannot be scheduled](../scheduling/#a-member-that-cannot-be-scheduled). |
+| `...; it is due to be replaced on a fresh disk` | `Provisioning`: the replacement delay has passed, and the operator replaces the member as soon as the StatefulSet has caught up and the scheduler has decided every other member's Pod. |
+| `Member my-fleet-2 has not been scheduled since TIME: REASON` | `MemberUnschedulable`, with `Blocked=True`: the member has gone unscheduled for the replacement delay and the operator does not replace it. The message ends with the other member that is down, if any. See [a member that cannot be scheduled](../scheduling/#a-member-that-cannot-be-scheduled). |
 | `Force-deleted Pod my-fleet-2: its node has not confirmed termination; the member returns on its own disk` | `LifecycleProgress`: the Pod stayed more than two minutes past its termination grace, so its node no longer answers. The StatefulSet recreates it. Ordered Bucket fleets report this too. See [lost nodes](../recovery/#lost-nodes). |
 | `Replacing member my-fleet-2: its volume no longer exists; celld records a bounded loss for any session with no other copy` | `LifecycleProgress`: the member's claim is `Lost`. The operator deleted the claim and the Pod, and the member returns on a fresh disk. |
 | `Replacing member my-fleet-2: down since TIME while the rest of the fleet is ready; it returns on a fresh disk` | `LifecycleProgress`: the member stayed down for the replacement delay. The operator deleted the claim and the Pod. |
@@ -44,9 +49,10 @@ The force-delete and each replacement also record a Warning Event:
 A rollout waits only for the member it restarted. It does not wait for another
 member that is already down, so two members can be down at once; both keep
 their disks. A member that cannot come back holds a rollout or a scale-in for
-at most the replacement delay, 10 minutes by default, and a lost volume holds
-nothing up. When two members are down at once, neither is replaced until one
-returns, unless its volume is lost; bring one of them back.
+at most the replacement delay, 10 minutes by default, and a lost volume waits
+only for the scheduler to decide the other members' Pods. When two members are
+down at once, neither is replaced until one returns, unless its volume is lost;
+bring one of them back.
 
 `StorageIdentityConflict` means a PVC at a member's name lacks this fleet's UID
 label; it is never adopted, and creation or growth stays blocked until you

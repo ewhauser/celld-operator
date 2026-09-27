@@ -157,9 +157,11 @@ manifest and fleet Role, and requires:
 - the v0.0.5 bookkeeping annotation is gone from the storage reservation;
 - nothing is edited by hand.
 
-This suite runs the operator with its default replacement delay, so
-self-healing does not replace the retired member's disk before the rollout
-restarts it.
+The retired member stays down for longer than the suite's replacement delay
+before the upgrade, as in
+[#79](https://github.com/ewhauser/celld-operator/issues/79). The upgraded
+operator must not replace its disk in the reconcile that starts the rollout;
+the rollout restarts it on its own disk.
 
 ## Limits
 

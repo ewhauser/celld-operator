@@ -361,12 +361,6 @@ func (h *harness) startOperator() {
 	// fault within the suite's time budget; every other fault ends well
 	// before it.
 	args := []string{"--operator-namespace=" + operatorNS, "--network-policy-enforced", "--local-test", "--local-rwop", "--member-replacement-delay=" + memberReplacementDelay.String()}
-	if h.opts.suite == "upgrade" {
-		// The member the old launcher retired has been down for minutes by
-		// the upgrade; the default delay keeps self-healing from replacing
-		// its disk before the rollout restarts it on that disk.
-		args = args[:len(args)-1]
-	}
 	container := object{"name": "operator", "args": args}
 	var volumes []object
 	if h.opts.operatorImage != "" {

@@ -549,6 +549,224 @@ func TestPersistentLeavesMembersThatAFreshDiskWouldNotHelp(t *testing.T) {
 	}
 }
 
+// spreadConflict is the scheduler's verdict on a member whose disk pins it to
+// a zone that the zone spread no longer allows (#79). The fleet's status
+// quotes it without the final period.
+const spreadConflict = "0/3 nodes are available: 1 node(s) didn't match pod topology spread constraints, 2 node(s) didn't match PersistentVolume's node affinity. preemption: 0/3 nodes are available: 3 Preemption is not helpful for scheduling."
+
+var spreadReason = strings.TrimSuffix(spreadConflict, ".")
+
+// pendMember recreates a member's Pod on the same claim, as the StatefulSet
+// does, and leaves it off every node. A non-empty verdict is the scheduler's
+// message after it found no node for the Pod.
+func (x *operationFixture) pendMember(name string, created time.Time, verdict string) {
+	x.t.Helper()
+	p := x.pod(name)
+	if err := x.r.Delete(x.t.Context(), p); err != nil {
+		x.t.Fatal(err)
+	}
+	p.ResourceVersion, p.UID = "", types.UID(name+"-pending")
+	p.CreationTimestamp = metav1.NewTime(created)
+	p.Spec.NodeName = ""
+	p.Status = corev1.PodStatus{Phase: corev1.PodPending}
+	if verdict != "" {
+		p.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: corev1.PodReasonUnschedulable, Message: verdict, LastTransitionTime: metav1.NewTime(created)}}
+	}
+	if err := x.r.Create(x.t.Context(), p); err != nil {
+		x.t.Fatal(err)
+	}
+}
+
+// #79: an operator upgrade found alpha-1 down long past the replacement delay,
+// as v0.0.5 leaves a member whose disk its launcher retired. Replacing it
+// while the rollout restarts alpha-2 leaves both Pods pending at once, and the
+// fresh disk can take the zone alpha-2's disk pins it to. Nothing is replaced
+// until the StatefulSet has caught up, and the rollout then restarts alpha-1
+// on its own disk.
+func TestPersistentFreshDiskWaitsForTheStatefulSetToCatchUp(t *testing.T) {
+	x := agedFleet(t)
+	claims := x.claimUIDs()
+	x.setMember("alpha-1", x.clock.Add(-3*time.Hour), corev1.ConditionFalse, x.clock.Add(-2*time.Hour))
+	x.edit(func(f *fleet.CelldFleet) { f.Spec.RuntimeImage = fixtureRuntimeUpgrade })
+	// The reconcile that writes the new template replaces nothing.
+	if reason := readyReason(x.operatorStep()); reason != "Provisioning" {
+		t.Fatalf("upgrade reported %s", reason)
+	}
+	// Neither does one before the StatefulSet has observed that template.
+	sts := x.workload().(*appsv1.StatefulSet)
+	sts.Generation = sts.Status.ObservedGeneration + 1
+	if err := x.r.Update(t.Context(), sts); err != nil {
+		t.Fatal(err)
+	}
+	x.operatorStep()
+	x.settle()
+	for name, uid := range x.claimUIDs() {
+		if claims[name] != uid {
+			t.Fatalf("the upgrade replaced disk %s", name)
+		}
+	}
+}
+
+// A lost volume is replaced once the scheduler has decided every other
+// member's Pod, here alpha-1's, which is being recreated. Either decision
+// counts: a Pod on a node holds its zone, and one the scheduler cannot place
+// must not hold up the replacement.
+func TestPersistentFreshDiskWaitsForTheSchedulerToDecideEveryMember(t *testing.T) {
+	for name, decide := range map[string]func(x *operationFixture){
+		"placed": func(x *operationFixture) {
+			p := x.pod("alpha-1")
+			p.Spec.NodeName = "host-1"
+			if err := x.r.Update(x.t.Context(), p); err != nil {
+				x.t.Fatal(err)
+			}
+		},
+		"unschedulable": func(x *operationFixture) {
+			p := x.pod("alpha-1")
+			p.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: corev1.PodReasonUnschedulable, Message: spreadConflict, LastTransitionTime: metav1.NewTime(x.clock)}}
+			if err := x.r.Status().Update(x.t.Context(), p); err != nil {
+				x.t.Fatal(err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			x := persistentFleet(t)
+			claims := x.claimUIDs()
+			c := x.claim("data-alpha-2")
+			c.Status.Phase = corev1.ClaimLost
+			if err := x.r.Status().Update(t.Context(), c); err != nil {
+				t.Fatal(err)
+			}
+			x.pendMember("alpha-1", x.clock, "")
+			x.operatorStep()
+			decide(x)
+			if reason := readyReason(x.step()); reason != "LifecycleProgress" {
+				t.Fatalf("lost volume reported %s", reason)
+			}
+			if _, kept := x.claimUIDs()["data-alpha-2"]; kept {
+				t.Fatal("claim of a lost volume kept")
+			}
+			if x.claimUIDs()["data-alpha-1"] != claims["data-alpha-1"] {
+				t.Fatal("replaced the member being scheduled")
+			}
+		})
+	}
+}
+
+// A member whose disk pins it to a zone that another member has taken cannot
+// be scheduled. The status names it with the scheduler's reason, and after the
+// replacement delay it is replaced like any member that cannot come back.
+// With every other member on a node, the zone spread places its fresh disk in
+// the zone the fleet is missing.
+func TestPersistentReplacesAMemberItsDiskKeepsOffEveryNode(t *testing.T) {
+	x := agedFleet(t)
+	claims := x.claimUIDs()
+	x.pendMember("alpha-2", x.clock.Add(-time.Minute), spreadConflict)
+	f := x.operatorStep()
+	c := meta.FindStatusCondition(f.Status.Conditions, "Ready")
+	if c == nil || c.Reason != "Provisioning" || !strings.Contains(c.Message, "member alpha-2 cannot be scheduled ("+spreadReason+"); it is replaced on a fresh disk at") {
+		t.Fatalf("unschedulable member not reported: %+v", c)
+	}
+	if meta.IsStatusConditionTrue(f.Status.Conditions, "Blocked") {
+		t.Fatal("a member the operator will replace blocks the fleet")
+	}
+	x.clock = x.clock.Add(DefaultMemberReplacementDelay)
+	if reason := readyReason(x.step()); reason != "LifecycleProgress" {
+		t.Fatalf("unschedulable member reported %s", reason)
+	}
+	x.converge()
+	for name, uid := range x.claimUIDs() {
+		if fresh := uid != claims[name]; fresh != (name == "data-alpha-2") {
+			t.Fatalf("disk %s replaced=%v", name, fresh)
+		}
+	}
+}
+
+// A member the scheduler cannot place, and that the operator does not
+// replace, blocks the fleet once it has waited out the replacement delay.
+func TestPersistentBlocksOnAMemberItCannotPlaceOrReplace(t *testing.T) {
+	for name, tc := range map[string]struct {
+		setup func(x *operationFixture)
+		why   string
+	}{
+		// The deadlock #79 reported: alpha-1 came back on a fresh disk in the
+		// zone that alpha-2's disk needs, and its recovery waits for alpha-2.
+		// Neither is replaced while the other is down.
+		"another member down": {
+			setup: func(x *operationFixture) {
+				x.setMember("alpha-1", x.clock.Add(-2*time.Minute), corev1.ConditionFalse, x.clock.Add(-time.Minute))
+				c := x.claim("data-alpha-1")
+				c.CreationTimestamp = metav1.NewTime(x.clock.Add(-2 * time.Minute))
+				if err := x.r.Update(x.t.Context(), c); err != nil {
+					x.t.Fatal(err)
+				}
+			},
+			why: "; it is not replaced while member alpha-1 is also down",
+		},
+		// A member with no disk yet waits for a node; a fresh disk would not
+		// help it.
+		"no disk yet": {
+			setup: func(x *operationFixture) {
+				c := x.claim("data-alpha-2")
+				c.Status.Phase = corev1.ClaimPending
+				if err := x.r.Status().Update(x.t.Context(), c); err != nil {
+					x.t.Fatal(err)
+				}
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			x := agedFleet(t)
+			claims := x.claimUIDs()
+			x.pendMember("alpha-2", x.clock.Add(-time.Minute), spreadConflict)
+			tc.setup(x)
+			f := x.operatorStep()
+			if c := meta.FindStatusCondition(f.Status.Conditions, "Ready"); c == nil || c.Reason != "Provisioning" || !strings.HasSuffix(c.Message, "; member alpha-2 cannot be scheduled ("+spreadReason+")") {
+				t.Fatalf("unschedulable member not reported: %+v", c)
+			}
+			if meta.IsStatusConditionTrue(f.Status.Conditions, "Blocked") {
+				t.Fatal("blocked before the replacement delay")
+			}
+			since := x.clock.Add(-time.Minute).UTC().Format(time.RFC3339)
+			x.clock = x.clock.Add(DefaultMemberReplacementDelay)
+			f = x.operatorStep()
+			c := meta.FindStatusCondition(f.Status.Conditions, "Blocked")
+			want := "Member alpha-2 has not been scheduled since " + since + ": " + spreadReason + tc.why
+			if c == nil || c.Status != metav1.ConditionTrue || c.Reason != "MemberUnschedulable" || c.Message != want {
+				t.Fatalf("fleet not blocked on the member: %+v", c)
+			}
+			if !meta.IsStatusConditionTrue(f.Status.Conditions, "InfrastructureReady") || meta.IsStatusConditionTrue(f.Status.Conditions, "Progressing") {
+				t.Fatalf("blocked on a member with its objects in place: %+v", f.Status.Conditions)
+			}
+			if len(x.claimUIDs()) != len(claims) {
+				t.Fatal("replaced a disk")
+			}
+		})
+	}
+}
+
+// Once the other member is back and the rest of the fleet has been ready for
+// five minutes, the member the fleet was blocked on is replaced.
+func TestPersistentReplacesTheMemberItWasBlockedOnOnceTheOtherReturns(t *testing.T) {
+	x := agedFleet(t)
+	x.setMember("alpha-1", x.clock.Add(-2*time.Minute), corev1.ConditionFalse, x.clock.Add(-time.Minute))
+	x.pendMember("alpha-2", x.clock.Add(-time.Minute), spreadConflict)
+	x.clock = x.clock.Add(DefaultMemberReplacementDelay)
+	if reason := readyReason(x.operatorStep()); reason != "MemberUnschedulable" {
+		t.Fatalf("stuck members reported %s", reason)
+	}
+	x.setMember("alpha-1", x.clock.Add(-12*time.Minute), corev1.ConditionTrue, x.clock)
+	if reason := readyReason(x.operatorStep()); reason != "MemberUnschedulable" {
+		t.Fatalf("replaced a member before the rest of the fleet had been ready for five minutes: %s", reason)
+	}
+	x.clock = x.clock.Add(absorbWindow)
+	if reason := readyReason(x.step()); reason != "LifecycleProgress" {
+		t.Fatalf("member blocked on its disk reported %s", reason)
+	}
+	if _, kept := x.podUIDs()["alpha-2"]; kept {
+		t.Fatal("member blocked on its disk not replaced")
+	}
+}
+
 // The operator restarted after deleting a replaced member's claim but before
 // deleting its Pod: the Pod still holds the claim, so it is deleted next.
 func TestPersistentFinishesInterruptedReplacement(t *testing.T) {

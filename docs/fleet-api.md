@@ -24,9 +24,9 @@ and upgrades are one-member rolling updates for both profiles;
 `allowCoordinatedDowntime` is accepted and ignored.
 
 PersistentFleet has no member-replacement API. The operator replaces a member
-that cannot come back on its own: at once when its claim is `Lost`, or after
-the replacement delay when it is the one member down and the rest of the fleet
-is ready. The StatefulSet creates a fresh claim. See
+that cannot come back on its own: when its claim is `Lost`, or after the
+replacement delay when it is the one member down and the rest of the fleet is
+ready. The StatefulSet creates a fresh claim. See
 [self-healing](current-operation.md#self-healing).
 
 `spec.env` adds up to 32 `CELLD_` variables with either a literal `value` or a

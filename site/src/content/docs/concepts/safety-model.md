@@ -29,17 +29,24 @@ for any other failure.
 
 The operator deletes an existing disk on its own only when the disk cannot come
 back. A claim that Kubernetes marks `Lost` has no volume behind it and is
-replaced at once. Otherwise one member must have been down for the replacement
-delay, 10 minutes by default, while every other member has been ready for five
-minutes. Leaders stop using a departed member within seconds, and every member
-sweeps dead leaders every 30 seconds, so by then no session depends on the down
-member's disk. A member on a fresh disk answers recovery for its old
-disk with a conclusive "no fragment", and celld records a bounded loss for any session whose only
-complete copy was on the old disk. With the rest of the fleet ready, none
-remains unless a second failure happened first. See
+replaced as soon as the scheduler has decided every other member's Pod.
+Otherwise one member must have been down for the replacement delay, 10 minutes
+by default, while every other member has been ready for five minutes. Leaders
+stop using a departed member within seconds, and every member sweeps dead
+leaders every 30 seconds, so by then no session depends on the down member's
+disk. A member on a fresh disk answers recovery for its old disk with a
+conclusive "no fragment", and celld records a bounded loss for any session
+whose only complete copy was on the old disk. With the rest of the fleet ready,
+none remains unless a second failure happened first. See
 [self-healing](../current-operation/#self-healing) and
 [lost disks](../../troubleshoot/recovery/#lost-disks). No EC2 fence,
 force-detach or storage-finalizer removal exists.
+
+A fresh disk is created in the zone where its Pod is first scheduled. The
+operator gives one only when no rollout is about to recreate another member
+and the scheduler has decided every other member's Pod, so the fresh disk
+cannot take the zone another member's disk is pinned to. See
+[where a fresh disk goes](../current-operation/#where-a-fresh-disk-goes).
 
 Read the [PersistentFleet lifecycle](../current-operation/),
 [retained disks](../../contracts/disposable-disks/) and
