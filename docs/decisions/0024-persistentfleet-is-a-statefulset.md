@@ -1,15 +1,13 @@
 # 0024: PersistentFleet is a StatefulSet
 
-Status: accepted. Supersedes the PersistentFleet profile, controller state and
-celld contract sections of [0023](0023-node-loss-is-routine.md). The rest of
-0023 stands: Bucket fleets are plain rolling workloads, the launcher is gone,
-the operator owns only the fields it sets, and bucket reservations, pinned
-artifacts and network isolation are unchanged.
+Status: accepted and implemented. Builds on
+[0023](0023-node-loss-is-routine.md), and replaces the PersistentFleet
+lifecycle that 0023 first proposed.
 
 ## Context
 
-0023 kept PersistentFleet disks across restart and upgrade, but it gave the
-operator a lifecycle of its own:
+0023 as first accepted kept PersistentFleet disks across restart and upgrade,
+but it gave the operator a lifecycle of its own:
 
 - It read celld's `/state.node_log` from every member on each reconcile. It
   derived a fleet-wide `settled` value from it and gated each restart on it.
@@ -62,9 +60,10 @@ lifecycle state.
   scale-in and deletion.
 - **Disruption budget.** A fixed `maxUnavailable: 1`. A Pod that is not Ready
   counts against it, so node drains proceed one member at a time.
-- **Replica count.** Growth is applied in one step. Contraction removes one
-  member per step, and only after the previous change has rolled out. This is
-  the same rule Bucket fleets follow. Automatic and External contraction still
+- **Replica count.** Growth is applied one run of ordinals at a time, kept
+  disks and fresh disks never in the same run (see below). Contraction removes
+  one member per step, and only after the previous change has rolled out. This
+  is the same contraction rule Bucket fleets follow. Automatic and External contraction still
   require survivor-capacity evidence.
 - **Storage identity.** Before creating or growing the StatefulSet, the
   operator refuses to proceed if a claim at a member's name does not carry the
@@ -117,8 +116,14 @@ reconcile, and records nothing:
   gives a member a fresh disk only when the StatefulSet already runs and has
   observed the operator's spec, so no rollout is about to recreate another
   member, and the scheduler has placed, or found no node for, every other
-  member's Pod. The fresh disk then goes to the zone the fleet is missing. A
-  member the scheduler cannot place is named in the fleet's status. If the
+  member's Pod. The fresh disk then goes to the zone the fleet is missing.
+  Growth follows the same rule: the StatefulSet creates every new Pod at once,
+  so the operator adds one run of consecutive ordinals at a time, all
+  reattaching kept claims or all getting new ones, and each run waits until the
+  StatefulSet has observed its spec and the scheduler has decided every current
+  member's Pod. The runs are read from the claims on each reconcile. A
+  capacity-policy addition that spans both kinds is cut at the end of its first
+  run and recorded as that step. A member the scheduler cannot place is named in the fleet's status. If the
   operator has not replaced it by the end of the replacement delay, the fleet
   reports `Blocked` with reason `MemberUnschedulable`.
 
@@ -156,18 +161,23 @@ happened first.
   most the replacement delay. A lost volume is replaced once the scheduler has
   decided the other members' Pods, usually within seconds. The fleet keeps
   serving on the other members throughout.
-- Growth to a new ordinal, and a claim an administrator deletes, get fresh
-  disks from the StatefulSet without that wait. If such a disk takes the zone a
-  pending member's disk needs, the pending member cannot be scheduled and is
-  replaced after the replacement delay, as a member that cannot come back.
+- Growth reattaches kept disks before it adds fresh ones, and adds each run
+  only once every current member's Pod has been placed or found unschedulable.
+  Growth across a mix of kept and fresh ordinals therefore takes several
+  scheduling rounds instead of one. A capacity-policy addition cut short this
+  way adds the rest only if the policy asks again.
+- A claim an administrator deletes gets a fresh disk from the StatefulSet
+  without that wait. If it takes the zone a pending member's disk needs, the
+  pending member cannot be scheduled and is replaced after the replacement
+  delay, as a member that cannot come back.
 - The operator deletes an existing disk on its own only when that disk's
   member has been down for the replacement delay while the rest of the fleet
-  was ready. This is a deliberate change from 0023, where only an
-  administrator could do that.
+  was ready. This is a deliberate change from 0023's first lifecycle, where
+  only an administrator could do that.
 - Two members that cannot come back at the same time wait until one returns,
   unless their volumes are lost. celld's guarantee covers the loss of one node.
-- The fleet rebuild that 0023 left as an explicit administrative operation is
-  not needed. A fleet recovers from any outage on its members' own disks, and a
+- The fleet rebuild that 0023's first lifecycle left as an explicit
+  administrative operation is not needed. A fleet recovers from any outage on its members' own disks, and a
   rolling restart is the only lever an administrator needs. Replacing every
   disk at once would record every session whose writes were only on those
   disks as lost, and on runtimes before `0.5.1-ewhauser.7` it stalls recovery.

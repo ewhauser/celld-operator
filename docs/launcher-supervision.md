@@ -9,7 +9,8 @@ likewise unnecessary.
 Earlier releases ran PersistentFleet under a launcher that captured celld's
 strict `remove-disk` result, proved exact child exit and inherited-lock release,
 and wrote a permanent restart-deny marker on the disk before the operator
-removed a member ([ADR 0022](decisions/0022-celld-control-plane.md)). PersistentFleet
+removed a member (ADR 0022, now in Git history; see
+[ADR 0023](decisions/0023-node-loss-is-routine.md)). PersistentFleet
 is now a StatefulSet that restarts one member at a time on its retained disk;
 see [PersistentFleet lifecycle](current-operation.md).
 

@@ -47,10 +47,21 @@ five minutes, the operator replaces it after the replacement delay, 10 minutes
 by default. Its new disk is created where its Pod is scheduled, in the zone
 the fleet is missing. No manual step is needed.
 
-The operator avoids putting a member in this position: it gives a fresh disk
-only after the scheduler has decided every other member's Pod. Growth to a new
-ordinal, or a claim deleted by hand while another member was restarting, can
-still take a pending member's zone; the operator then heals it as above.
+The operator avoids putting a member in this position: it gives a fresh disk,
+and grows the fleet, only after the scheduler has decided every other member's
+Pod, and it reattaches removed members' kept disks before it adds new ones. A
+claim deleted by hand while another member was restarting can still take a
+pending member's zone; the operator then heals it as above.
+
+While growth waits for the scheduler, the fleet says so:
+
+```text
+Waiting for the scheduler to place member my-fleet-2, or find no node for it, before adding members my-fleet-3 to my-fleet-4 on fresh disks
+```
+
+It clears once that member is on a node or reports `FailedScheduling`. If it
+does not, check the member's Pod events for a Pod that is recreated repeatedly
+or held by a scheduling gate.
 
 If the operator does not replace the member, the fleet reports `Blocked` with
 reason `MemberUnschedulable` once the member has gone unscheduled for the

@@ -30,7 +30,7 @@ StatefulSet; their disks are caches.
 | --- | --- |
 | Restart or upgrade | A new `maintenance.restartToken` or `runtimeImage` changes the Pod template. The StatefulSet uses `RollingUpdate`: Kubernetes restarts one member at a time, highest ordinal first, and waits for each to be Ready. Each member reattaches its disk. An operator release that changes the template rolls the same way. |
 | Scale-in | One member per step, the highest ordinal, and only after the previous change has rolled out. The removed member keeps its PVC. `Automatic` and `External` contraction also require survivor-capacity evidence (`CapacityUncertain`). |
-| Growth | Applied in one step. An ordinal that had a member before reattaches its kept PVC, and celld treats that as a restart. New ordinals get new claims. |
+| Growth | Applied one run of ordinals at a time, so kept disks are placed before fresh ones; see [where a fresh disk goes](#where-a-fresh-disk-goes). An ordinal that had a member before reattaches its kept PVC, and celld treats that as a restart. New ordinals get new claims. |
 | Node drain | The PodDisruptionBudget allows `maxUnavailable: 1`. A member that is not Ready counts against it, so drains proceed one member at a time. |
 | Pause | `maintenance.paused` stops the operator from writing workload changes and from replacing members. A rollout the StatefulSet controller has already started continues. |
 | Full stop | A runtime pair that cannot run together, such as `0.5.1-ewhauser` to `0.6.0-ewhauser`, is upgraded by pausing the fleet, scaling its StatefulSet to zero, then setting the new image and resuming in one change. Every member returns on its own disk at the declared count, whatever the capacity policy. See [upgrade the runtime](../../operate/upgrade-runtime/#full-stop-upgrade). |
@@ -101,6 +101,22 @@ usually replaced within seconds. During an operator upgrade, a member that an
 earlier release left down is restarted by the rollout on its own disk before
 the operator considers replacing it.
 
+Growth follows the same rule. The StatefulSet creates every new Pod at once,
+so the operator grows one run of ordinals at a time: consecutive ordinals that
+all kept their claims, or consecutive ordinals that all get new ones. Growing
+back to removed members reattaches their disks first. Each run waits until the
+scheduler has placed, or found no node for, every current member's Pod, and
+the fleet reports `Provisioning` while it waits:
+
+```text
+Waiting for the scheduler to place member my-fleet-2, or find no node for it, before adding members my-fleet-3 to my-fleet-4 on fresh disks
+```
+
+A manual or External target is reached over as many runs as it takes. A
+capacity-policy addition that spans kept and fresh ordinals is cut at the end
+of its first run, and the policy adds more after its next stable window if
+pressure remains.
+
 A member whose Pod the scheduler cannot place is named in the fleet's status
 with the scheduler's reason. If it is the one member down, it is replaced after
 the replacement delay like any other. If the operator does not replace it,
@@ -116,11 +132,14 @@ unscheduled for the replacement delay. See
   Replacing either could lose writes that only their disks hold. celld's
   guarantee covers the loss of one member. If one of them cannot be scheduled,
   the fleet reports `MemberUnschedulable` after the replacement delay.
-- **Growth and hand-deleted claims do not wait for placement.** The
-  StatefulSet gives a new ordinal, or a claim you delete, a fresh disk as soon
-  as it creates the member's Pod. If that disk takes the zone a pending
-  member's disk needs, the pending member is replaced after the replacement
-  delay, once the rest of the fleet is ready.
+- **Hand-deleted claims do not wait for placement.** The StatefulSet gives a
+  claim you delete a fresh disk as soon as it creates the member's Pod. If
+  that disk takes the zone a pending member's disk needs, the pending member is
+  replaced after the replacement delay, once the rest of the fleet is ready.
+- **Growth is paced by scheduling.** Each run of new members waits until the
+  scheduler has decided every current member's Pod. A member whose Pod never
+  reaches the scheduler holds growth back; one the scheduler cannot place does
+  not.
 - **Pacing is readiness.** Kubernetes does not wait for celld to finish
   recovering other sessions between restarts. With disks kept, a restart
   destroys nothing.
