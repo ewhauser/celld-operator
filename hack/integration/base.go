@@ -138,12 +138,14 @@ func (h *harness) exerciseIsolation() {
 	fmt.Println("PASS: schema rejects invalid specs and lifecycle mutations")
 	h.assertDirectRuntime("alpha")
 	h.assertDirectRuntime("beta")
-	nodeLog := sub(decode(h.curl(request{pod: "operator", address: addresses["beta"], ns: operatorNS})), "node_log")
-	assert(str(nodeLog, "posture") == "fleet", "PersistentFleet runtime does not report fleet node_log state: %v", nodeLog)
+	// The operator reads only the /state.shutdown identity; celld
+	// 0.6.0-ewhauser.2 no longer reports /state.node_log.
+	shutdown := sub(decode(h.curl(request{pod: "operator", address: addresses["beta"], ns: operatorNS})), "shutdown")
+	assert(num(shutdown, "schema_version") == 1 && str(shutdown, "runtime_generation") != "", "PersistentFleet runtime does not report its shutdown identity: %v", shutdown)
 	// This probe uses the operator's network label and therefore also matches
 	// its Deployment selector. It must not shadow later manager Pod selection.
 	h.k("-n", operatorNS, "delete", "pod", "operator", "--wait=true")
-	fmt.Println("PASS: PersistentFleet members report /state.node_log in fleet posture")
+	fmt.Println("PASS: PersistentFleet members report their /state.shutdown identity")
 	h.waitSettled("beta", 2, 5*time.Minute)
 	assert(h.budget("beta") == 1 && h.budget("alpha") == 1, "settled fleets do not allow one disruption")
 	// Template drift in the operator's own fields is converged, not blocked.

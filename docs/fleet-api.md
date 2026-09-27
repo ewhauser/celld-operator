@@ -43,7 +43,11 @@ restart the fleet after a rotation.
 `spec.telemetry` enables OTLP export to `collectorURL`; omission leaves it
 disabled. The operator emits `CELLD_OTEL=<collector URL>`, optional sampler and
 flush settings, and optional `OTEL_EXPORTER_OTLP_HEADERS` from a same-namespace
-Secret key. It never emits the removed `CELLD_OTEL_SINK`. `egress` is required
+Secret key. It also emits `OTEL_RESOURCE_ATTRIBUTES` with
+`k8s.namespace.name`, `k8s.pod.name` (from `POD_NAME`, set by the downward API)
+and `celld.fleet.name`, so celld's OTLP signals join the operator's
+`celld_fleet_*` metrics on namespace and fleet; celld reads it from
+`0.6.0-ewhauser.2`. It never emits the removed `CELLD_OTEL_SINK`. `egress` is required
 and adds one TCP rule for the collector URL's port, scoped to one IP address
 (`cidr` /32 or /128) or labeled collector Pods (`podLabels`, with optional
 `namespace`). The administrator must ensure the URL resolves to the selected
