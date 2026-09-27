@@ -40,7 +40,7 @@ is deleted. Delete one by hand only if the fleet will not grow back to that
 ordinal; see the [limits](current-operation.md#limits).
 
 The operator replaces a member's disk in two cases. A claim in phase `Lost` has
-no volume behind it, so the operator deletes the claim and the Pod at once. A
+no volume behind it, so the operator deletes the claim and the Pod. A
 member that has stayed down for the replacement delay, 10 minutes by default,
 while every other member has been ready for five minutes, is treated as lost,
 and the operator deletes its claim and Pod. The StatefulSet then creates a
@@ -48,7 +48,10 @@ fresh claim for the new Pod, and celld records a bounded loss for any session
 whose only complete copy was on the old disk. A member waiting on its image or
 configuration, or already on a disk created for its current Pod, is left alone.
 When two members are down at once, neither is replaced until one returns,
-unless a volume is lost. See [self-healing](current-operation.md#self-healing).
+unless a volume is lost. The operator gives a fresh disk only when no other
+member's Pod is waiting to be scheduled, so the new disk cannot take the zone
+another member's disk is pinned to. See
+[self-healing](current-operation.md#self-healing).
 
 ## What deletion establishes
 

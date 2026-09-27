@@ -109,6 +109,9 @@ func (r *Reconciler) reconcileWorkload(ctx context.Context, f *fleet.CelldFleet,
 		}
 	}
 	setReplicas(desired, target)
+	// A workload this reconcile does not write, and whose controller has
+	// observed it, has no rollout pending that could recreate a member.
+	settled := matches(desired, actual) && observed(actual)
 	if err := r.converge(ctx, desired, actual); err != nil {
 		if apierrors.IsConflict(err) {
 			return ctrl.Result{}, err
@@ -138,12 +141,15 @@ func (r *Reconciler) reconcileWorkload(ctx context.Context, f *fleet.CelldFleet,
 	h = &loadedState{res: h.res, j: s}
 	waiting := ""
 	if sts, ok := actual.(*appsv1.StatefulSet); ok {
-		action, note, err := r.healMembers(ctx, f, sts)
+		action, note, blocked, err := r.healMembers(ctx, f, sts, settled)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
 		if action != "" {
 			return r.report(ctx, f, h, "LifecycleProgress", action, true)
+		}
+		if blocked {
+			return r.report(ctx, f, h, "MemberUnschedulable", note, true)
 		}
 		waiting = note
 	}
@@ -231,12 +237,24 @@ func rolledOut(w client.Object) bool {
 	switch w := w.(type) {
 	case *appsv1.Deployment:
 		st := w.Status
-		return st.ObservedGeneration >= w.Generation && st.Replicas == n && st.UpdatedReplicas == n && st.ReadyReplicas == n
+		return observed(w) && st.Replicas == n && st.UpdatedReplicas == n && st.ReadyReplicas == n
 	case *appsv1.StatefulSet:
 		// Only a converged workload is checked, so the strategy is always
 		// RollingUpdate, which advances currentRevision when the roll completes.
 		st := w.Status
-		return st.ObservedGeneration >= w.Generation && st.Replicas == n && st.UpdatedReplicas == n && st.ReadyReplicas == n && st.CurrentRevision == st.UpdateRevision
+		return observed(w) && st.Replicas == n && st.UpdatedReplicas == n && st.ReadyReplicas == n && st.CurrentRevision == st.UpdateRevision
+	}
+	return false
+}
+
+// observed reports whether the workload controller has acted on the
+// workload's current spec.
+func observed(w client.Object) bool {
+	switch w := w.(type) {
+	case *appsv1.Deployment:
+		return w.Status.ObservedGeneration >= w.Generation
+	case *appsv1.StatefulSet:
+		return w.Status.ObservedGeneration >= w.Generation
 	}
 	return false
 }

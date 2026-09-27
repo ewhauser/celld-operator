@@ -51,7 +51,7 @@ records nothing:
 | Condition | Action | Event |
 | --- | --- | --- |
 | A member Pod is still present more than two minutes after its termination grace ended, because its node no longer answers | Force-delete the Pod. The StatefulSet recreates it and the member keeps its disk. Also applies to Ordered Bucket fleets. | `MemberForceDeleted` |
-| A member's claim is `Lost`, because its volume no longer exists | Delete the claim and the Pod at once. The StatefulSet recreates both. | `MemberDiskLost` |
+| A member's claim is `Lost`, because its volume no longer exists | Delete the claim and the Pod. The StatefulSet recreates both. | `MemberDiskLost` |
 | One member has been down for the replacement delay while every other member has been ready for five minutes | Delete the claim and the Pod. The member returns on a fresh disk. | `MemberReplaced` |
 
 celld's lease fences a process that survives on a lost node, and a
@@ -82,12 +82,45 @@ a second failure happened first.
 [Lost disks](../../troubleshoot/recovery/#lost-disks) describes what you see
 while this happens.
 
+### Where a fresh disk goes
+
+A member's disk pins it to the zone where the disk was created, and the zone
+spread counts only Pods that are on nodes. A member whose Pod is pending leaves
+its zone looking empty, so a fresh disk scheduled at that moment can take the
+zone that member's disk needs. The pending member then has no zone it may run
+in. The operator therefore gives a member a fresh disk only when:
+
+- the StatefulSet already runs the operator's current template and replica
+  count and has observed them, so no rollout is about to recreate another
+  member; and
+- the scheduler has placed every other member's Pod on a node, or found no node
+  for it.
+
+The fresh disk then goes to the zone the fleet is missing. A lost volume is
+usually replaced within seconds. During an operator upgrade, a member that an
+earlier release left down is restarted by the rollout on its own disk before
+the operator considers replacing it.
+
+A member whose Pod the scheduler cannot place is named in the fleet's status
+with the scheduler's reason. If it is the one member down, it is replaced after
+the replacement delay like any other. If the operator does not replace it,
+because another member is also down or because it has no disk yet, the fleet
+reports `Blocked` with reason `MemberUnschedulable` once the member has gone
+unscheduled for the replacement delay. See
+[scheduling problems](../../troubleshoot/scheduling/#a-member-that-cannot-be-scheduled).
+
 ## Limits
 
 - **Two members that cannot come back wait.** When two members are down at
   once, neither is replaced until one returns, unless its volume is lost.
   Replacing either could lose writes that only their disks hold. celld's
-  guarantee covers the loss of one member.
+  guarantee covers the loss of one member. If one of them cannot be scheduled,
+  the fleet reports `MemberUnschedulable` after the replacement delay.
+- **Growth and hand-deleted claims do not wait for placement.** The
+  StatefulSet gives a new ordinal, or a claim you delete, a fresh disk as soon
+  as it creates the member's Pod. If that disk takes the zone a pending
+  member's disk needs, the pending member is replaced after the replacement
+  delay, once the rest of the fleet is ready.
 - **Pacing is readiness.** Kubernetes does not wait for celld to finish
   recovering other sessions between restarts. With disks kept, a restart
   destroys nothing.
