@@ -1,15 +1,13 @@
 # 0024: PersistentFleet is a StatefulSet
 
-Status: accepted. Supersedes the PersistentFleet profile, controller state and
-celld contract sections of [0023](0023-node-loss-is-routine.md). The rest of
-0023 stands: Bucket fleets are plain rolling workloads, the launcher is gone,
-the operator owns only the fields it sets, and bucket reservations, pinned
-artifacts and network isolation are unchanged.
+Status: accepted and implemented. Builds on
+[0023](0023-node-loss-is-routine.md), and replaces the PersistentFleet
+lifecycle that 0023 first proposed.
 
 ## Context
 
-0023 kept PersistentFleet disks across restart and upgrade, but it gave the
-operator a lifecycle of its own:
+0023 as first accepted kept PersistentFleet disks across restart and upgrade,
+but it gave the operator a lifecycle of its own:
 
 - It read celld's `/state.node_log` from every member on each reconcile. It
   derived a fleet-wide `settled` value from it and gated each restart on it.
@@ -174,12 +172,12 @@ happened first.
   delay, as a member that cannot come back.
 - The operator deletes an existing disk on its own only when that disk's
   member has been down for the replacement delay while the rest of the fleet
-  was ready. This is a deliberate change from 0023, where only an
-  administrator could do that.
+  was ready. This is a deliberate change from 0023's first lifecycle, where
+  only an administrator could do that.
 - Two members that cannot come back at the same time wait until one returns,
   unless their volumes are lost. celld's guarantee covers the loss of one node.
-- The fleet rebuild that 0023 left as an explicit administrative operation is
-  not needed. A fleet recovers from any outage on its members' own disks, and a
+- The fleet rebuild that 0023's first lifecycle left as an explicit
+  administrative operation is not needed. A fleet recovers from any outage on its members' own disks, and a
   rolling restart is the only lever an administrator needs. Replacing every
   disk at once would record every session whose writes were only on those
   disks as lost, and on runtimes before `0.5.1-ewhauser.7` it stalls recovery.
