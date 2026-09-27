@@ -23,9 +23,11 @@ survivor capacity for every possible victim, else `CapacityUncertain`.
 PersistentFleet scale-in follows the same rule: one member per step, the
 highest ordinal, and only after the previous change has rolled out. The removed
 member drains on SIGTERM and its claim, such as `data-my-fleet-3`, is kept.
-Growth is applied in one step. An ordinal that had a member before reattaches
-its kept claim, which celld treats as a restart on the same disk; new ordinals
-get new claims. A claim at a member's name without this fleet's UID label stops
+An ordinal that had a member before reattaches its kept claim, which celld
+treats as a restart on the same disk; new ordinals get new claims. Growth adds
+one run of ordinals at a time, kept claims first when the fleet grows back, and
+each run waits until the scheduler has placed, or found no node for, every
+current member, so a new disk cannot take the zone a kept disk needs. A claim at a member's name without this fleet's UID label stops
 growth with `StorageIdentityConflict`. See the
 [PersistentFleet lifecycle](../../concepts/current-operation/).
 

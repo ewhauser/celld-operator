@@ -45,7 +45,8 @@ import (
 // once the StatefulSet has caught up with the operator's spec, so a rollout
 // cannot recreate another member alongside it, and the scheduler has placed,
 // or found no node for, every other member's Pod. The fresh disk then goes to
-// the zone the fleet is missing.
+// the zone the fleet is missing. Growth follows the same rule, one run of kept
+// or fresh disks at a time (growth).
 //
 // Each reconcile takes at most one of these actions. A member the scheduler
 // cannot place is named in the fleet's status, and once it has waited out the
@@ -91,17 +92,9 @@ func (r *Reconciler) memberReplacementDelay() time.Duration {
 // settled reports that the StatefulSet already runs the operator's spec and
 // has observed it.
 func (r *Reconciler) healMembers(ctx context.Context, f *fleet.CelldFleet, sts *appsv1.StatefulSet, settled bool) (action, note string, blocked bool, err error) {
-	list := &corev1.PodList{}
-	if err := r.List(ctx, list, client.InNamespace(f.Namespace), client.MatchingLabels(labels(f))); err != nil {
+	pods, err := r.memberPods(ctx, f, sts)
+	if err != nil {
 		return "", "", false, err
-	}
-	// Only Pods the StatefulSet controls are members; anything else that
-	// carries the fleet's label is ignored.
-	var pods []corev1.Pod
-	for _, p := range list.Items {
-		if owner := metav1.GetControllerOf(&p); owner != nil && owner.UID == sts.UID {
-			pods = append(pods, p)
-		}
 	}
 	now := r.capacityNow()
 	for i := range pods {
@@ -206,6 +199,76 @@ func (r *Reconciler) healMembers(ctx context.Context, f *fleet.CelldFleet, sts *
 		return "", message, true, nil
 	}
 	return "", "", false, nil
+}
+
+// memberPods lists the StatefulSet's Pods. Only Pods it controls are
+// members; anything else that carries the fleet's label is ignored.
+func (r *Reconciler) memberPods(ctx context.Context, f *fleet.CelldFleet, sts *appsv1.StatefulSet) ([]corev1.Pod, error) {
+	list := &corev1.PodList{}
+	if err := r.List(ctx, list, client.InNamespace(f.Namespace), client.MatchingLabels(labels(f))); err != nil {
+		return nil, err
+	}
+	var pods []corev1.Pod
+	for _, p := range list.Items {
+		if owner := metav1.GetControllerOf(&p); owner != nil && owner.UID == sts.UID {
+			pods = append(pods, p)
+		}
+	}
+	return pods, nil
+}
+
+// growth returns how far a PersistentFleet grows toward target now, or why it
+// does not grow yet. The StatefulSet creates every new Pod at once, and a Pod
+// that reattaches a kept disk is pinned to that disk's zone while a Pod on a
+// fresh disk may take any zone the spread allows. Created together, the fresh
+// disk can take the zone a kept disk needs (#79). Growth therefore adds one
+// run of ordinals at a time, all of them reattaching kept claims or all of
+// them getting fresh disks, and each run waits until the scheduler has
+// decided every current member's Pod, so the zones kept disks hold are
+// counted.
+func (r *Reconciler) growth(ctx context.Context, f *fleet.CelldFleet, sts *appsv1.StatefulSet, target int32) (int32, string, error) {
+	applied := replicas(sts)
+	if f.Spec.Profile != "PersistentFleet" {
+		return target, "", nil
+	}
+	pods, err := r.memberPods(ctx, f, sts)
+	if err != nil {
+		return 0, "", err
+	}
+	claims := &corev1.PersistentVolumeClaimList{}
+	if err := r.List(ctx, claims, client.InNamespace(f.Namespace), client.MatchingLabels(labels(f))); err != nil {
+		return 0, "", err
+	}
+	kept := map[string]bool{}
+	for _, c := range claims.Items {
+		kept[c.Name] = c.DeletionTimestamp.IsZero()
+	}
+	end := applied + 1
+	for end < target && kept[claimName(f, end)] == kept[claimName(f, applied)] {
+		end++
+	}
+	adding := fmt.Sprintf("adding member %s on a fresh disk", memberName(f, applied))
+	switch {
+	case kept[claimName(f, applied)] && end-applied > 1:
+		adding = fmt.Sprintf("adding members %s to %s on their kept disks", memberName(f, applied), memberName(f, end-1))
+	case kept[claimName(f, applied)]:
+		adding = fmt.Sprintf("adding member %s on its kept disk", memberName(f, applied))
+	case end-applied > 1:
+		adding = fmt.Sprintf("adding members %s to %s on fresh disks", memberName(f, applied), memberName(f, end-1))
+	}
+	if !observed(sts) {
+		return applied, "Waiting for the StatefulSet to observe its spec before " + adding, nil
+	}
+	podOf := map[string]*corev1.Pod{}
+	for i := range pods {
+		podOf[pods[i].Name] = &pods[i]
+	}
+	for ordinal := range applied {
+		if name := memberName(f, ordinal); !scheduleDecided(podOf[name]) {
+			return applied, fmt.Sprintf("Waiting for the scheduler to place member %s, or find no node for it, before %s", name, adding), nil
+		}
+	}
+	return end, "", nil
 }
 
 func (r *Reconciler) healed(f *fleet.CelldFleet, reason, message string) (string, string, bool, error) {

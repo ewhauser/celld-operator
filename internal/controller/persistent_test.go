@@ -805,3 +805,177 @@ func TestPersistentIgnoresPodsTheStatefulSetDoesNotControl(t *testing.T) {
 		t.Fatalf("a stray labeled Pod changed the fleet's status: %s", reason)
 	}
 }
+
+// Growth in runs: kept disks pin their members to zones, and a fresh disk
+// created alongside them can take a zone one of them needs (#79).
+
+// scheduleNoNode records the scheduler's verdict that it found no node for a
+// member's pending Pod.
+func (x *operationFixture) scheduleNoNode(name string) {
+	x.t.Helper()
+	p := x.pod(name)
+	p.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: corev1.PodReasonUnschedulable, Message: spreadConflict, LastTransitionTime: metav1.NewTime(x.clock)}}
+	if err := x.r.Status().Update(x.t.Context(), p); err != nil {
+		x.t.Fatal(err)
+	}
+}
+
+func waitingFor(t *testing.T, f *fleet.CelldFleet, want string) {
+	t.Helper()
+	if c := meta.FindStatusCondition(f.Status.Conditions, "Ready"); c == nil || c.Reason != "Provisioning" || c.Message != want {
+		t.Fatalf("growth wait not reported: %+v", c)
+	}
+}
+
+// Growth first reattaches the run of ordinals that kept their disks. Members
+// on fresh disks are added only once the scheduler has placed each existing
+// member, or found no node for it, so every zone a kept disk holds is counted.
+func TestPersistentGrowthReattachesKeptDisksBeforeAddingFreshOnes(t *testing.T) {
+	x := persistentFleet(t)
+	x.desired(1)
+	x.settle()
+	claims := x.claimUIDs()
+	x.desired(5)
+	x.operatorStep()
+	if n := replicas(x.workload()); n != 3 {
+		t.Fatalf("growth wrote %d replicas, want the 3 with kept disks", n)
+	}
+	x.syncWorkload()
+	x.pendMember("alpha-1", x.clock, "")
+	x.pendMember("alpha-2", x.clock, "")
+	waitingFor(t, x.operatorStep(), "Waiting for the scheduler to place member alpha-1, or find no node for it, before adding members alpha-3 to alpha-4 on fresh disks")
+	p := x.pod("alpha-1")
+	p.Spec.NodeName = "host-1"
+	if err := x.r.Update(t.Context(), p); err != nil {
+		t.Fatal(err)
+	}
+	waitingFor(t, x.operatorStep(), "Waiting for the scheduler to place member alpha-2, or find no node for it, before adding members alpha-3 to alpha-4 on fresh disks")
+	if n := replicas(x.workload()); n != 3 {
+		t.Fatalf("added fresh disks while a kept disk's member was undecided: %d replicas", n)
+	}
+	// A member the scheduler cannot place does not hold growth back.
+	x.scheduleNoNode("alpha-2")
+	x.operatorStep()
+	if n := replicas(x.workload()); n != 5 {
+		t.Fatalf("fresh members not added once every member was decided: %d replicas", n)
+	}
+	x.syncWorkload()
+	for name, uid := range x.claimUIDs() {
+		if old, ok := claims[name]; ok != (uid == old) {
+			t.Fatalf("disk %s kept=%v", name, ok)
+		}
+	}
+	x.storesNothing()
+}
+
+// A run of fresh disks ends at the next ordinal that kept its disk, here
+// alpha-2 after alpha-1's claim was deleted by hand.
+func TestPersistentGrowthReattachesAfterAFreshRun(t *testing.T) {
+	x := persistentFleet(t)
+	x.desired(1)
+	x.settle()
+	if err := x.r.Delete(t.Context(), x.claim("data-alpha-1")); err != nil {
+		t.Fatal(err)
+	}
+	claims := x.claimUIDs()
+	x.desired(3)
+	x.operatorStep()
+	if n := replicas(x.workload()); n != 2 {
+		t.Fatalf("growth wrote %d replicas, want the fresh run to end before alpha-2", n)
+	}
+	waitingFor(t, x.operatorStep(), "Waiting for the scheduler to place member alpha-1, or find no node for it, before adding member alpha-2 on its kept disk")
+	x.syncWorkload()
+	x.settle()
+	if n := replicas(x.workload()); n != 3 {
+		t.Fatalf("growth stopped at %d replicas", n)
+	}
+	got := x.claimUIDs()
+	if got["data-alpha-2"] != claims["data-alpha-2"] || got["data-alpha-1"] == "" {
+		t.Fatalf("growth did not reattach alpha-2's disk after alpha-1's fresh one: %v", got)
+	}
+}
+
+// A claim from another fleet anywhere in the requested growth blocks all of
+// it, including the run of kept disks before it.
+func TestPersistentForeignClaimBlocksEveryGrowthStep(t *testing.T) {
+	x := persistentFleet(t)
+	x.desired(1)
+	x.settle()
+	foreign := &corev1.PersistentVolumeClaim{Name: "data-alpha-4", Namespace: x.f.Namespace, Labels: map[string]string{FleetLabel: "another-fleet"}}
+	if err := x.r.Create(t.Context(), foreign); err != nil {
+		t.Fatal(err)
+	}
+	x.desired(5)
+	if reason := readyReason(x.operatorStep()); reason != "StorageIdentityConflict" {
+		t.Fatalf("growth onto a foreign claim reported %s", reason)
+	}
+	if n := replicas(x.workload()); n != 1 {
+		t.Fatalf("growth toward a foreign claim wrote %d replicas", n)
+	}
+}
+
+// A policy step that spans kept and fresh disks is cut at the end of the kept
+// run and recorded as the step taken: its redistribution is judged against
+// the one member it added, and the rest waits for the policy to ask again.
+func TestPersistentPolicyGrowthStopsAtTheKeptRun(t *testing.T) {
+	x := newOperationFixture(t, "PersistentFleet")
+	x.f = enableCapacity(t, x.r, x.f, "Automatic")
+	x.desired(2)
+	x.settle()
+	x.edit(func(f *fleet.CelldFleet) { f.Spec.Capacity.ScaleOutStep = 2 })
+	x.cpu = 1000
+	added := x.awaitReplicas(3)
+	s := x.state().Capacity
+	if !s.LastAction.Equal(added) || s.Addition == nil || s.Addition.Target != 3 {
+		t.Fatalf("the cut step was recorded as %v with %+v", s.LastAction, s.Addition)
+	}
+	for range 4 {
+		x.tick()
+	}
+	if n := replicas(x.workload()); n != 3 {
+		t.Fatalf("the rest of the cut step was added without the policy: %d replicas", n)
+	}
+}
+
+// A full stop returns at the declared count even when growth from zero takes
+// several runs, here because alpha-1's claim was deleted while stopped.
+func TestPersistentFullStopReturnsInRuns(t *testing.T) {
+	for _, mode := range []string{"", "Automatic"} {
+		t.Run("mode="+mode, func(t *testing.T) {
+			x := newOperationFixture(t, "PersistentFleet")
+			if mode != "" {
+				x.f = enableCapacity(t, x.r, x.f, mode)
+			}
+			x.settle()
+			x.edit(func(f *fleet.CelldFleet) { f.Spec.Maintenance = &fleet.MaintenanceSpec{Paused: true} })
+			x.step()
+			sts := x.workload().(*appsv1.StatefulSet)
+			sts.Spec.Replicas = new(int32(0))
+			if err := x.r.Update(t.Context(), sts); err != nil {
+				t.Fatal(err)
+			}
+			x.syncWorkload()
+			if err := x.r.Delete(t.Context(), x.claim("data-alpha-1")); err != nil {
+				t.Fatal(err)
+			}
+			claims := x.claimUIDs()
+			x.edit(func(f *fleet.CelldFleet) { f.Spec.Maintenance = &fleet.MaintenanceSpec{Paused: false} })
+			x.operatorStep()
+			if n := replicas(x.workload()); n != 1 {
+				t.Fatalf("the restart wrote %d replicas, want alpha-0's kept run", n)
+			}
+			x.syncWorkload()
+			x.settle()
+			if n := replicas(x.workload()); n != 3 {
+				t.Fatalf("fleet returned at %d members, want 3", n)
+			}
+			got := x.claimUIDs()
+			if got["data-alpha-0"] != claims["data-alpha-0"] || got["data-alpha-2"] != claims["data-alpha-2"] {
+				t.Fatalf("the restart replaced a kept disk: %v", got)
+			}
+			if s := x.state(); s != nil && s.Capacity != nil && s.Capacity.Addition != nil {
+				t.Fatalf("a full stop was judged as a policy addition: %+v", s.Capacity.Addition)
+			}
+		})
+	}
+}
