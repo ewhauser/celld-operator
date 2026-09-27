@@ -64,6 +64,77 @@ This is how to judge a fleet in `Shadow` mode before handing it `ScaleOut`. For 
 max by (namespace, fleet, reason) (celld_fleet_capacity_decision) == 1
 ```
 
+#### Example Grafana panel
+
+This time series panel plots the policy's recommendation against the applied and ready counts for one fleet, so a gap between the lines shows how far the fleet is from what the policy wants. It assumes a Prometheus data source and dashboard variables `namespace` and `fleet`, for example `label_values(celld_fleet_applied_replicas, namespace)` and `label_values(celld_fleet_applied_replicas{namespace="$namespace"}, fleet)`. Paste it into a dashboard through **Add > Visualization**, then the panel JSON editor.
+
+```json
+{
+  "type": "timeseries",
+  "title": "Capacity: recommended vs applied",
+  "datasource": {"type": "prometheus", "uid": "${datasource}"},
+  "fieldConfig": {
+    "defaults": {"unit": "short", "decimals": 0, "custom": {"lineInterpolation": "stepAfter"}},
+    "overrides": [
+      {"matcher": {"id": "byName", "options": "recommended"},
+       "properties": [{"id": "custom.lineStyle", "value": {"fill": "dash", "dash": [10, 10]}}]}
+    ]
+  },
+  "targets": [
+    {"refId": "A", "legendFormat": "recommended",
+     "expr": "max(celld_fleet_capacity_recommended_replicas{namespace=\"$namespace\", fleet=\"$fleet\"})"},
+    {"refId": "B", "legendFormat": "applied",
+     "expr": "max(celld_fleet_applied_replicas{namespace=\"$namespace\", fleet=\"$fleet\"})"},
+    {"refId": "C", "legendFormat": "ready",
+     "expr": "max(celld_fleet_ready_replicas{namespace=\"$namespace\", fleet=\"$fleet\"})"},
+    {"refId": "D", "legendFormat": "pending",
+     "expr": "max(celld_fleet_capacity_pending_replicas{namespace=\"$namespace\", fleet=\"$fleet\"})"}
+  ]
+}
+```
+
+To see why the recommendation holds, add a **State timeline** panel with the query `max by (reason) (celld_fleet_capacity_decision{namespace="$namespace", fleet="$fleet"}) == 1` and legend `{{reason}}`; each band is how long the policy reported that reason.
+
+#### Example alert rules
+
+The chart's `metrics.prometheusRule` covers only blockers and unavailable fleets. These capacity rules go in a separate `PrometheusRule`, or the equivalent `groups` block of a plain Prometheus rule file. Adjust the `for` durations and severities to your paging policy.
+
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: celld-fleet-capacity
+  namespace: celld-system
+spec:
+  groups:
+    - name: celld-fleet-capacity
+      rules:
+        - alert: CelldFleetUnderprovisioned
+          expr: |
+            max by (namespace, fleet) (celld_fleet_capacity_recommended_replicas)
+              - max by (namespace, fleet) (celld_fleet_applied_replicas) > 0
+          for: 15m
+          labels: {severity: warning}
+          annotations:
+            summary: Capacity policy recommends more replicas than {{ $labels.namespace }}/{{ $labels.fleet }} runs
+        - alert: CelldFleetOverprovisioned
+          expr: |
+            max by (namespace, fleet) (celld_fleet_capacity_recommended_replicas)
+              - max by (namespace, fleet) (celld_fleet_applied_replicas) < 0
+          for: 1d
+          labels: {severity: info}
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.fleet }} runs more replicas than its capacity policy recommends"
+        - alert: CelldFleetCapacityMetricsIncomplete
+          expr: max by (namespace, fleet) (celld_fleet_capacity_decision{reason="IncompleteMetrics"}) == 1
+          for: 15m
+          labels: {severity: warning}
+          annotations:
+            summary: Capacity policy for {{ $labels.namespace }}/{{ $labels.fleet }} lacks the metrics it needs to decide
+```
+
+A fleet whose policy is unset, `External`, or not yet decided has no capacity series, so these rules never fire for it. The rules read differently by mode. In `Shadow`, they tell you what the policy would change. In `ScaleOut` and `Automatic` the operator applies additions itself, so a sustained `CelldFleetUnderprovisioned` means an addition is not landing; check `status.capacity.reason` and the `Provisioning` condition. `ScaleOut` never contracts, so `CelldFleetOverprovisioned` there only says a smaller fleet would do; route it accordingly or scope the rule with a `fleet` matcher.
+
 See [runtime recovery](../../troubleshoot/recovery/) for S3 lease expiry,
 delayed witnesses, lost nodes and lost disks.
 
