@@ -24,6 +24,11 @@ const (
 // every member onto plain celld on its own disk, the retired member rejoins
 // on that disk, and every acknowledged write stays readable. No finalizer,
 // reservation, claim or workload is edited by hand.
+//
+// The retired member has been down longer than the replacement delay when the
+// operator is upgraded, as in #79. The upgraded operator must not give it a
+// fresh disk in the reconcile that starts the rollout, when the rollout may
+// recreate another member beside it; the rollout restarts it on its own disk.
 func (h *harness) exerciseUpgrade() {
 	h.startPreviousOperator()
 	beta := h.newFleet("beta", "bucket-beta", "PersistentFleet", "fleets")
@@ -36,7 +41,7 @@ func (h *harness) exerciseUpgrade() {
 	assert(len(disks) == 3, "%s created %d claims, not 3", previousRelease, len(disks))
 
 	h.k("-n", "fleets", "delete", "pod", "beta-2", "--wait=true")
-	h.hold(90*time.Second, previousRelease+" leaves the member whose disk it retired down", func() bool {
+	h.hold(memberReplacementDelay+time.Minute, previousRelease+" leaves the member whose disk it retired down past the replacement delay", func() bool {
 		pod, err := h.tryGet("fleets", "pod", "beta-2")
 		return err != nil || !podReady(pod)
 	})

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
@@ -29,7 +30,7 @@ import (
 //     recreate it, and its disk is kept. celld fences any process that
 //     survives on that node through its lease.
 //   - A claim that Kubernetes marks Lost has no volume behind it. The member's
-//     claim and Pod are deleted at once, and the StatefulSet recreates both.
+//     claim and Pod are deleted, and the StatefulSet recreates both.
 //   - A member that has stayed down for the replacement delay, while every
 //     other member has been ready for absorbWindow, is treated as lost. By then
 //     celld has moved every session off it, so its claim and Pod are deleted
@@ -37,7 +38,18 @@ import (
 //     configuration, or already on a disk made after its Pod, is left alone:
 //     a new disk would not help it.
 //
-// Each reconcile takes at most one of these actions.
+// A zonal disk pins its member to one zone, and the zone spread counts only
+// Pods that are already on nodes. A member whose Pod is pending leaves its
+// zone looking free, so a fresh disk scheduled beside it can take that zone
+// and leave it nowhere to run (#79). A fresh disk is therefore given only
+// once the StatefulSet has caught up with the operator's spec, so a rollout
+// cannot recreate another member alongside it, and the scheduler has placed,
+// or found no node for, every other member's Pod. The fresh disk then goes to
+// the zone the fleet is missing.
+//
+// Each reconcile takes at most one of these actions. A member the scheduler
+// cannot place is named in the fleet's status, and once it has waited out the
+// replacement delay without being replaced, the fleet is Blocked on it.
 
 const (
 	// DefaultMemberReplacementDelay is how long a member may stay down, while
@@ -73,11 +85,15 @@ func (r *Reconciler) memberReplacementDelay() time.Duration {
 }
 
 // healMembers takes at most one self-healing action and describes it. When no
-// action is due but one member is down, waiting says when it will be replaced.
-func (r *Reconciler) healMembers(ctx context.Context, f *fleet.CelldFleet, sts *appsv1.StatefulSet) (action, waiting string, err error) {
+// action is due, note describes a down member: when it will be replaced, or
+// why the scheduler cannot place it. blocked reports a member the scheduler
+// has not placed for the replacement delay and that is not being replaced.
+// settled reports that the StatefulSet already runs the operator's spec and
+// has observed it.
+func (r *Reconciler) healMembers(ctx context.Context, f *fleet.CelldFleet, sts *appsv1.StatefulSet, settled bool) (action, note string, blocked bool, err error) {
 	list := &corev1.PodList{}
 	if err := r.List(ctx, list, client.InNamespace(f.Namespace), client.MatchingLabels(labels(f))); err != nil {
-		return "", "", err
+		return "", "", false, err
 	}
 	// Only Pods the StatefulSet controls are members; anything else that
 	// carries the fleet's label is ignored.
@@ -92,17 +108,17 @@ func (r *Reconciler) healMembers(ctx context.Context, f *fleet.CelldFleet, sts *
 		p := &pods[i]
 		if !p.DeletionTimestamp.IsZero() && now.Sub(p.DeletionTimestamp.Time) > terminationMargin {
 			if err := r.Delete(ctx, p, client.GracePeriodSeconds(0), client.Preconditions{UID: new(p.UID)}); err != nil && !apierrors.IsNotFound(err) {
-				return "", "", err
+				return "", "", false, err
 			}
 			return r.healed(f, "MemberForceDeleted", fmt.Sprintf("Force-deleted Pod %s: its node has not confirmed termination; the member returns on its own disk", p.Name))
 		}
 	}
 	if f.Spec.Profile != "PersistentFleet" {
-		return "", "", nil
+		return "", "", false, nil
 	}
 	claims := &corev1.PersistentVolumeClaimList{}
 	if err := r.List(ctx, claims, client.InNamespace(f.Namespace), client.MatchingLabels(labels(f))); err != nil {
-		return "", "", err
+		return "", "", false, err
 	}
 	podOf := map[string]*corev1.Pod{}
 	for i := range pods {
@@ -112,6 +128,20 @@ func (r *Reconciler) healMembers(ctx context.Context, f *fleet.CelldFleet, sts *
 	for i := range claims.Items {
 		claimOf[claims.Items[i].Name] = &claims.Items[i]
 	}
+	// fresh reports whether a member may be given a fresh disk now: no rollout
+	// is about to recreate another member, and the scheduler has decided every
+	// other member's Pod, so each disk that pins a member to a zone is counted.
+	fresh := func(ordinal int32) bool {
+		if !settled {
+			return false
+		}
+		for other := range replicas(sts) {
+			if other != ordinal && !scheduleDecided(podOf[memberName(f, other)]) {
+				return false
+			}
+		}
+		return true
+	}
 	var down []int32
 	for ordinal := range replicas(sts) {
 		name := memberName(f, ordinal)
@@ -120,15 +150,15 @@ func (r *Reconciler) healMembers(ctx context.Context, f *fleet.CelldFleet, sts *
 		case c != nil && !c.DeletionTimestamp.IsZero():
 			// A replacement in progress: a scheduled Pod holds the claim until
 			// it is gone. An unscheduled one does not.
-			if p != nil && p.DeletionTimestamp.IsZero() && p.Spec.NodeName != "" {
+			if p != nil && p.DeletionTimestamp.IsZero() && p.Spec.NodeName != "" && fresh(ordinal) {
 				if err := r.Delete(ctx, p, client.Preconditions{UID: new(p.UID)}); err != nil && !apierrors.IsNotFound(err) {
-					return "", "", err
+					return "", "", false, err
 				}
-				return fmt.Sprintf("Replacing member %s: deleting its Pod so its old disk can be released", name), "", nil
+				return fmt.Sprintf("Replacing member %s: deleting its Pod so its old disk can be released", name), "", false, nil
 			}
-		case c != nil && c.Status.Phase == corev1.ClaimLost:
+		case c != nil && c.Status.Phase == corev1.ClaimLost && fresh(ordinal):
 			if err := r.replaceMember(ctx, c, p); err != nil {
-				return "", "", err
+				return "", "", false, err
 			}
 			return r.healed(f, "MemberDiskLost", fmt.Sprintf("Replacing member %s: its volume no longer exists; celld records a bounded loss for any session with no other copy", name))
 		}
@@ -136,41 +166,111 @@ func (r *Reconciler) healMembers(ctx context.Context, f *fleet.CelldFleet, sts *
 			down = append(down, ordinal)
 		}
 	}
-	if len(down) != 1 {
-		return "", "", nil
+	if len(down) == 1 {
+		name := memberName(f, down[0])
+		p, c := podOf[name], claimOf[claimName(f, down[0])]
+		if due, ok := r.replacementDue(f, sts, podOf, c, down[0], now); ok {
+			if now.Before(due) {
+				return "", fmt.Sprintf("%s; it is replaced on a fresh disk at %s unless it returns", describeDown(name, p), due.UTC().Format(time.RFC3339)), false, nil
+			}
+			if !fresh(down[0]) {
+				return "", describeDown(name, p) + "; it is due to be replaced on a fresh disk", false, nil
+			}
+			if err := r.replaceMember(ctx, c, p); err != nil {
+				return "", "", false, err
+			}
+			return r.healed(f, "MemberReplaced", fmt.Sprintf("Replacing member %s: down since %s while the rest of the fleet is ready; it returns on a fresh disk", name, notReadySince(p).UTC().Format(time.RFC3339)))
+		}
 	}
-	name := memberName(f, down[0])
-	p, c := podOf[name], claimOf[claimName(f, down[0])]
+	// No replacement is planned. A member the scheduler cannot place is named,
+	// and once it has waited out the replacement delay the fleet is blocked on
+	// it.
+	for _, ordinal := range down {
+		name := memberName(f, ordinal)
+		p := podOf[name]
+		s := unschedulable(p)
+		if s == nil {
+			continue
+		}
+		since := s.LastTransitionTime.Time
+		if since.IsZero() {
+			since = p.CreationTimestamp.Time
+		}
+		if now.Sub(since) < r.memberReplacementDelay() {
+			return "", describeDown(name, p), false, nil
+		}
+		message := fmt.Sprintf("Member %s has not been scheduled since %s: %s", name, since.UTC().Format(time.RFC3339), schedulerReason(s))
+		if i := slices.IndexFunc(down, func(other int32) bool { return other != ordinal }); i >= 0 {
+			message += fmt.Sprintf("; it is not replaced while member %s is also down", memberName(f, down[i]))
+		}
+		return "", message, true, nil
+	}
+	return "", "", false, nil
+}
+
+func (r *Reconciler) healed(f *fleet.CelldFleet, reason, message string) (string, string, bool, error) {
+	r.eventf(f, corev1.EventTypeWarning, reason, "%s", message)
+	return message, "", false, nil
+}
+
+// replacementDue reports when the one member that is down is replaced on a
+// fresh disk, if it is replaced at all.
+func (r *Reconciler) replacementDue(f *fleet.CelldFleet, sts *appsv1.StatefulSet, podOf map[string]*corev1.Pod, c *corev1.PersistentVolumeClaim, ordinal int32, now time.Time) (time.Time, bool) {
+	p := podOf[memberName(f, ordinal)]
 	if p == nil || !p.DeletionTimestamp.IsZero() || c == nil || c.Status.Phase != corev1.ClaimBound || waitingOnConfig(p) {
-		return "", "", nil
+		return time.Time{}, false
 	}
 	// The StatefulSet creates a claim just before or after the Pod that needs
 	// it. A disk that new was made for this Pod; replacing it again would not
 	// help.
 	if !c.CreationTimestamp.Time.Before(p.CreationTimestamp.Add(-time.Minute)) {
-		return "", "", nil
+		return time.Time{}, false
 	}
-	for ordinal := range replicas(sts) {
-		if ordinal == down[0] {
+	for other := range replicas(sts) {
+		if other == ordinal {
 			continue
 		}
-		if since, ok := readySince(podOf[memberName(f, ordinal)]); !ok || now.Sub(since) < absorbWindow {
-			return "", "", nil
+		if since, ok := readySince(podOf[memberName(f, other)]); !ok || now.Sub(since) < absorbWindow {
+			return time.Time{}, false
 		}
 	}
-	due := notReadySince(p).Add(r.memberReplacementDelay())
-	if now.Before(due) {
-		return "", fmt.Sprintf("member %s is down; it is replaced on a fresh disk at %s unless it returns", name, due.UTC().Format(time.RFC3339)), nil
-	}
-	if err := r.replaceMember(ctx, c, p); err != nil {
-		return "", "", err
-	}
-	return r.healed(f, "MemberReplaced", fmt.Sprintf("Replacing member %s: down since %s while the rest of the fleet is ready; it returns on a fresh disk", name, notReadySince(p).UTC().Format(time.RFC3339)))
+	return notReadySince(p).Add(r.memberReplacementDelay()), true
 }
 
-func (r *Reconciler) healed(f *fleet.CelldFleet, reason, message string) (string, string, error) {
-	r.eventf(f, corev1.EventTypeWarning, reason, "%s", message)
-	return message, "", nil
+// describeDown names a down member and, when the scheduler finds no node for
+// it, gives the scheduler's reason.
+func describeDown(name string, p *corev1.Pod) string {
+	if s := unschedulable(p); s != nil {
+		return fmt.Sprintf("member %s cannot be scheduled (%s)", name, schedulerReason(s))
+	}
+	return fmt.Sprintf("member %s is down", name)
+}
+
+// unschedulable returns the scheduler's verdict on a member Pod it has found
+// no node for, or nil.
+func unschedulable(p *corev1.Pod) *corev1.PodCondition {
+	if p == nil || !p.DeletionTimestamp.IsZero() || p.Spec.NodeName != "" {
+		return nil
+	}
+	for i := range p.Status.Conditions {
+		c := &p.Status.Conditions[i]
+		if c.Type == corev1.PodScheduled && c.Status == corev1.ConditionFalse && c.Reason == corev1.PodReasonUnschedulable {
+			return c
+		}
+	}
+	return nil
+}
+
+// schedulerReason is the scheduler's explanation, to be quoted in a sentence.
+func schedulerReason(s *corev1.PodCondition) string {
+	return strings.TrimRight(s.Message, ". ")
+}
+
+// scheduleDecided reports whether the scheduler has decided a member Pod: it
+// is on a node, or the scheduler has found no node for it. A Pod that is
+// being recreated, or that the scheduler has not tried yet, is undecided.
+func scheduleDecided(p *corev1.Pod) bool {
+	return p != nil && p.DeletionTimestamp.IsZero() && (p.Spec.NodeName != "" || unschedulable(p) != nil)
 }
 
 // replaceMember deletes a member's claim and Pod. The claim is released once

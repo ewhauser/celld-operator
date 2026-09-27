@@ -33,7 +33,8 @@ need before then.
 | Bounded startup retries exhausted | The container exits with recovery data retained and restarts. Resolve peer availability; do not erase data to make it healthy. |
 | A rollout stops at one member | The StatefulSet waits for the member it restarted to become Ready. Resolve that member's readiness; see [waiting changes](../lifecycle/#persistentfleet-waits). If it cannot come back, the operator replaces it after the replacement delay. |
 | Pod stays `Terminating` on a node that is `NotReady` | The node no longer answers. The operator force-deletes the Pod; see [lost nodes](#lost-nodes). |
-| Pod cannot start because its PVC is `Lost` or its PV is missing | The volume is gone. The operator replaces the member on a fresh disk at once; see [lost disks](#lost-disks). |
+| Pod cannot start because its PVC is `Lost` or its PV is missing | The volume is gone. The operator replaces the member on a fresh disk as soon as the scheduler has decided the other members' Pods; see [lost disks](#lost-disks). |
+| Pod stays Pending: `didn't match pod topology spread constraints` and `didn't match PersistentVolume's node affinity` | Its disk is pinned to a zone the zone spread no longer allows. The operator replaces it after the replacement delay; see [a member that cannot be scheduled](../scheduling/#a-member-that-cannot-be-scheduled). |
 | Fleet reason `DiskRetired` or `LauncherBlocked` | Reported only by releases that ran the launcher. Upgrade the operator: current releases roll each launcher-supervised Pod onto a plain template on the same disk and ignore retirement markers. |
 
 ## Retained-peer startup
@@ -71,7 +72,7 @@ fresh disk. No manual step is needed.
 
 | Situation | What the operator does | Event |
 | --- | --- | --- |
-| The member's PVC is in phase `Lost`: the PV it was bound to no longer exists. | Deletes the claim and the Pod at once. | `MemberDiskLost` |
+| The member's PVC is in phase `Lost`: the PV it was bound to no longer exists. | Deletes the claim and the Pod once the scheduler has decided every other member's Pod, usually within seconds. | `MemberDiskLost` |
 | The disk still exists but the member cannot come back, for example because the disk is stranded in an unavailable zone, no longer attaches, or is corrupt and keeps celld from starting. | Deletes the claim and the Pod once the member has been down for the replacement delay while every other member has been ready for five minutes. | `MemberReplaced` |
 
 The replacement delay defaults to 10 minutes. Set it with the chart value
@@ -96,7 +97,11 @@ kubectl --context YOUR_CONTEXT -n fleets get events \
   --field-selector involvedObject.name=my-fleet,type=Warning
 ```
 
-The StatefulSet creates a fresh claim for the new Pod. The new member
+The StatefulSet creates a fresh claim for the new Pod, and the volume is
+created in the zone where that Pod is scheduled. The operator deletes a claim
+only when no rollout is about to recreate another member and the scheduler has
+decided every other member's Pod, so the fresh disk goes to the zone the fleet
+is missing, not to one another member's disk needs. The new member
 answers recovery for its old disk with a conclusive "no fragment", so celld
 seals any session whose only complete copy was on the old disk and records a
 bounded loss in `log/<session>.e<epoch>.loss.json`. A session with another

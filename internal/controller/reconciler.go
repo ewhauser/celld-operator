@@ -316,7 +316,9 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, h *loadedS
 	set("Ready", serving, reason, message)
 	set("InfrastructureReady", provisioned || reason == "LifecycleProgress", reason, message)
 	set("Progressing", reason == "LifecycleProgress" || reason == "Provisioning", reason, message)
-	set("Blocked", !provisioned && reason != "LifecycleProgress", reason, message)
+	// A member the scheduler cannot place blocks a workload that is otherwise
+	// in place.
+	set("Blocked", (!provisioned && reason != "LifecycleProgress") || reason == "MemberUnschedulable", reason, message)
 	// Clear obsolete qualification projections on fleets created by older releases.
 	meta.RemoveStatusCondition(&f.Status.Conditions, "LifecycleBlocked")
 	meta.RemoveStatusCondition(&f.Status.Conditions, "ProductionQualified")

@@ -91,8 +91,8 @@ reconcile, and records nothing:
   `ReadWriteOncePod` disk attaches to one node at a time. This applies to every
   StatefulSet fleet, including Ordered Bucket.
 - **A lost volume.** When Kubernetes marks a member's claim `Lost`, the volume
-  behind it no longer exists. The operator deletes the claim and the Pod at
-  once, and the StatefulSet recreates both.
+  behind it no longer exists. The operator deletes the claim and the Pod, and
+  the StatefulSet recreates both.
 - **A member that cannot come back.** A member that has stayed down for the
   replacement delay is treated as lost if every other member has been ready for
   five minutes. The delay defaults to 10 minutes (`--member-replacement-delay`).
@@ -109,6 +109,18 @@ reconcile, and records nothing:
   configuration, and a member already on a disk created for its current Pod.
   Only one down member is ever replaced this way. When two are down, replacing
   either could lose writes that only their disks hold.
+- **Where a fresh disk goes.** A zonal disk pins its member to one zone, and
+  the zone spread counts only Pods that are on nodes. A fresh disk scheduled
+  while another member's Pod is pending can take the zone that member's disk
+  needs, and that member then cannot be scheduled at all
+  ([#79](https://github.com/ewhauser/celld-operator/issues/79)). The operator
+  gives a member a fresh disk only when the StatefulSet already runs and has
+  observed the operator's spec, so no rollout is about to recreate another
+  member, and the scheduler has placed, or found no node for, every other
+  member's Pod. The fresh disk then goes to the zone the fleet is missing. A
+  member the scheduler cannot place is named in the fleet's status. If the
+  operator has not replaced it by the end of the replacement delay, the fleet
+  reports `Blocked` with reason `MemberUnschedulable`.
 
 For a replaced disk, the new member answers recovery for its old disk with a
 conclusive "no fragment" (`0.5.1-ewhauser.7`; earlier builds refuse until the
@@ -141,8 +153,13 @@ happened first.
   within seconds on `0.5.1-ewhauser.6` or later. A claim deleted before then can
   still hold the only copy of recent writes.
 - A member that cannot come back holds up a rollout or a contraction for at
-  most the replacement delay. A lost volume holds nothing up. The fleet keeps
+  most the replacement delay. A lost volume is replaced once the scheduler has
+  decided the other members' Pods, usually within seconds. The fleet keeps
   serving on the other members throughout.
+- Growth to a new ordinal, and a claim an administrator deletes, get fresh
+  disks from the StatefulSet without that wait. If such a disk takes the zone a
+  pending member's disk needs, the pending member cannot be scheduled and is
+  replaced after the replacement delay, as a member that cannot come back.
 - The operator deletes an existing disk on its own only when that disk's
   member has been down for the replacement delay while the rest of the fleet
   was ready. This is a deliberate change from 0023, where only an

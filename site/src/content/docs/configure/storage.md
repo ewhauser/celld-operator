@@ -54,12 +54,13 @@ claim from elsewhere at a member's name reports `StorageIdentityConflict` and is
 never adopted.
 
 A member whose volume is gone cannot start. The operator deletes its claim and
-Pod at once; the StatefulSet recreates both, and the member returns on a fresh
-disk. A disk that still exists but cannot come back, for example one stranded
-in an unavailable zone or one that no longer attaches, is replaced the same way
-once its member has been down for the replacement delay while every other
-member has been ready for five minutes. The delay defaults to 10 minutes; set
-it with the chart value `memberReplacementDelay`. See
+Pod as soon as the scheduler has decided every other member's Pod; the
+StatefulSet recreates both, and the member returns on a fresh disk. A disk that
+still exists but cannot come back, for example one stranded in an unavailable
+zone or one that no longer attaches, is replaced the same way once its member
+has been down for the replacement delay while every other member has been ready
+for five minutes. The delay defaults to 10 minutes; set it with the chart value
+`memberReplacementDelay`. See
 [lost disks](../../troubleshoot/recovery/#lost-disks).
 
 Read the [retained disk contract](../../contracts/disposable-disks/). Verify that

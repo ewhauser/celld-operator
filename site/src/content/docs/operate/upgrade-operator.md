@@ -44,12 +44,14 @@ operator switches the StatefulSet from `OnDelete` to `RollingUpdate` and writes
 the current template, and the PodDisruptionBudget becomes `maxUnavailable: 1`.
 Kubernetes then replaces each earlier Pod one at a time, highest ordinal first,
 including Pods held by the launcher scheduling gate. Each member keeps its
-claim, with the same name and identity. An in-flight strict operation is
-dropped with an `OperationSuperseded` Event, and the reservation annotation is
-rewritten to capacity-policy history alone, or removed. Launcher retirement
-markers on those disks are ignored. The `DiskCleanupPending` condition is
-removed and `status.lifecycle` is left empty. See the
-[PersistentFleet lifecycle](../../concepts/current-operation/).
+claim, with the same name and identity. A member the earlier release left down
+is restarted on its own disk too: the operator does not replace it while the
+rollout is starting, and replaces it only if it still cannot come back. An
+in-flight strict operation is dropped with an `OperationSuperseded` Event, and
+the reservation annotation is rewritten to capacity-policy history alone, or
+removed. Launcher retirement markers on those disks are ignored. The
+`DiskCleanupPending` condition is removed and `status.lifecycle` is left empty.
+See the [PersistentFleet lifecycle](../../concepts/current-operation/).
 
 This release needs fewer permissions. The ClusterRole no longer grants
 PersistentVolume, Node or VolumeAttachment reads, and the fleet-namespace Role
