@@ -18,6 +18,9 @@ memberReplacementDelay: 10m
 fleetNamespaces: []
 serviceAccount:
   annotations: {}
+# Annotations on the operator Pod template, for example Datadog autodiscovery
+# checks against the metrics port. Values must be strings.
+podAnnotations: {}
 resources:
   requests:
     cpu: 100m
