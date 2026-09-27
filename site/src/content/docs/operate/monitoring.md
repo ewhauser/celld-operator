@@ -37,6 +37,33 @@ podAnnotations:
 
 Every operator replica serves metrics, but only the elected leader reconciles, so only the leader reports `celld_fleet_*` and per-controller series. Standbys serve process and client metrics alone. Aggregate fleet series across operator Pods with `max`, not `sum`.
 
+### Capacity policy metrics
+
+`celld_fleet_desired_replicas` follows the capacity policy only in `ScaleOut` and `Automatic` modes; otherwise it is `spec.replicas`. The policy's own decision is published in every mode, including `Shadow`, from `status.capacity`:
+
+| Metric | Value |
+| --- | --- |
+| `celld_fleet_capacity_recommended_replicas` | `desiredReplicas`, the count the policy recommends |
+| `celld_fleet_capacity_useful_replicas` | `usefulReplicas` |
+| `celld_fleet_capacity_pending_replicas` | `pendingReplicas` |
+| `celld_fleet_capacity_covered_replicas` | `coveredReplicas` |
+| `celld_fleet_capacity_decision{reason}` | 1 for the current `reason`, 0 for every other |
+
+`reason` takes the fixed set the policy emits; a reason this release does not know reports as `Other`. A fleet has no capacity series when `spec.capacity` is unset, its mode is `External`, or the policy has not decided yet, so an absent series never reads as a recommendation of zero.
+
+Comparing the recommendation to the applied count tells you how a fleet is sized in any mode. A positive value means it is underprovisioned, a negative value overprovisioned:
+
+```promql
+max by (namespace, fleet) (celld_fleet_capacity_recommended_replicas)
+  - max by (namespace, fleet) (celld_fleet_applied_replicas)
+```
+
+This is how to judge a fleet in `Shadow` mode before handing it `ScaleOut`. For example, alert when the difference stays above zero for 15 minutes, and send it to a low-urgency channel when it stays below zero for a day. The reason behind a hold:
+
+```promql
+max by (namespace, fleet, reason) (celld_fleet_capacity_decision) == 1
+```
+
 See [runtime recovery](../../troubleshoot/recovery/) for S3 lease expiry,
 delayed witnesses, lost nodes and lost disks.
 

@@ -3,9 +3,11 @@ package controller
 import (
 	"context"
 	"hash/fnv"
+	"slices"
 	"time"
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
+	"github.com/ewhauser/celld-operator/internal/capacity"
 	"github.com/prometheus/client_golang/prometheus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -16,9 +18,17 @@ import (
 
 var fleetGauges = map[string]*prometheus.GaugeVec{}
 
+// capacityGauges report the policy's latest decision in every mode, including
+// Shadow, where it is not applied.
+var capacityGauges = map[string]*prometheus.GaugeVec{}
+
+// capacityDecision is one for the latest reason and zero for the rest of the
+// fixed set; a reason missing from capacity.Reasons reports as Other.
+var capacityDecision = prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "celld_fleet_capacity_decision", Help: "One for the capacity policy's latest reason, zero for every other reason."}, []string{"namespace", "fleet", "reason"})
+
 func init() {
 	for name, help := range map[string]string{
-		"desired_replicas":          "Latest requested replica count (shadow policy recommendations are informational).",
+		"desired_replicas":          "Replica count the fleet requests: spec.replicas, or the capacity policy's count in ScaleOut and Automatic modes. See celld_fleet_capacity_recommended_replicas for the policy's recommendation in every mode.",
 		"applied_replicas":          "Replica target currently applied to the owned workload.",
 		"observed_replicas":         "Pods observed for the fleet, including terminating pods.",
 		"ready_replicas":            "Ready replicas reported by the owned workload.",
@@ -33,12 +43,30 @@ func init() {
 		metrics.Registry.MustRegister(gauge)
 		fleetGauges[name] = gauge
 	}
+	for name, help := range map[string]string{
+		"recommended_replicas": "Replica count the capacity policy recommends, whether or not its mode applies it.",
+		"useful_replicas":      "Replicas the capacity policy observed as ready and useful.",
+		"pending_replicas":     "Replicas requested but not yet observed as useful by the capacity policy.",
+		"covered_replicas":     "Replicas covered by fresh capacity policy observations.",
+	} {
+		gauge := prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "celld_fleet_capacity_" + name, Help: help}, []string{"namespace", "fleet"})
+		metrics.Registry.MustRegister(gauge)
+		capacityGauges[name] = gauge
+	}
+	metrics.Registry.MustRegister(capacityDecision)
 }
 
 func clearFleetMetrics(namespace, name string) {
 	for _, gauge := range fleetGauges {
 		gauge.DeleteLabelValues(namespace, name)
 	}
+	clearCapacityMetrics(namespace, name)
+}
+func clearCapacityMetrics(namespace, name string) {
+	for _, gauge := range capacityGauges {
+		gauge.DeleteLabelValues(namespace, name)
+	}
+	capacityDecision.DeletePartialMatch(prometheus.Labels{"namespace": namespace, "fleet": name})
 }
 func secondsSince(value string, now time.Time) float64 {
 	at, err := time.Parse(time.RFC3339, value)
@@ -65,6 +93,30 @@ func publishFleetMetrics(f *fleet.CelldFleet, state stateFootprint, now time.Tim
 	}
 	for name, value := range values {
 		fleetGauges[name].WithLabelValues(f.Namespace, f.Name).Set(value)
+	}
+	publishCapacityMetrics(f)
+}
+
+// publishCapacityMetrics reports status.capacity. A fleet without a policy
+// result has no series: zeros would read as a recommendation of zero replicas.
+func publishCapacityMetrics(f *fleet.CelldFleet) {
+	c := f.Status.Capacity
+	if f.Spec.Capacity == nil || externalOwner(f) || c.Reason == "" {
+		clearCapacityMetrics(f.Namespace, f.Name)
+		return
+	}
+	for name, value := range map[string]int32{
+		"recommended_replicas": c.DesiredReplicas, "useful_replicas": c.UsefulReplicas,
+		"pending_replicas": c.PendingReplicas, "covered_replicas": c.CoveredReplicas,
+	} {
+		capacityGauges[name].WithLabelValues(f.Namespace, f.Name).Set(float64(value))
+	}
+	current := "Other"
+	if slices.Contains(capacity.Reasons, c.Reason) {
+		current = c.Reason
+	}
+	for _, reason := range append(slices.Clone(capacity.Reasons), "Other") {
+		capacityDecision.WithLabelValues(f.Namespace, f.Name, reason).Set(boolean(reason == current))
 	}
 }
 func (r *Reconciler) observeReplicaCounts(ctx context.Context, f *fleet.CelldFleet) {
