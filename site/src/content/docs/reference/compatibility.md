@@ -26,24 +26,30 @@ an unreachable peer as holding no copy of a write, and it lets an idle leader
 stop depending on a departed member; stock upstream releases do neither. A
 syntactically valid pin does not establish runtime/storage-format qualification.
 
-Use the `0.6.0-ewhauser.2` artifact above for new fleets. Among the
-`0.5.1-ewhauser` builds, `.1` can stall populated full-stop removal; `.2` fixes that shutdown issue but can lose acknowledged writes when a
-retained recovery peer starts late. `.3` keeps unreachable witnesses undecided
-and fails startup with retained evidence if its bounded retries are exhausted.
-It cannot repair loss already recorded by an older runtime. `.6` adds idle
-probes, so an idle leader stops depending on a departed member. `.7` lets
-members that lose their disks at the same time recover each other's sessions,
-or record a bounded loss, instead of stalling. `0.6.0-ewhauser.1` carries all of
-this onto upstream v0.6.0, and `0.6.0-ewhauser.2` adds OTLP metrics and
-`OTEL_RESOURCE_ATTRIBUTES` support and drops the unused strict disk-removal and
-`/state.node_log` APIs; it rolls from `0.6.0-ewhauser.1`. A PersistentFleet on a `0.5.1-ewhauser` build moves
-to it with a [full stop](../../operate/upgrade-runtime/#full-stop-upgrade), not
-a rolling update; Bucket fleets roll. See
+Use the `0.6.0-ewhauser.2` artifact above for new fleets. Older fork builds
+have these known issues and fixes:
+
+| Build | Behavior |
+| --- | --- |
+| `0.5.1-ewhauser.1` | Can stall populated full-stop removal. |
+| `0.5.1-ewhauser.2` | Fixes that shutdown stall, but can lose acknowledged writes when a retained recovery peer starts late. |
+| `0.5.1-ewhauser.3` | Keeps unreachable witnesses undecided and fails startup with retained evidence if its bounded retries are exhausted. It cannot repair loss already recorded by an older runtime. |
+| `0.5.1-ewhauser.6` | Adds idle probes, so an idle leader stops depending on a departed member. |
+| `0.5.1-ewhauser.7` | Lets members that lose their disks at the same time recover each other's sessions, or record a bounded loss, instead of stalling. |
+| `0.6.0-ewhauser.1` | Carries every `0.5.1-ewhauser.7` fix onto upstream v0.6.0. |
+| `0.6.0-ewhauser.2` | Adds OTLP metrics and `OTEL_RESOURCE_ATTRIBUTES` support and drops the unused strict disk-removal and `/state.node_log` APIs. |
+
+A fleet on `0.6.0-ewhauser.1` rolls to `0.6.0-ewhauser.2`. A PersistentFleet
+on any `0.5.1-ewhauser` build moves to a `0.6.0-ewhauser` build with a
+[full stop](../../operate/upgrade-runtime/#full-stop-upgrade), not a rolling
+update; Bucket fleets roll. See
 [recovery troubleshooting](../../troubleshoot/recovery/).
 
-The [.2 → .3 upgrade](../../qualification/runtime-upgrade/) and the
-[.3 native and Kind qualification](../../qualification/native-peer-startup/)
-passed for the recorded artifacts. An image pin or schema number alone does not
+The recorded
+[`0.5.1-ewhauser.2` → `0.5.1-ewhauser.3` upgrade](../../qualification/runtime-upgrade/)
+and the
+[`0.5.1-ewhauser.3` native and Kind qualification](../../qualification/native-peer-startup/)
+passed for those artifacts. An image pin or schema number alone does not
 establish the same behavior for another build.
 
 Runtime image changes [roll one member at a time](../../operate/upgrade-runtime/).
