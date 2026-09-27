@@ -25,9 +25,10 @@ import (
 // holds a new node's first healthy response until the fleet has absorbed the
 // change, so the workload controller's rolling update is the whole lifecycle
 // (ADR 0023, ADR 0024). The operator renders the desired objects, applies
-// them, steps contraction one member at a time, and replaces a StatefulSet
-// member that cannot come back on its own (persistent.go). It persists
-// nothing but capacity-policy state, once a fleet sets spec.capacity.
+// them, steps contraction one member at a time, grows a PersistentFleet one
+// run of kept or fresh disks at a time, and replaces a StatefulSet member that
+// cannot come back on its own (persistent.go). It persists nothing but
+// capacity-policy state, once a fleet sets spec.capacity.
 //
 // Bucket fleets run CELLD_DURABILITY=bucket: their disks are caches.
 // PersistentFleet runs CELLD_DURABILITY=fleet on a StatefulSet whose members
@@ -106,6 +107,18 @@ func (r *Reconciler) reconcileWorkload(ctx context.Context, f *fleet.CelldFleet,
 			return ctrl.Result{}, err
 		} else if conflict != "" {
 			target, waitReason, waitMessage, blocked = applied, "StorageIdentityConflict", conflict, true
+		} else if sts, ok := actual.(*appsv1.StatefulSet); ok {
+			// Template changes still apply; only the addition waits. A policy
+			// step cut short here is recorded as the step taken.
+			step, wait, err := r.growth(ctx, f, sts, target)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+			if wait != "" {
+				target, waitReason, waitMessage = applied, "Provisioning", wait
+			} else {
+				target = step
+			}
 		}
 	}
 	setReplicas(desired, target)

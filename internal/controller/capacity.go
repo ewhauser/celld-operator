@@ -53,7 +53,10 @@ func (r *Reconciler) capacityTarget(ctx context.Context, f *fleet.CelldFleet, j 
 		// A workload an administrator stopped by hand, for a full-stop
 		// runtime upgrade, returns at the declared count. The policy cannot
 		// evaluate a stopped fleet, and it resumes from there. The restart is
-		// not a policy step, so it gets no redistribution baseline.
+		// not a policy step, so it gets no redistribution baseline. It is held
+		// as a manual target, so a restart that grows in steps reaches the
+		// declared count.
+		s.ManualTarget = f.Spec.Replicas
 		return f.Spec.Replicas, false
 	}
 	observation := capacity.Observation{At: r.capacityNow()}

@@ -4,7 +4,11 @@ The built-in collector reads celld's typed `/state` and Kubernetes Metrics Serve
 Incomplete observations are invalid, never zero demand. CPU, memory and readiness
 do not establish PersistentFleet removal safety; a removed member keeps its disk
 ([PersistentFleet lifecycle](current-operation.md)). Manual and policy requests
-share one path: growth in one step, contraction one member per step.
+share one path: growth in one step, contraction one member per step. A
+PersistentFleet grows one run of kept or fresh disks at a time
+([where a fresh disk goes](current-operation.md#where-a-fresh-disk-goes)); a
+policy addition that spans both is cut at the end of its first run and
+recorded as the step taken.
 
 | Mode | Replica ownership |
 | --- | --- |
