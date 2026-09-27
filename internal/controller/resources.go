@@ -119,7 +119,14 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 		env = append(env, v)
 	}
 	if t := s.Telemetry; t != nil {
-		env = append(env, corev1.EnvVar{Name: "CELLD_OTEL", Value: t.CollectorURL})
+		// Resource attributes let celld's OTLP signals join the operator's
+		// celld_fleet_* series on namespace and fleet. Kubernetes names need
+		// no percent-encoding. celld reads them from 0.6.0-ewhauser.2.
+		env = append(env,
+			corev1.EnvVar{Name: "CELLD_OTEL", Value: t.CollectorURL},
+			corev1.EnvVar{Name: "POD_NAME", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"}}},
+			corev1.EnvVar{Name: "OTEL_RESOURCE_ATTRIBUTES", Value: "k8s.namespace.name=" + f.Namespace + ",k8s.pod.name=$(POD_NAME),celld.fleet.name=" + f.Name},
+		)
 		if t.Sampler != "" {
 			env = append(env, corev1.EnvVar{Name: "OTEL_TRACES_SAMPLER", Value: t.Sampler})
 		}

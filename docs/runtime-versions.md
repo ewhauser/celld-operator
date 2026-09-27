@@ -32,7 +32,26 @@ older fleet can upgrade in place.
 
 ## Published fork artifact
 
-Release `v0.6.0-ewhauser.1` has a Linux amd64/arm64 image index:
+Release `v0.6.0-ewhauser.2` has a Linux amd64/arm64 image index:
+
+```text
+ghcr.io/ewhauser/celld@sha256:94f35ba6973942eb4aaad2830ee8ebe431e2a125940acf380e74782602980a2a
+```
+
+It is `0.6.0-ewhauser.1` plus two changes. celld exports OTLP metrics beside
+traces and logs and reads `OTEL_RESOURCE_ATTRIBUTES`, which the operator sets
+when `spec.telemetry` is present (see [fleet API](fleet-api.md)). Strict
+disk-removal shutdown and `/state.node_log` are removed; the operator uses
+neither, and `/state.shutdown` keeps `schema_version: 1` and
+`runtime_generation`. Nodes roll from `0.6.0-ewhauser.1` with no record or
+storage format change.
+
+The source revision is `70a1e0b7fa16a3bccdc739331c9231f6ddc0a299`; the index is
+also tagged `sha-70a1e0b7fa16a3bccdc739331c9231f6ddc0a299`. Native binaries and
+checksums are attached to the
+[fork release](https://github.com/ewhauser/celld/releases/tag/v0.6.0-ewhauser.2).
+
+### v0.6.0-ewhauser.1
 
 ```text
 ghcr.io/ewhauser/celld@sha256:3e6c45392310add318952e45427db3316251a912ea7fd8d2fbff438fd2cc9f7f

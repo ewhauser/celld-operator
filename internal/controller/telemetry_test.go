@@ -24,6 +24,25 @@ func TestTelemetryRendersEnvAndEgress(t *testing.T) {
 			t.Errorf("%s = %q, want %q", key, got, want)
 		}
 	}
+	if got, _ := envValue(env, "OTEL_RESOURCE_ATTRIBUTES"); got != "k8s.namespace.name="+f.Namespace+",k8s.pod.name=$(POD_NAME),celld.fleet.name=alpha" {
+		t.Errorf("OTEL_RESOURCE_ATTRIBUTES = %q", got)
+	}
+	podName, resources := -1, -1
+	for i, e := range env {
+		switch e.Name {
+		case "POD_NAME":
+			podName = i
+			if e.ValueFrom == nil || e.ValueFrom.FieldRef == nil || e.ValueFrom.FieldRef.FieldPath != "metadata.name" {
+				t.Fatalf("POD_NAME not from the downward API: %+v", e)
+			}
+		case "OTEL_RESOURCE_ATTRIBUTES":
+			resources = i
+		}
+	}
+	// Kubernetes expands $(POD_NAME) only from variables defined earlier.
+	if podName < 0 || podName > resources {
+		t.Fatalf("POD_NAME at %d must precede OTEL_RESOURCE_ATTRIBUTES at %d", podName, resources)
+	}
 	foundHeaders := false
 	for _, e := range env {
 		if e.Name == "CELLD_OTEL_SINK" {
@@ -59,7 +78,7 @@ func TestTelemetryRendersEnvAndEgress(t *testing.T) {
 		}
 	}
 	for _, e := range podTemplate(f, Options{}).Spec.Containers[0].Env {
-		if slices.Contains([]string{"CELLD_OTEL", "CELLD_OTEL_SINK", "OTEL_EXPORTER_OTLP_HEADERS"}, e.Name) {
+		if slices.Contains([]string{"CELLD_OTEL", "CELLD_OTEL_SINK", "OTEL_EXPORTER_OTLP_HEADERS", "OTEL_RESOURCE_ATTRIBUTES", "POD_NAME"}, e.Name) {
 			t.Fatalf("disabled telemetry emitted %s", e.Name)
 		}
 	}
