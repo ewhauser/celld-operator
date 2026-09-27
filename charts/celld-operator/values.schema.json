@@ -62,6 +62,12 @@
         "maxLength": 63
       }
     },
+    "podAnnotations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
     "metrics": {
       "type": "object",
       "required": [

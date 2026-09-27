@@ -17,6 +17,7 @@ pod = deploy['spec']['template']['spec']
 assert pod['containers'][0]['image'] == 'ghcr.io/ewhauser/celld-operator:dev'
 assert '--operator-namespace=operator-test' in pod['containers'][0]['args']
 assert not any(doc['kind'] in ('ServiceMonitor', 'PrometheusRule') for doc in base)
+assert 'annotations' not in deploy['spec']['template']['metadata']
 assert not any(arg.startswith('--ec2-fencing-') for arg in pod['containers'][0]['args'])
 assert {doc['spec']['names']['kind'] for doc in base if doc['kind'] == 'CustomResourceDefinition'} == {'CelldFleet', 'CelldPreview', 'CelldStorageReservation'}
 role = next(doc for doc in base if doc['kind'] == 'ClusterRole')
@@ -44,15 +45,19 @@ for doc in base:
     if doc['kind'].endswith('RoleBinding'):
         assert doc['subjects'][0]['namespace'] == 'operator-test'
         assert doc['subjects'][0]['name'] == pod['serviceAccountName']
-full = render('--set', 'metrics.enabled=true,metrics.serviceMonitor.enabled=true,metrics.prometheusRule.enabled=true', '--set', 'image.digest=sha256:' + 'a' * 64, '--set', 'launcherImage=ghcr.io/example/operator@sha256:' + 'a' * 64)
+full = render('--set', 'metrics.enabled=true,metrics.serviceMonitor.enabled=true,metrics.prometheusRule.enabled=true', '--set', 'image.digest=sha256:' + 'a' * 64, '--set', 'launcherImage=ghcr.io/example/operator@sha256:' + 'a' * 64, '--set-string', 'podAnnotations.ad\\.datadoghq\\.com/operator\\.checks=1')
 assert any(doc['kind'] == 'ServiceMonitor' for doc in full)
 assert any(doc['kind'] == 'PrometheusRule' for doc in full)
-fullpod = next(doc for doc in full if doc['kind'] == 'Deployment')['spec']['template']['spec']
+fulldeploy = next(doc for doc in full if doc['kind'] == 'Deployment')
+fullpod = fulldeploy['spec']['template']['spec']
+# Pod annotations land on the Pod template, where autodiscovery agents read them, not the Deployment.
+assert fulldeploy['spec']['template']['metadata']['annotations'] == {'ad.datadoghq.com/operator.checks': '1'}
+assert 'annotations' not in fulldeploy['metadata']
 assert fullpod['containers'][0]['image'].endswith('@sha256:' + 'a' * 64)
 assert not any(arg.startswith('--launcher-image') for arg in fullpod['containers'][0]['args'])
 assert not any(doc['kind'] == 'PodDisruptionBudget' for doc in render('--set', 'replicaCount=1'))
 assert '--member-replacement-delay=10m' in fullpod['containers'][0]['args']
-for bad in ('fleetNamespaces={Bad_Name}', 'replicaCount=0', 'memberReplacementDelay=soon', 'metrics.serviceMonitor.enabled=true', 'metrics.port=8082', 'launcherImage=mutable:latest', 'image.digest=sha256:bad'):
+for bad in ('fleetNamespaces={Bad_Name}', 'replicaCount=0', 'memberReplacementDelay=soon', 'metrics.serviceMonitor.enabled=true', 'metrics.port=8082', 'launcherImage=mutable:latest', 'image.digest=sha256:bad', 'podAnnotations.checks=1'):
     result = subprocess.run(['helm', 'template', 'example', CHART, '--set', bad], text=True, capture_output=True)
     assert result.returncode != 0, f'invalid chart values accepted: {bad}'
 print('Helm rendering, canonical RBAC, HA, monitoring and invalid-value checks passed.')

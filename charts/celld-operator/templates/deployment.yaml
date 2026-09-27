@@ -14,6 +14,9 @@ spec:
     metadata:
       labels:
         {{- include "celld-operator.labels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations: {{ toYaml . | nindent 8 }}
+      {{- end }}
     spec:
       serviceAccountName: {{ include "celld-operator.name" . }}
       {{- with .Values.imagePullSecrets }}

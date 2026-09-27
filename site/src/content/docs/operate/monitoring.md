@@ -21,6 +21,22 @@ For capacity policy, read `status.capacity.reason` and its explanation. `Pending
 
 The chart can expose the controller metrics port through a ClusterIP Service. Enable `metrics.enabled=true` in chart values. `metrics.serviceMonitor.enabled` and `metrics.prometheusRule.enabled` require Prometheus Operator CRDs already installed. The included alert rules cover a blocker reported for more than 15 minutes and zero ready replicas. Restrict access to the metrics Service through cluster policy.
 
+Agents that discover scrape targets from Pod annotations need no Prometheus Operator. Set them with `podAnnotations`, which the chart places on the operator Pod template. Values must be strings. For the Datadog Agent, an OpenMetrics check on the `operator` container looks like this:
+
+```yaml
+metrics:
+  enabled: true
+podAnnotations:
+  ad.datadoghq.com/operator.checks: |
+    {"openmetrics": {"instances": [{
+      "openmetrics_endpoint": "http://%%host%%:8084/metrics",
+      "namespace": "",
+      "metrics": ["celld_fleet_.*"]
+    }]}}
+```
+
+Every operator replica serves metrics, but only the elected leader reconciles, so only the leader reports `celld_fleet_*` and per-controller series. Standbys serve process and client metrics alone. Aggregate fleet series across operator Pods with `max`, not `sum`.
+
 See [runtime recovery](../../troubleshoot/recovery/) for S3 lease expiry,
 delayed witnesses, lost nodes and lost disks.
 
