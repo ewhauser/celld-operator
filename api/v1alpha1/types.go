@@ -29,7 +29,7 @@ type CelldFleet struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 	// +kubebuilder:validation:XValidation:rule="!has(oldSelf.previews) || (has(self.previews) && self.previews == oldSelf.previews)",message="preview configuration cannot change once enabled"
-	// +kubebuilder:validation:XValidation:rule="self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement && has(self.execution) == has(oldSelf.execution) && (!has(self.execution) || self.execution == oldSelf.execution) && has(self.lifecycle) == has(oldSelf.lifecycle) && (!has(self.lifecycle) || self.lifecycle == oldSelf.lifecycle) && has(self.env) == has(oldSelf.env) && (!has(self.env) || self.env == oldSelf.env) && has(self.telemetry) == has(oldSelf.telemetry) && (!has(self.telemetry) || self.telemetry == oldSelf.telemetry) && self.bucketWorkload == oldSelf.bucketWorkload",message="runtime storage, layout, placement, execution, lifecycle, env and telemetry are fixed at creation"
+	// +kubebuilder:validation:XValidation:rule="self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement && has(self.execution) == has(oldSelf.execution) && (!has(self.execution) || self.execution == oldSelf.execution) && has(self.lifecycle) == has(oldSelf.lifecycle) && (!has(self.lifecycle) || self.lifecycle == oldSelf.lifecycle) && has(self.env) == has(oldSelf.env) && (!has(self.env) || self.env == oldSelf.env) && has(self.telemetry) == has(oldSelf.telemetry) && (!has(self.telemetry) || self.telemetry == oldSelf.telemetry) && self.bucketWorkload == oldSelf.bucketWorkload && has(self.mesh) == has(oldSelf.mesh)",message="runtime storage, layout, placement, execution, lifecycle, env, telemetry and mesh membership are fixed at creation"
 	Spec   CelldFleetSpec   `json:"spec"`
 	Status CelldFleetStatus `json:"status,omitempty"`
 }
@@ -100,7 +100,42 @@ type CelldFleetSpec struct {
 	// Omission removes operator-owned routes and their separate ingress policy.
 	// +optional
 	Routing *RoutingSpec `json:"routing,omitempty"`
+	// Optional service mesh membership. Joining or leaving the mesh is fixed at
+	// creation because it changes every member's Pod; the settings inside are
+	// mutable and change only the NetworkPolicy and AuthorizationPolicy.
+	// +optional
+	Mesh *MeshSpec `json:"mesh,omitempty"`
 }
+
+// MeshSpec places fleet members in a service mesh.
+type MeshSpec struct {
+	// Istio sidecar mode. Members get an injected sidecar, egress to istiod and
+	// an operator-owned AuthorizationPolicy, so they keep working under STRICT
+	// mTLS and alongside your own AuthorizationPolicies.
+	Istio IstioMeshSpec `json:"istio"`
+}
+
+type IstioMeshSpec struct {
+	// Namespace of the istiod Pods (label app=istiod) that serve sidecar
+	// configuration on TCP 15012. Default istio-system.
+	// +optional
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	ControlPlaneNamespace string `json:"controlPlaneNamespace,omitempty"`
+	// Who may call the application port 8080. AllowAll adds an ALLOW rule for
+	// port 8080 from any source, matching a fleet outside the mesh. Policies
+	// leaves port 8080 to AuthorizationPolicies you write; until one allows a
+	// caller, Istio denies it. Default AllowAll.
+	// +optional
+	// +kubebuilder:validation:Enum=AllowAll;Policies
+	ApplicationAccess string `json:"applicationAccess,omitempty"`
+}
+
+const (
+	DefaultIstioControlPlaneNamespace = "istio-system"
+	ApplicationAccessAllowAll         = "AllowAll"
+	ApplicationAccessPolicies         = "Policies"
+)
 
 // +kubebuilder:validation:XValidation:rule="has(self.value) != has(self.secretKeyRef)",message="exactly one of value or secretKeyRef is required"
 type FleetEnvVar struct {

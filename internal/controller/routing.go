@@ -107,7 +107,8 @@ func desiredRoutingPolicy(f *fleet.CelldFleet) *unstructured.Unstructured {
 }
 
 // Routing has separate ownership from workloads and storage. It may be updated
-// or garbage-collected without granting any runtime lifecycle authority.
+// or garbage-collected without granting any runtime lifecycle authority. The
+// mesh AuthorizationPolicy shares this ownership.
 func (r *Reconciler) applyRouting(ctx context.Context, f *fleet.CelldFleet, desired *unstructured.Unstructured) (*unstructured.Unstructured, error) {
 	desired.SetLabels(labels(f))
 	owner := metav1.NewControllerRef(f, fleet.GroupVersion.WithKind("CelldFleet"))
@@ -124,7 +125,10 @@ func (r *Reconciler) applyRouting(ctx context.Context, f *fleet.CelldFleet, desi
 	}
 	annotations[routingAnnotations] = string(encoded)
 	desired.SetAnnotations(annotations)
-	actual := routingObject(f, desired.GroupVersionKind())
+	actual := &unstructured.Unstructured{}
+	actual.SetGroupVersionKind(desired.GroupVersionKind())
+	actual.SetNamespace(desired.GetNamespace())
+	actual.SetName(desired.GetName())
 	if err := r.Get(ctx, client.ObjectKeyFromObject(actual), actual); err != nil {
 		if !apierrors.IsNotFound(err) {
 			return nil, err

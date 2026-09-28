@@ -62,6 +62,13 @@ func (r *Reconciler) reconcileWorkload(ctx context.Context, f *fleet.CelldFleet,
 			return r.report(ctx, f, h, "InfrastructureBlocked", err.Error(), false)
 		}
 	}
+	if err := r.reconcileMesh(ctx, f); err != nil {
+		// Forbidden names the missing fleet-namespace Role rule (Reconcile).
+		if apierrors.IsConflict(err) || apierrors.IsForbidden(err) {
+			return ctrl.Result{}, err
+		}
+		return r.report(ctx, f, h, "InfrastructureBlocked", err.Error(), false)
+	}
 	if !knownRuntime(runtimeImage(f)) {
 		return r.report(ctx, f, h, "UnsupportedTransition", "Provisioning requires a digest-pinned compatible fork runtime; there is no default image", false)
 	}

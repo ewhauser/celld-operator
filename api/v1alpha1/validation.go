@@ -26,6 +26,14 @@ func (f *CelldFleet) Default() {
 	if f.Spec.Placement.Mode == "" {
 		f.Spec.Placement.Mode = "Strict"
 	}
+	if m := f.Spec.Mesh; m != nil {
+		if m.Istio.ControlPlaneNamespace == "" {
+			m.Istio.ControlPlaneNamespace = DefaultIstioControlPlaneNamespace
+		}
+		if m.Istio.ApplicationAccess == "" {
+			m.Istio.ApplicationAccess = ApplicationAccessAllowAll
+		}
+	}
 }
 
 // Validate checks both runtime configuration and optional routing.
@@ -64,6 +72,9 @@ func (f *CelldFleet) ValidateRuntime() error {
 		return err
 	}
 	if err := validateTelemetry(s.Telemetry); err != nil {
+		return err
+	}
+	if err := validateMesh(s.Mesh); err != nil {
 		return err
 	}
 	switch {
@@ -154,6 +165,20 @@ func validateTuning(s *CelldFleetSpec) error {
 	}
 	if l.TerminationGraceSeconds < l.ShutdownSeconds+terminationGraceHeadroom || l.TerminationGraceSeconds > 3605 {
 		return fmt.Errorf("lifecycle.terminationGraceSeconds must exceed shutdownSeconds by at least %d", terminationGraceHeadroom)
+	}
+	return nil
+}
+
+func validateMesh(m *MeshSpec) error {
+	if m == nil {
+		return nil
+	}
+	i := m.Istio
+	if i.ControlPlaneNamespace != "" && len(validation.IsDNS1123Label(i.ControlPlaneNamespace)) != 0 {
+		return fmt.Errorf("mesh.istio.controlPlaneNamespace must be a namespace name")
+	}
+	if i.ApplicationAccess != "" && i.ApplicationAccess != ApplicationAccessAllowAll && i.ApplicationAccess != ApplicationAccessPolicies {
+		return fmt.Errorf("mesh.istio.applicationAccess must be AllowAll or Policies")
 	}
 	return nil
 }

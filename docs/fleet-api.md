@@ -16,9 +16,10 @@ StatefulSet. Neither layout
 is converted in place. Infrastructure outside Kubernetes, including bucket,
 IAM roles, worker nodes and EBS CSI, remains administrator-owned.
 
-The mutable request fields are `replicas`, `capacity`, `runtimeImage` and
-`maintenance` and `routing`. Storage, layout, placement, execution sizing, lifecycle budgets,
-`env`, and `telemetry` are fixed at creation. `maintenance.paused` stops new
+The mutable request fields are `replicas`, `capacity`, `runtimeImage`,
+`maintenance`, `routing` and the settings inside `mesh`. Storage, layout,
+placement, execution sizing, lifecycle budgets, `env`, `telemetry` and mesh
+membership are fixed at creation. `maintenance.paused` stops new
 workload changes. A new `restartToken` requests a same-version restart. Restarts
 and upgrades are one-member rolling updates for both profiles;
 `allowCoordinatedDowntime` is accepted and ignored.
@@ -82,6 +83,26 @@ never the managed Deployment or StatefulSet. They gain no deletion authority.
 Install with namespace-scoped RBAC for every managed namespace and attest CNI
 NetworkPolicy enforcement. See [installation](../site/src/content/docs/start/install.mdx)
 and [security boundaries](../site/src/content/docs/reference/security-boundaries.md).
+
+`spec.mesh.istio` places members in an Istio sidecar mesh that may run STRICT
+mTLS and AuthorizationPolicies. The Pod template gains the
+`sidecar.istio.io/inject: "true"` and `celld.eric.dev/fleet: FLEET` labels and
+asks for a native sidecar (`sidecar.istio.io/nativeSidecar: "true"`), which
+starts before celld and stops after it, so peer RPC works through startup
+recovery and the SIGTERM handoff. The EKS Pod Identity agent address bypasses
+the proxy. The fleet NetworkPolicy adds egress to istiod Pods (`app: istiod`) in
+`controlPlaneNamespace` (default `istio-system`) on TCP 15012. The operator
+owns an ALLOW AuthorizationPolicy named `FLEET-mesh` that admits port 8081 only
+from the fleet's ServiceAccount and the operator's (`--operator-service-account`),
+matched in any trust domain. With `applicationAccess: AllowAll` (the default) it
+also allows port 8080 from any caller; with `Policies`, port 8080 callers need an
+AuthorizationPolicy you write. The policy is created before the workload; a
+missing `security.istio.io/v1` API or a same-named policy the fleet does not own
+reports `InfrastructureBlocked`. Joining or leaving the mesh is fixed at creation
+because it changes every Pod; `controlPlaneNamespace` and `applicationAccess`
+change only policies and roll nothing. The operator reads each member's `/state`
+on 8081 directly, so under STRICT mTLS the operator Pods must be in the mesh too.
+See [Istio networking](../site/src/content/docs/configure/networking.md#istio-strict-mtls-and-authorization).
 
 `spec.routing` optionally creates one Gateway API v1 HTTPRoute or a standard
 Ingress, named `FLEET-routing`. Both forward `/` for explicit `hostnames` to

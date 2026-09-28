@@ -34,6 +34,7 @@ func run() error {
 	fs := flag.NewFlagSet("celld-operator", flag.ContinueOnError)
 	showVersion := fs.Bool("version", false, "Print version and exit")
 	namespace := fs.String("operator-namespace", "celld-system", "Namespace of trusted operator pods and leader election")
+	operatorSA := fs.String("operator-service-account", controller.DefaultOperatorServiceAccount, "The operator's ServiceAccount, admitted to fleet peer ports by the AuthorizationPolicy of fleets in the Istio mesh")
 	enforced := fs.Bool("network-policy-enforced", false, "Administrator attests NetworkPolicy enforcement has been verified on this cluster")
 	localTest := fs.Bool("local-test", false, "Use disposable local MinIO test configuration; never enable on EKS")
 	localRWOP := fs.Bool("local-rwop", false, "Disposable harness only: request ReadWriteOncePod claims served by the per-node hostpath CSI driver; requires --local-test")
@@ -84,7 +85,7 @@ func run() error {
 		return err
 	}
 	celld := controlplane.New(nil)
-	reconciler := &controller.Reconciler{ApplicationRuntime: celld, Collector: collector, Client: direct, Options: controller.Options{OperatorNamespace: *namespace, LocalTest: *localTest, LocalRWOP: *localRWOP, MemberReplacementDelay: *replaceAfter}, NetworkPolicyEnforced: *enforced}
+	reconciler := &controller.Reconciler{ApplicationRuntime: celld, Collector: collector, Client: direct, Options: controller.Options{OperatorNamespace: *namespace, OperatorServiceAccount: *operatorSA, LocalTest: *localTest, LocalRWOP: *localRWOP, MemberReplacementDelay: *replaceAfter}, NetworkPolicyEnforced: *enforced}
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		return err
 	}

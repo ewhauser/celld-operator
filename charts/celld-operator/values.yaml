@@ -21,6 +21,10 @@ serviceAccount:
 # Annotations on the operator Pod template, for example Datadog autodiscovery
 # checks against the metrics port. Values must be strings.
 podAnnotations: {}
+# Labels on the operator Pod template. Fleets with spec.mesh.istio need the
+# operator in the mesh to read member state under STRICT mTLS, for example
+# sidecar.istio.io/inject: "true". Values must be strings.
+podLabels: {}
 resources:
   requests:
     cpu: 100m

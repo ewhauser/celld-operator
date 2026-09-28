@@ -14,6 +14,9 @@ spec:
     metadata:
       labels:
         {{- include "celld-operator.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- with .Values.podAnnotations }}
       annotations: {{ toYaml . | nindent 8 }}
       {{- end }}
@@ -52,6 +55,7 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - --operator-namespace={{ .Release.Namespace }}
+            - --operator-service-account={{ include "celld-operator.name" . }}
             - --network-policy-enforced={{ .Values.networkPolicyEnforced }}
             - --member-replacement-delay={{ .Values.memberReplacementDelay }}
             {{- if .Values.metrics.enabled }}

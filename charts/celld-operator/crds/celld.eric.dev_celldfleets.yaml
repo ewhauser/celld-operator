@@ -369,6 +369,39 @@ spec:
                     maxLength: 128
                     type: string
                 type: object
+              mesh:
+                description: |-
+                  Optional service mesh membership. Joining or leaving the mesh is fixed at
+                  creation because it changes every member's Pod; the settings inside are
+                  mutable and change only the NetworkPolicy and AuthorizationPolicy.
+                properties:
+                  istio:
+                    description: |-
+                      Istio sidecar mode. Members get an injected sidecar, egress to istiod and
+                      an operator-owned AuthorizationPolicy, so they keep working under STRICT
+                      mTLS and alongside your own AuthorizationPolicies.
+                    properties:
+                      applicationAccess:
+                        description: |-
+                          Who may call the application port 8080. AllowAll adds an ALLOW rule for
+                          port 8080 from any source, matching a fleet outside the mesh. Policies
+                          leaves port 8080 to AuthorizationPolicies you write; until one allows a
+                          caller, Istio denies it. Default AllowAll.
+                        enum:
+                        - AllowAll
+                        - Policies
+                        type: string
+                      controlPlaneNamespace:
+                        description: |-
+                          Namespace of the istiod Pods (label app=istiod) that serve sidecar
+                          configuration on TCP 15012. Default istio-system.
+                        maxLength: 63
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                        type: string
+                    type: object
+                required:
+                - istio
+                type: object
               placement:
                 description: Allowed availability zones and scheduling strictness.
                   Immutable after creation.
@@ -1231,8 +1264,8 @@ spec:
             - message: preview configuration cannot change once enabled
               rule: '!has(oldSelf.previews) || (has(self.previews) && self.previews
                 == oldSelf.previews)'
-            - message: runtime storage, layout, placement, execution, lifecycle, env
-                and telemetry are fixed at creation
+            - message: runtime storage, layout, placement, execution, lifecycle, env,
+                telemetry and mesh membership are fixed at creation
               rule: self.profile == oldSelf.profile && self.serviceAccountName ==
                 oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement
                 == oldSelf.placement && has(self.execution) == has(oldSelf.execution)
@@ -1242,6 +1275,7 @@ spec:
                 && (!has(self.env) || self.env == oldSelf.env) && has(self.telemetry)
                 == has(oldSelf.telemetry) && (!has(self.telemetry) || self.telemetry
                 == oldSelf.telemetry) && self.bucketWorkload == oldSelf.bucketWorkload
+                && has(self.mesh) == has(oldSelf.mesh)
             - message: preview storage must use a separate bucket from the parent
                 runtime
               rule: '!has(self.previews) || self.previews.storage.bucket != self.storage.bucket'

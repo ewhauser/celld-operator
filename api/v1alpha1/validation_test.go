@@ -179,3 +179,27 @@ func TestTuningValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestMeshDefaultsAndValidation(t *testing.T) {
+	f := valid()
+	f.Spec.Mesh = &MeshSpec{}
+	f.Default()
+	if f.Spec.Mesh.Istio.ControlPlaneNamespace != DefaultIstioControlPlaneNamespace || f.Spec.Mesh.Istio.ApplicationAccess != ApplicationAccessAllowAll {
+		t.Fatalf("mesh defaults not applied: %+v", f.Spec.Mesh.Istio)
+	}
+	if err := f.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for name, istio := range map[string]IstioMeshSpec{
+		"namespace": {ControlPlaneNamespace: "Istio_System"},
+		"access":    {ApplicationAccess: "Open"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := valid()
+			f.Spec.Mesh = &MeshSpec{Istio: istio}
+			if err := f.Validate(); err == nil {
+				t.Fatal("accepted invalid mesh")
+			}
+		})
+	}
+}

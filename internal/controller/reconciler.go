@@ -55,6 +55,7 @@ func reservationSpecJSON(f *fleet.CelldFleet) []byte {
 	spec.Previews = nil
 	spec.Capacity = nil
 	spec.Routing = nil
+	spec.Mesh = nil
 	spec.RuntimeImage = ""
 	spec.Maintenance = nil
 	b, _ := json.Marshal(spec)

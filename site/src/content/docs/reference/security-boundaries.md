@@ -77,7 +77,10 @@ containers, init containers, environment, volumes and mounts. No injector is
 named or allow-listed, and the operator no longer validates admitted Pod shape.
 Mutations that change the runtime image, command, operator-set environment or
 data-disk mounts can break celld; keep them out of fleet namespaces. Admission
-that can add privileged or hostPath containers is trusted with the node.
+that can add privileged or hostPath containers is trusted with the node. A fleet
+with `spec.mesh.istio` asks for the Istio sidecar itself and receives an
+operator-owned AuthorizationPolicy limiting its peer port to fleet members and
+the operator; see [networking](../../configure/networking/#istio-strict-mtls-and-authorization).
 
 ## Optional routing
 
