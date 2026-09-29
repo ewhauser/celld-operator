@@ -75,9 +75,44 @@ installs must label the fleet namespace with `istio.io/rev`, since the pod label
 alone selects the default revision. Under a `REGISTRY_ONLY` outbound policy,
 add ServiceEntries for S3, STS and your collector.
 
-Mesh membership is fixed at creation because it changes every member Pod; to
-move an existing fleet, create a new one. `controlPlaneNamespace` and
-`applicationAccess` are mutable and change only policies. Update the
+`controlPlaneNamespace` and `applicationAccess` are mutable and change only
+policies. Joining or leaving the mesh changes every member Pod, and under STRICT
+mTLS a fleet that is half in the mesh cannot reach its own peers, so membership
+changes only across a full stop, as in the
+[full-stop upgrade](../../operate/upgrade-runtime/#full-stop-upgrade). The API
+accepts a membership change only on a paused fleet, and the operator reports
+`MeshTransitionBlocked` and keeps the old template while any member Pod remains.
+Members keep their disks. To move an existing fleet into the mesh:
+
+```bash
+CONTEXT=YOUR_CONTEXT
+NAMESPACE=fleets
+FLEET=my-fleet
+FLEET_UID=$(kubectl --context "$CONTEXT" -n "$NAMESPACE" get celldfleet "$FLEET" -o jsonpath='{.metadata.uid}')
+
+# 1. Pause the fleet.
+kubectl --context "$CONTEXT" -n "$NAMESPACE" patch celldfleet "$FLEET" --type merge \
+  -p '{"spec":{"maintenance":{"paused":true}}}'
+kubectl --context "$CONTEXT" -n "$NAMESPACE" wait "celldfleet/$FLEET" \
+  --for=condition=MaintenancePaused --timeout=2m
+
+# 2. Stop every member (use deployment for a Bucket fleet with the Deployment
+#    layout), and wait until no member Pod remains.
+kubectl --context "$CONTEXT" -n "$NAMESPACE" scale statefulset "$FLEET" --replicas=0
+while kubectl --context "$CONTEXT" -n "$NAMESPACE" get pods \
+  -l "celld.eric.dev/fleet-uid=$FLEET_UID" -o name | grep -q .; do sleep 5; done
+
+# 3. Join the mesh and resume in one change. Every member returns in the mesh
+#    at the declared count.
+kubectl --context "$CONTEXT" -n "$NAMESPACE" patch celldfleet "$FLEET" --type merge \
+  -p '{"spec":{"mesh":{"istio":{}},"maintenance":{"paused":false}}}'
+kubectl --context "$CONTEXT" -n "$NAMESPACE" wait "celldfleet/$FLEET" \
+  --for=condition=Ready --timeout=20m
+```
+
+To leave the mesh, run the same steps with `"mesh":null` in step 3. The
+`FLEET-mesh` policy stays until the fleet is deleted; without a sidecar it has
+no effect. Update the
 per-fleet-namespace Role when upgrading: it now grants `get`, `create` and
 `update` on `security.istio.io` AuthorizationPolicies. The operator requires
 Istio's `security.istio.io/v1` API and reports `InfrastructureBlocked` without

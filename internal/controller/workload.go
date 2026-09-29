@@ -96,6 +96,12 @@ func (r *Reconciler) reconcileWorkload(ctx context.Context, f *fleet.CelldFleet,
 	if err := owned(f, actual); err != nil {
 		return r.report(ctx, f, h, "LifecycleBlocked", err.Error(), false)
 	}
+	if err := r.meshTransition(ctx, f, desired, actual); err != nil {
+		if apierrors.IsForbidden(err) {
+			return ctrl.Result{}, err
+		}
+		return r.report(ctx, f, h, "MeshTransitionBlocked", err.Error(), false)
+	}
 	applied := replicas(actual)
 	target, automatic := r.capacityTarget(ctx, f, s, applied)
 	var waitReason, waitMessage string

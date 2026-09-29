@@ -16,6 +16,7 @@ kubectl --context YOUR_CONTEXT -n fleets get celldfleet my-fleet   -o json | jq 
 | `InfrastructureReady` | Required Kubernetes objects match; Pods may still be Pending. |
 | `Blocked` | A requested action cannot proceed; read its reason and message. |
 | `Progressing` | `Provisioning` while a change rolls out or a down member waits to be replaced, or `LifecycleProgress` while the operator heals a member or deletes the fleet. |
+| `MeshTransitionBlocked` | `spec.mesh` membership changed while members run. The workload keeps its template until no member Pod remains; see [the mesh full stop](../../configure/networking/#istio-strict-mtls-and-authorization). |
 | `MaintenancePaused` | Workload changes are suspended. |
 | `Deleting` | A fleet deletion request is removing compute and, for PersistentFleet, disks. |
 | `OperationSizeWarning` | The reservation's capacity-policy history is nearing its bounded encoded-state limit. |

@@ -249,3 +249,50 @@ func TestIstioMeshWithoutRoleRuleNamesTheRole(t *testing.T) {
 	}})
 	reason(t, reconcile(t, r, f), "NamespaceAccessDenied")
 }
+
+// An existing fleet joins or leaves the mesh only across a full stop: the
+// operator holds the new template while any member runs, and applies it with
+// the declared count once none remain.
+func TestMeshMembershipChangesAcrossAFullStop(t *testing.T) {
+	for _, profile := range []string{"Deployment", "PersistentFleet"} {
+		t.Run(profile, func(t *testing.T) {
+			x := newOperationFixture(t, profile)
+			x.settle()
+			x.edit(func(f *fleet.CelldFleet) { f.Spec.Mesh = &fleet.MeshSpec{} })
+			reason(t, x.step(), "MeshTransitionBlocked")
+			if meshMember(x.workload()) || replicas(x.workload()) != 3 {
+				t.Fatal("a running fleet was moved into the mesh")
+			}
+
+			x.edit(func(f *fleet.CelldFleet) {
+				f.Spec.Mesh = nil
+				f.Spec.Maintenance = &fleet.MaintenanceSpec{Paused: true}
+			})
+			x.step()
+			w := x.workload()
+			setReplicas(w, 0)
+			if err := x.r.Update(t.Context(), w); err != nil {
+				t.Fatal(err)
+			}
+			x.syncWorkload()
+			x.edit(func(f *fleet.CelldFleet) {
+				f.Spec.Mesh = &fleet.MeshSpec{}
+				f.Spec.Maintenance = &fleet.MaintenanceSpec{}
+			})
+			x.settle()
+			if !meshMember(x.workload()) || replicas(x.workload()) != 3 {
+				t.Fatalf("fleet did not return in the mesh at its declared count: member=%v replicas=%d", meshMember(x.workload()), replicas(x.workload()))
+			}
+			if _, err := authorizationPolicy(t, x.r, x.f); err != nil {
+				t.Fatal(err)
+			}
+
+			// Leaving is held the same way while members run.
+			x.edit(func(f *fleet.CelldFleet) { f.Spec.Mesh = nil })
+			reason(t, x.step(), "MeshTransitionBlocked")
+			if !meshMember(x.workload()) {
+				t.Fatal("a running fleet left the mesh")
+			}
+		})
+	}
+}

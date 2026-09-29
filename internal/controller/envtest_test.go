@@ -203,7 +203,20 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 	}
 	withMesh.Spec.Mesh = nil
 	if err := c.Update(ctx, withMesh); !apierrors.IsInvalid(err) {
-		t.Fatalf("mesh removal accepted: %v", err)
+		t.Fatalf("mesh removal accepted on a running fleet: %v", err)
+	}
+	// Membership changes across a full stop: pause, then change and resume in one edit.
+	if err := c.Get(ctx, client.ObjectKeyFromObject(withMesh), withMesh); err != nil {
+		t.Fatal(err)
+	}
+	withMesh.Spec.Maintenance = &fleet.MaintenanceSpec{Paused: true}
+	if err := c.Update(ctx, withMesh); err != nil {
+		t.Fatalf("pause rejected: %v", err)
+	}
+	withMesh.Spec.Mesh = nil
+	withMesh.Spec.Maintenance = nil
+	if err := c.Update(ctx, withMesh); err != nil {
+		t.Fatalf("mesh removal rejected on a paused fleet: %v", err)
 	}
 
 	// CEL cross-field rules reject at creation time.

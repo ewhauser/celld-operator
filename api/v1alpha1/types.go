@@ -29,7 +29,8 @@ type CelldFleet struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 	// +kubebuilder:validation:XValidation:rule="!has(oldSelf.previews) || (has(self.previews) && self.previews == oldSelf.previews)",message="preview configuration cannot change once enabled"
-	// +kubebuilder:validation:XValidation:rule="self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement && has(self.execution) == has(oldSelf.execution) && (!has(self.execution) || self.execution == oldSelf.execution) && has(self.lifecycle) == has(oldSelf.lifecycle) && (!has(self.lifecycle) || self.lifecycle == oldSelf.lifecycle) && has(self.env) == has(oldSelf.env) && (!has(self.env) || self.env == oldSelf.env) && has(self.telemetry) == has(oldSelf.telemetry) && (!has(self.telemetry) || self.telemetry == oldSelf.telemetry) && self.bucketWorkload == oldSelf.bucketWorkload && has(self.mesh) == has(oldSelf.mesh)",message="runtime storage, layout, placement, execution, lifecycle, env, telemetry and mesh membership are fixed at creation"
+	// +kubebuilder:validation:XValidation:rule="self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement && has(self.execution) == has(oldSelf.execution) && (!has(self.execution) || self.execution == oldSelf.execution) && has(self.lifecycle) == has(oldSelf.lifecycle) && (!has(self.lifecycle) || self.lifecycle == oldSelf.lifecycle) && has(self.env) == has(oldSelf.env) && (!has(self.env) || self.env == oldSelf.env) && has(self.telemetry) == has(oldSelf.telemetry) && (!has(self.telemetry) || self.telemetry == oldSelf.telemetry) && self.bucketWorkload == oldSelf.bucketWorkload",message="runtime storage, layout, placement, execution, lifecycle, env and telemetry are fixed at creation"
+	// +kubebuilder:validation:XValidation:rule="has(self.mesh) == has(oldSelf.mesh) || (has(oldSelf.maintenance) && has(oldSelf.maintenance.paused) && oldSelf.maintenance.paused)",message="mesh membership changes only on a paused fleet; stop every member first"
 	Spec   CelldFleetSpec   `json:"spec"`
 	Status CelldFleetStatus `json:"status,omitempty"`
 }
@@ -100,8 +101,10 @@ type CelldFleetSpec struct {
 	// Omission removes operator-owned routes and their separate ingress policy.
 	// +optional
 	Routing *RoutingSpec `json:"routing,omitempty"`
-	// Optional service mesh membership. Joining or leaving the mesh is fixed at
-	// creation because it changes every member's Pod; the settings inside are
+	// Optional service mesh membership. A running fleet cannot be half in the
+	// mesh, so joining or leaving is a full stop: pause, stop every member,
+	// then change membership and resume in one edit. The operator holds the
+	// new template until no member Pod remains. The settings inside are
 	// mutable and change only the NetworkPolicy and AuthorizationPolicy.
 	// +optional
 	Mesh *MeshSpec `json:"mesh,omitempty"`

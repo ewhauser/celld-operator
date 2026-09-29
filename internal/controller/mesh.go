@@ -3,8 +3,10 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -12,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // Istio sidecar mode (spec.mesh.istio). Under STRICT mTLS every caller of a
@@ -116,6 +119,39 @@ func (r *Reconciler) reconcileMesh(ctx context.Context, f *fleet.CelldFleet) err
 			return errors.New("spec.mesh.istio requires Istio's security.istio.io/v1 AuthorizationPolicy API; install Istio 1.22 or later")
 		}
 		return err
+	}
+	return nil
+}
+
+func podTemplateOf(w client.Object) corev1.PodTemplateSpec {
+	switch w := w.(type) {
+	case *appsv1.StatefulSet:
+		return w.Spec.Template
+	case *appsv1.Deployment:
+		return w.Spec.Template
+	}
+	return corev1.PodTemplateSpec{}
+}
+
+// meshMember reports whether a workload's template puts members in the mesh.
+func meshMember(w client.Object) bool {
+	return podTemplateOf(w).Labels[istioInjectLabel] == "true"
+}
+
+// meshTransition refuses to change mesh membership while any member runs. A
+// meshed member under STRICT mTLS rejects an unmeshed peer, and the rolling
+// update would leave the fleet split until its last member rolled, so
+// membership changes only across a full stop.
+func (r *Reconciler) meshTransition(ctx context.Context, f *fleet.CelldFleet, desired, actual client.Object) error {
+	if meshMember(desired) == meshMember(actual) {
+		return nil
+	}
+	pods := &corev1.PodList{}
+	if err := r.List(ctx, pods, client.InNamespace(f.Namespace), client.MatchingLabels(labels(f))); err != nil {
+		return err
+	}
+	if n := replicas(actual); n > 0 || len(pods.Items) > 0 {
+		return fmt.Errorf("mesh membership changes only across a full stop: scale %s to zero and wait for its %d member Pods to exit; the new template applies once none remain", f.Name, len(pods.Items))
 	}
 	return nil
 }
