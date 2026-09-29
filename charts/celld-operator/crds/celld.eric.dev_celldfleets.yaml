@@ -371,11 +371,10 @@ spec:
                 type: object
               mesh:
                 description: |-
-                  Optional service mesh membership. A running fleet cannot be half in the
-                  mesh, so joining or leaving is a full stop: pause, stop every member,
-                  then change membership and resume in one edit. The operator holds the
-                  new template until no member Pod remains. The settings inside are
-                  mutable and change only the NetworkPolicy and AuthorizationPolicy.
+                  Optional service mesh membership. Adding or removing it rolls members one
+                  at a time; until every member matches, the peer port accepts plaintext
+                  from any source the fleet NetworkPolicy admits. The settings inside
+                  change only the NetworkPolicy and AuthorizationPolicy.
                 properties:
                   istio:
                     description: |-
@@ -1277,10 +1276,6 @@ spec:
                 && (!has(self.env) || self.env == oldSelf.env) && has(self.telemetry)
                 == has(oldSelf.telemetry) && (!has(self.telemetry) || self.telemetry
                 == oldSelf.telemetry) && self.bucketWorkload == oldSelf.bucketWorkload
-            - message: mesh membership changes only on a paused fleet; stop every
-                member first
-              rule: has(self.mesh) == has(oldSelf.mesh) || (has(oldSelf.maintenance)
-                && has(oldSelf.maintenance.paused) && oldSelf.maintenance.paused)
             - message: preview storage must use a separate bucket from the parent
                 runtime
               rule: '!has(self.previews) || self.previews.storage.bucket != self.storage.bucket'

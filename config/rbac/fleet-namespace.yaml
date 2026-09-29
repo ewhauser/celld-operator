@@ -53,11 +53,12 @@ rules:
   - apiGroups: [gateway.networking.k8s.io]
     resources: [httproutes]
     verbs: [get, create, update, delete]
-  # Fleets in the Istio mesh (spec.mesh.istio) get one AuthorizationPolicy,
-  # owned by the CelldFleet and garbage-collected with it.
+  # Fleets in the Istio mesh (spec.mesh.istio) get an AuthorizationPolicy, and a
+  # PeerAuthentication while members roll into or out of the mesh, owned by
+  # the CelldFleet. Delete removes them once a fleet has rolled out of the mesh.
   - apiGroups: [security.istio.io]
-    resources: [authorizationpolicies]
-    verbs: [get, create, update]
+    resources: [authorizationpolicies, peerauthentications]
+    verbs: [get, create, update, delete]
   # Update converges fleet budgets.
   - apiGroups: [policy]
     resources: [poddisruptionbudgets]

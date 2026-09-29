@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"strings"
 	"testing"
@@ -187,7 +188,8 @@ func (x *operationFixture) syncWorkload() {
 		spec.SchedulingGates = nil
 		spec.NodeName = fmt.Sprintf("host-%d", i)
 		owner := metav1.OwnerReference{APIVersion: "apps/v1", Kind: "StatefulSet", Name: x.f.Name, UID: w.GetUID(), Controller: new(true)}
-		podLabels := labels(x.f)
+		// Pods carry the template's labels, as the workload controllers copy them.
+		podLabels := maps.Clone(podTemplateOf(w).Labels)
 		switch w := w.(type) {
 		case *appsv1.StatefulSet:
 			spec.Containers[0].Image = w.Spec.Template.Spec.Containers[0].Image

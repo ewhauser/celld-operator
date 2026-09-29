@@ -17,8 +17,7 @@ is converted in place. Infrastructure outside Kubernetes, including bucket,
 IAM roles, worker nodes and EBS CSI, remains administrator-owned.
 
 The mutable request fields are `replicas`, `capacity`, `runtimeImage`,
-`maintenance`, `routing` and `mesh`; mesh membership changes only on a paused
-fleet (see below). Storage, layout, placement, execution sizing, lifecycle
+`maintenance`, `routing` and `mesh`. Storage, layout, placement, execution sizing, lifecycle
 budgets, `env` and `telemetry` are fixed at creation. `maintenance.paused` stops new
 workload changes. A new `restartToken` requests a same-version restart. Restarts
 and upgrades are one-member rolling updates for both profiles;
@@ -99,13 +98,13 @@ also allows port 8080 from any caller; with `Policies`, port 8080 callers need a
 AuthorizationPolicy you write. The policy is created before the workload; a
 missing `security.istio.io/v1` API or a same-named policy the fleet does not own
 reports `InfrastructureBlocked`. `controlPlaneNamespace` and `applicationAccess`
-change only policies and roll nothing. Joining or leaving the mesh changes every
-Pod, and a fleet half in the mesh cannot reach its own peers under STRICT mTLS,
-so membership changes only across a full stop: the API accepts the change only
-when the stored fleet is paused, and the operator reports
-`MeshTransitionBlocked`, keeping the old template, while any member Pod remains.
-Pause, scale the workload to zero, then change membership and resume in one
-edit; members return in the new mode at the declared count on their own disks. The operator reads each member's `/state`
+change only policies and roll nothing. Adding or removing `mesh` rolls members one at
+a time. Until every member Pod matches, the operator keeps a PeerAuthentication
+`FLEET-mesh` that makes port 8081 `PERMISSIVE` and drops the identity requirement
+from the peer-port rule, since an unmeshed member's plaintext peer RPC has no
+identity; the fleet NetworkPolicy still limits 8081 to members and the operator.
+It restores the strict rule and deletes the PeerAuthentication when the roll
+completes, and deletes both objects once a fleet has left the mesh. The operator reads each member's `/state`
 on 8081 directly, so under STRICT mTLS the operator Pods must be in the mesh too.
 See [Istio networking](../site/src/content/docs/configure/networking.md#istio-strict-mtls-and-authorization).
 

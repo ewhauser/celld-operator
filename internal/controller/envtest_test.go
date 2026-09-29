@@ -201,22 +201,10 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 	if err := c.Update(ctx, withMesh); err != nil {
 		t.Fatalf("mesh settings rejected: %v", err)
 	}
+	// Membership rolls like any template change.
 	withMesh.Spec.Mesh = nil
-	if err := c.Update(ctx, withMesh); !apierrors.IsInvalid(err) {
-		t.Fatalf("mesh removal accepted on a running fleet: %v", err)
-	}
-	// Membership changes across a full stop: pause, then change and resume in one edit.
-	if err := c.Get(ctx, client.ObjectKeyFromObject(withMesh), withMesh); err != nil {
-		t.Fatal(err)
-	}
-	withMesh.Spec.Maintenance = &fleet.MaintenanceSpec{Paused: true}
 	if err := c.Update(ctx, withMesh); err != nil {
-		t.Fatalf("pause rejected: %v", err)
-	}
-	withMesh.Spec.Mesh = nil
-	withMesh.Spec.Maintenance = nil
-	if err := c.Update(ctx, withMesh); err != nil {
-		t.Fatalf("mesh removal rejected on a paused fleet: %v", err)
+		t.Fatalf("mesh removal rejected: %v", err)
 	}
 
 	// CEL cross-field rules reject at creation time.
@@ -290,7 +278,6 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 		{"telemetry", func(f *fleet.CelldFleet) {
 			f.Spec.Telemetry = &fleet.TelemetrySpec{CollectorURL: "http://collector:4318", Egress: fleet.CollectorEgress{PodLabels: map[string]string{"app": "otel"}}}
 		}},
-		{"mesh", func(f *fleet.CelldFleet) { f.Spec.Mesh = &fleet.MeshSpec{} }},
 	} {
 		t.Run("immutable "+tc.name, func(t *testing.T) {
 			got := &fleet.CelldFleet{}

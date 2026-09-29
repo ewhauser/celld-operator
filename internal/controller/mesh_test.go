@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
@@ -250,48 +251,98 @@ func TestIstioMeshWithoutRoleRuleNamesTheRole(t *testing.T) {
 	reason(t, reconcile(t, r, f), "NamespaceAccessDenied")
 }
 
-// An existing fleet joins or leaves the mesh only across a full stop: the
-// operator holds the new template while any member runs, and applies it with
-// the declared count once none remain.
-func TestMeshMembershipChangesAcrossAFullStop(t *testing.T) {
-	for _, profile := range []string{"Deployment", "PersistentFleet"} {
+func peerRuleOpen(t *testing.T, r *Reconciler, f *fleet.CelldFleet) bool {
+	t.Helper()
+	ap, err := authorizationPolicy(t, r, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, restricted := policyRules(t, ap)[0]["from"]
+	return !restricted
+}
+
+func peerAuthentication(t *testing.T, r *Reconciler, f *fleet.CelldFleet) (*unstructured.Unstructured, error) {
+	t.Helper()
+	obj := meshObject(f, peerAuthenticationGVK)
+	err := r.Get(t.Context(), client.ObjectKeyFromObject(obj), obj)
+	return obj, err
+}
+
+// rollMesh runs the operator and the simulated workload controller until every
+// member matches the desired membership, then reconciles once more.
+func rollMesh(x *operationFixture) {
+	x.t.Helper()
+	for range 40 {
+		x.operatorStep()
+		x.syncWorkload()
+		mixed, err := x.r.meshMixed(x.t.Context(), x.f)
+		if err != nil {
+			x.t.Fatal(err)
+		}
+		if !mixed {
+			x.operatorStep()
+			return
+		}
+	}
+	x.t.Fatal("members never matched the desired membership")
+}
+
+// An existing fleet joins and leaves the mesh one member at a time. While
+// members are mixed, the peer port accepts plaintext from any source the
+// NetworkPolicy admits; once every member matches, the strict policy returns.
+func TestMeshMembershipRollsOneMemberAtATime(t *testing.T) {
+	for _, profile := range []string{"Bucket", "PersistentFleet"} {
 		t.Run(profile, func(t *testing.T) {
 			x := newOperationFixture(t, profile)
 			x.settle()
+			if _, err := authorizationPolicy(t, x.r, x.f); !apierrors.IsNotFound(err) {
+				t.Fatalf("policy before joining: %v", err)
+			}
+
 			x.edit(func(f *fleet.CelldFleet) { f.Spec.Mesh = &fleet.MeshSpec{} })
-			reason(t, x.step(), "MeshTransitionBlocked")
-			if meshMember(x.workload()) || replicas(x.workload()) != 3 {
-				t.Fatal("a running fleet was moved into the mesh")
-			}
-
-			x.edit(func(f *fleet.CelldFleet) {
-				f.Spec.Mesh = nil
-				f.Spec.Maintenance = &fleet.MaintenanceSpec{Paused: true}
-			})
-			x.step()
-			w := x.workload()
-			setReplicas(w, 0)
-			if err := x.r.Update(t.Context(), w); err != nil {
-				t.Fatal(err)
-			}
-			x.syncWorkload()
-			x.edit(func(f *fleet.CelldFleet) {
-				f.Spec.Mesh = &fleet.MeshSpec{}
-				f.Spec.Maintenance = &fleet.MaintenanceSpec{}
-			})
-			x.settle()
-			if !meshMember(x.workload()) || replicas(x.workload()) != 3 {
-				t.Fatalf("fleet did not return in the mesh at its declared count: member=%v replicas=%d", meshMember(x.workload()), replicas(x.workload()))
-			}
-			if _, err := authorizationPolicy(t, x.r, x.f); err != nil {
-				t.Fatal(err)
-			}
-
-			// Leaving is held the same way while members run.
-			x.edit(func(f *fleet.CelldFleet) { f.Spec.Mesh = nil })
-			reason(t, x.step(), "MeshTransitionBlocked")
+			x.operatorStep()
 			if !meshMember(x.workload()) {
-				t.Fatal("a running fleet left the mesh")
+				t.Fatal("template not moved into the mesh")
+			}
+			// The relaxed objects exist before the first member rolls.
+			pa, err := peerAuthentication(t, x.r, x.f)
+			if err != nil || !routingOwned(x.f, pa) {
+				t.Fatalf("no transition PeerAuthentication: %v", err)
+			}
+			mode, _, _ := unstructured.NestedString(pa.Object, "spec", "portLevelMtls", "8081", "mode")
+			if mode != "PERMISSIVE" {
+				t.Fatalf("peer port mode %q", mode)
+			}
+			if !peerRuleOpen(t, x.r, x.f) {
+				t.Fatal("peer rule requires identities while members are mixed")
+			}
+			x.syncWorkload() // one member rolls
+			x.operatorStep()
+			if !peerRuleOpen(t, x.r, x.f) {
+				t.Fatal("strict policy returned mid-roll")
+			}
+			rollMesh(x)
+			if peerRuleOpen(t, x.r, x.f) {
+				t.Fatal("strict peer rule not restored after the roll")
+			}
+			if _, err := peerAuthentication(t, x.r, x.f); !apierrors.IsNotFound(err) {
+				t.Fatalf("transition PeerAuthentication left behind: %v", err)
+			}
+
+			x.edit(func(f *fleet.CelldFleet) { f.Spec.Mesh = nil })
+			x.operatorStep()
+			if meshMember(x.workload()) || !peerRuleOpen(t, x.r, x.f) {
+				t.Fatal("leaving did not relax the peer rule before rolling")
+			}
+			if _, err := peerAuthentication(t, x.r, x.f); err != nil {
+				t.Fatalf("no transition PeerAuthentication while leaving: %v", err)
+			}
+			rollMesh(x)
+			for _, gvk := range []schema.GroupVersionKind{authorizationPolicyGVK, peerAuthenticationGVK} {
+				obj := meshObject(x.f, gvk)
+				if err := x.r.Get(t.Context(), client.ObjectKeyFromObject(obj), obj); !apierrors.IsNotFound(err) {
+					t.Fatalf("%s left after leaving the mesh: %v", gvk.Kind, err)
+				}
 			}
 		})
 	}

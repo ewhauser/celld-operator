@@ -168,7 +168,11 @@ func (r *Reconciler) applyRouting(ctx context.Context, f *fleet.CelldFleet, desi
 // Return true only after absence is observed. Finalizers must finish before
 // replacing a route kind or closing its supporting NetworkPolicy.
 func (r *Reconciler) removeRouting(ctx context.Context, f *fleet.CelldFleet, gvk schema.GroupVersionKind) (bool, error) {
-	obj := routingObject(f, gvk)
+	return r.removeOwned(ctx, f, routingObject(f, gvk))
+}
+
+// removeOwned deletes obj when this fleet owns it, as removeRouting describes.
+func (r *Reconciler) removeOwned(ctx context.Context, f *fleet.CelldFleet, obj *unstructured.Unstructured) (bool, error) {
 	if err := r.Get(ctx, client.ObjectKeyFromObject(obj), obj); err != nil {
 		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
 			return true, nil

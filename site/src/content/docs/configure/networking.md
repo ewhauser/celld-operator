@@ -34,8 +34,8 @@ The operator cannot determine whether the CNI enforces NetworkPolicy. The chart'
 Without mesh settings, a fleet's generated NetworkPolicy has no route to istiod,
 the operator's plaintext `/state` reads on 8081 fail under STRICT mTLS, and the
 first ALLOW AuthorizationPolicy that selects the members denies peer RPC,
-because nothing allows port 8081. Set `spec.mesh.istio` when you create the
-fleet:
+because nothing allows port 8081. Set `spec.mesh.istio` on a new fleet, or on a
+running one to roll it into the mesh (see below):
 
 ```yaml
 spec:
@@ -55,7 +55,8 @@ The operator then:
 - adds NetworkPolicy egress to istiod Pods labelled `app: istiod` in
   `controlPlaneNamespace` on TCP 15012;
 - creates the ALLOW AuthorizationPolicy `FLEET-mesh`, which admits port 8081 only
-  from the fleet's ServiceAccount and the operator's. With `AllowAll` it also
+  from the fleet's ServiceAccount and the operator's (relaxed while members roll
+  into or out of the mesh; see below). With `AllowAll` it also
   allows port 8080 from any caller, as outside the mesh. With `Policies`, Istio
   denies port 8080 until an AuthorizationPolicy of yours allows the caller.
 
@@ -76,45 +77,36 @@ alone selects the default revision. Under a `REGISTRY_ONLY` outbound policy,
 add ServiceEntries for S3, STS and your collector.
 
 `controlPlaneNamespace` and `applicationAccess` are mutable and change only
-policies. Joining or leaving the mesh changes every member Pod, and under STRICT
-mTLS a fleet that is half in the mesh cannot reach its own peers, so membership
-changes only across a full stop, as in the
-[full-stop upgrade](../../operate/upgrade-runtime/#full-stop-upgrade). The API
-accepts a membership change only on a paused fleet, and the operator reports
-`MeshTransitionBlocked` and keeps the old template while any member Pod remains.
-Members keep their disks. To move an existing fleet into the mesh:
+policies. Adding or removing `spec.mesh` on a running fleet rolls members one at
+a time, like any template change, and members keep their disks. While the fleet
+is a mix of meshed and unmeshed members, an unmeshed member's peer RPC is
+plaintext with no mesh identity, so before the first member rolls the operator:
+
+- creates the PeerAuthentication `FLEET-mesh`, which sets the peer port 8081 to
+  `PERMISSIVE` for the fleet's Pods whatever the mesh or namespace mode is;
+- drops the identity requirement from the peer-port rule in `FLEET-mesh`, so any
+  source the fleet NetworkPolicy admits (members and the operator) may call it.
+
+Once every member Pod, terminating ones included, matches the desired
+membership, the operator restores the identity rule and deletes the
+PeerAuthentication. After a fleet leaves the mesh it deletes both objects. To
+join, add the block:
 
 ```bash
-CONTEXT=YOUR_CONTEXT
-NAMESPACE=fleets
-FLEET=my-fleet
-FLEET_UID=$(kubectl --context "$CONTEXT" -n "$NAMESPACE" get celldfleet "$FLEET" -o jsonpath='{.metadata.uid}')
-
-# 1. Pause the fleet.
-kubectl --context "$CONTEXT" -n "$NAMESPACE" patch celldfleet "$FLEET" --type merge \
-  -p '{"spec":{"maintenance":{"paused":true}}}'
-kubectl --context "$CONTEXT" -n "$NAMESPACE" wait "celldfleet/$FLEET" \
-  --for=condition=MaintenancePaused --timeout=2m
-
-# 2. Stop every member (use deployment for a Bucket fleet with the Deployment
-#    layout), and wait until no member Pod remains.
-kubectl --context "$CONTEXT" -n "$NAMESPACE" scale statefulset "$FLEET" --replicas=0
-while kubectl --context "$CONTEXT" -n "$NAMESPACE" get pods \
-  -l "celld.eric.dev/fleet-uid=$FLEET_UID" -o name | grep -q .; do sleep 5; done
-
-# 3. Join the mesh and resume in one change. Every member returns in the mesh
-#    at the declared count.
-kubectl --context "$CONTEXT" -n "$NAMESPACE" patch celldfleet "$FLEET" --type merge \
-  -p '{"spec":{"mesh":{"istio":{}},"maintenance":{"paused":false}}}'
-kubectl --context "$CONTEXT" -n "$NAMESPACE" wait "celldfleet/$FLEET" \
-  --for=condition=Ready --timeout=20m
+kubectl --context YOUR_CONTEXT -n fleets patch celldfleet my-fleet --type merge \
+  -p '{"spec":{"mesh":{"istio":{}}}}'
 ```
 
-To leave the mesh, run the same steps with `"mesh":null` in step 3. The
-`FLEET-mesh` policy stays until the fleet is deleted; without a sidecar it has
-no effect. Update the
-per-fleet-namespace Role when upgrading: it now grants `get`, `create` and
-`update` on `security.istio.io` AuthorizationPolicies. The operator requires
+and use `"mesh":null` to leave. Watch the roll as for a
+[rolling upgrade](../../operate/upgrade-runtime/#rolling-upgrade). Members that
+already have a sidecar from namespace injection keep their mesh identity through
+the roll. A member leaving the mesh loses its istiod egress when the roll
+starts; its proxy keeps the configuration it has until the member is replaced.
+A DestinationRule that forces `ISTIO_MUTUAL` toward the fleet breaks meshed
+members' calls to unmeshed ones; remove it for the roll. Update the
+per-fleet-namespace Role when upgrading: it now grants `get`, `create`, `update`
+and `delete` on `security.istio.io` AuthorizationPolicies and
+PeerAuthentications. The operator requires
 Istio's `security.istio.io/v1` API and reports `InfrastructureBlocked` without
 it. Native sidecars need Kubernetes 1.29 or later.
 

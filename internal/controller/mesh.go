@@ -3,12 +3,12 @@ package controller
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -24,7 +24,10 @@ import (
 // that keeps peer RPC and its own /state reads working: port 8081 accepts only
 // the fleet's ServiceAccount and the operator's.
 
-var authorizationPolicyGVK = schema.GroupVersionKind{Group: "security.istio.io", Version: "v1", Kind: "AuthorizationPolicy"}
+var (
+	authorizationPolicyGVK = schema.GroupVersionKind{Group: "security.istio.io", Version: "v1", Kind: "AuthorizationPolicy"}
+	peerAuthenticationGVK  = schema.GroupVersionKind{Group: "security.istio.io", Version: "v1", Kind: "PeerAuthentication"}
+)
 
 const (
 	istioInjectLabel = "sidecar.istio.io/inject"
@@ -77,27 +80,37 @@ func principal(namespace, serviceAccount string) string {
 	return "*/ns/" + namespace + "/sa/" + serviceAccount
 }
 
-func desiredAuthorizationPolicy(f *fleet.CelldFleet, opts Options) *unstructured.Unstructured {
+func meshObject(f *fleet.CelldFleet, gvk schema.GroupVersionKind) *unstructured.Unstructured {
+	obj := &unstructured.Unstructured{}
+	obj.SetGroupVersionKind(gvk)
+	obj.SetName(f.Name + "-mesh")
+	obj.SetNamespace(f.Namespace)
+	return obj
+}
+
+// desiredAuthorizationPolicy admits the peer port from the fleet's and the
+// operator's identities. While members are mixed, an unmeshed member's
+// plaintext peer RPC carries no identity, so the peer rule admits any source;
+// the fleet NetworkPolicy still limits 8081 to members and the operator.
+func desiredAuthorizationPolicy(f *fleet.CelldFleet, opts Options, mixed bool) *unstructured.Unstructured {
 	operatorSA := opts.OperatorServiceAccount
 	if operatorSA == "" {
 		operatorSA = DefaultOperatorServiceAccount
 	}
-	rules := []any{map[string]any{
-		"from": []any{map[string]any{"source": map[string]any{"principals": []any{
+	peer := map[string]any{"to": []any{map[string]any{"operation": map[string]any{"ports": []any{"8081"}}}}}
+	if !mixed {
+		peer["from"] = []any{map[string]any{"source": map[string]any{"principals": []any{
 			principal(f.Namespace, f.Spec.ServiceAccountName),
 			principal(opts.OperatorNamespace, operatorSA),
-		}}}},
-		"to": []any{map[string]any{"operation": map[string]any{"ports": []any{"8081"}}}},
-	}}
-	if f.Spec.Mesh.Istio.ApplicationAccess != fleet.ApplicationAccessPolicies {
+		}}}}
+	}
+	rules := []any{peer}
+	if f.Spec.Mesh == nil || f.Spec.Mesh.Istio.ApplicationAccess != fleet.ApplicationAccessPolicies {
 		rules = append(rules, map[string]any{
 			"to": []any{map[string]any{"operation": map[string]any{"ports": []any{"8080"}}}},
 		})
 	}
-	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(authorizationPolicyGVK)
-	obj.SetName(f.Name + "-mesh")
-	obj.SetNamespace(f.Namespace)
+	obj := meshObject(f, authorizationPolicyGVK)
 	obj.Object["spec"] = map[string]any{
 		"selector": map[string]any{"matchLabels": map[string]any{FleetLabel: string(f.UID)}},
 		"action":   "ALLOW",
@@ -106,21 +119,16 @@ func desiredAuthorizationPolicy(f *fleet.CelldFleet, opts Options) *unstructured
 	return obj
 }
 
-// reconcileMesh applies the fleet's AuthorizationPolicy before any member
-// exists, so no member ever serves its peer port without it. The policy is
-// owned by the CelldFleet and garbage-collected after it, which outlives the
-// members' SIGTERM handoff.
-func (r *Reconciler) reconcileMesh(ctx context.Context, f *fleet.CelldFleet) error {
-	if f.Spec.Mesh == nil {
-		return nil
+// desiredPeerAuthentication accepts plaintext on the peer port while members
+// are mixed, whatever mTLS mode the mesh or namespace sets, so a meshed member
+// still hears from peers that have not rolled yet.
+func desiredPeerAuthentication(f *fleet.CelldFleet) *unstructured.Unstructured {
+	obj := meshObject(f, peerAuthenticationGVK)
+	obj.Object["spec"] = map[string]any{
+		"selector":      map[string]any{"matchLabels": map[string]any{FleetLabel: string(f.UID)}},
+		"portLevelMtls": map[string]any{"8081": map[string]any{"mode": "PERMISSIVE"}},
 	}
-	if _, err := r.applyRouting(ctx, f, desiredAuthorizationPolicy(f, r.Options)); err != nil {
-		if meta.IsNoMatchError(err) {
-			return errors.New("spec.mesh.istio requires Istio's security.istio.io/v1 AuthorizationPolicy API; install Istio 1.22 or later")
-		}
-		return err
-	}
-	return nil
+	return obj
 }
 
 func podTemplateOf(w client.Object) corev1.PodTemplateSpec {
@@ -138,20 +146,84 @@ func meshMember(w client.Object) bool {
 	return podTemplateOf(w).Labels[istioInjectLabel] == "true"
 }
 
-// meshTransition refuses to change mesh membership while any member runs. A
-// meshed member under STRICT mTLS rejects an unmeshed peer, and the rolling
-// update would leave the fleet split until its last member rolled, so
-// membership changes only across a full stop.
-func (r *Reconciler) meshTransition(ctx context.Context, f *fleet.CelldFleet, desired, actual client.Object) error {
-	if meshMember(desired) == meshMember(actual) {
-		return nil
+// meshMixed reports whether the members may be a mix of meshed and unmeshed
+// Pods: the live template or any live Pod, terminating ones included, differs
+// from the desired membership. A fleet without a workload is not mixed; its
+// members start in the desired mode.
+func (r *Reconciler) meshMixed(ctx context.Context, f *fleet.CelldFleet) (bool, error) {
+	want := f.Spec.Mesh != nil
+	w := emptyObject(workload(f, r.Options))
+	if err := r.Get(ctx, client.ObjectKeyFromObject(f), w); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if w.GetLabels()[FleetLabel] != string(f.UID) {
+		// A foreign workload is reported by reconcileWorkload.
+		return false, nil
+	}
+	if meshMember(w) != want {
+		return true, nil
 	}
 	pods := &corev1.PodList{}
 	if err := r.List(ctx, pods, client.InNamespace(f.Namespace), client.MatchingLabels(labels(f))); err != nil {
+		return false, err
+	}
+	for _, p := range pods.Items {
+		if (p.Labels[istioInjectLabel] == "true") != want {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// reconcileMesh keeps the peer port working through every membership state.
+// A new meshed fleet gets the strict policy before any member exists. Joining
+// or leaving the mesh rolls one member at a time like any template change;
+// until every member matches, the peer port accepts plaintext from any source
+// NetworkPolicy admits, and the strict policy returns once the roll is done.
+// The objects are owned by the CelldFleet and garbage-collected after it,
+// which outlives the members' SIGTERM handoff.
+func (r *Reconciler) reconcileMesh(ctx context.Context, f *fleet.CelldFleet) error {
+	mixed, err := r.meshMixed(ctx, f)
+	if err != nil {
 		return err
 	}
-	if n := replicas(actual); n > 0 || len(pods.Items) > 0 {
-		return fmt.Errorf("mesh membership changes only across a full stop: scale %s to zero and wait for its %d member Pods to exit; the new template applies once none remain", f.Name, len(pods.Items))
+	if f.Spec.Mesh == nil && !mixed {
+		return r.removeMesh(ctx, f)
+	}
+	if mixed {
+		if _, err := r.applyRouting(ctx, f, desiredPeerAuthentication(f)); err != nil {
+			return meshAPIError(err)
+		}
+	}
+	if _, err := r.applyRouting(ctx, f, desiredAuthorizationPolicy(f, r.Options, mixed)); err != nil {
+		return meshAPIError(err)
+	}
+	if !mixed {
+		if _, err := r.removeOwned(ctx, f, meshObject(f, peerAuthenticationGVK)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func meshAPIError(err error) error {
+	if meta.IsNoMatchError(err) {
+		return errors.New("spec.mesh.istio requires Istio's security.istio.io/v1 AuthorizationPolicy and PeerAuthentication APIs; install Istio 1.22 or later")
+	}
+	return err
+}
+
+// removeMesh deletes the mesh objects of a fleet that has fully left the mesh.
+// Clusters without Istio and fleet-namespace Roles from before mesh support
+// have none to delete.
+func (r *Reconciler) removeMesh(ctx context.Context, f *fleet.CelldFleet) error {
+	for _, gvk := range []schema.GroupVersionKind{peerAuthenticationGVK, authorizationPolicyGVK} {
+		if _, err := r.removeOwned(ctx, f, meshObject(f, gvk)); err != nil && !apierrors.IsForbidden(err) {
+			return err
+		}
 	}
 	return nil
 }
