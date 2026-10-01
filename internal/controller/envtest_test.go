@@ -205,6 +205,23 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 		t.Fatalf("valid Kafka export rejected: %v", err)
 	}
 
+	withMesh := base()
+	withMesh.Name = "mesh-valid"
+	withMesh.Spec.Mesh = &fleet.MeshSpec{Istio: fleet.IstioMeshSpec{ApplicationAccess: fleet.ApplicationAccessPolicies}}
+	if err := c.Create(ctx, withMesh); err != nil {
+		t.Fatalf("valid mesh rejected: %v", err)
+	}
+	// Mesh settings other than membership change no Pod and stay mutable.
+	withMesh.Spec.Mesh.Istio = fleet.IstioMeshSpec{ControlPlaneNamespace: "istio-canary", ApplicationAccess: fleet.ApplicationAccessAllowAll}
+	if err := c.Update(ctx, withMesh); err != nil {
+		t.Fatalf("mesh settings rejected: %v", err)
+	}
+	// Membership rolls like any template change.
+	withMesh.Spec.Mesh = nil
+	if err := c.Update(ctx, withMesh); err != nil {
+		t.Fatalf("mesh removal rejected: %v", err)
+	}
+
 	// CEL cross-field rules reject at creation time.
 	invalid := []struct {
 		name string
@@ -247,6 +264,12 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 		}},
 		{"export broker without port", func(f *fleet.CelldFleet) {
 			f.Spec.Export = &fleet.ExportSpec{Sink: "Kafka", Kafka: &fleet.ExportKafkaSpec{Brokers: []string{"kafka"}, Egress: fleet.CollectorEgress{CIDR: "10.0.0.0/8"}}}
+		}},
+		{"mesh unknown application access", func(f *fleet.CelldFleet) {
+			f.Spec.Mesh = &fleet.MeshSpec{Istio: fleet.IstioMeshSpec{ApplicationAccess: "Open"}}
+		}},
+		{"mesh invalid control plane namespace", func(f *fleet.CelldFleet) {
+			f.Spec.Mesh = &fleet.MeshSpec{Istio: fleet.IstioMeshSpec{ControlPlaneNamespace: "Istio_System"}}
 		}},
 		{"capacity minimum below azCount", func(f *fleet.CelldFleet) {
 			f.Spec.Placement = fleet.PlacementSpec{AZCount: 2, Zones: []string{"us-east-1a", "us-east-1b"}}

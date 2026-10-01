@@ -1,0 +1,46 @@
+apiVersion: celld.eric.dev/v1alpha1
+kind: CelldFleet
+metadata:
+  name: mesh-example
+  namespace: fleets
+spec:
+  profile: Bucket
+  replicas: 3
+  # Replace with the verified compatible fork digest.
+  runtimeImage: ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29
+  serviceAccountName: runtime
+  storage:
+    bucket: replace-with-dedicated-bucket
+    region: us-east-1
+    sizeGiB: 10
+  placement:
+    azCount: 3
+    zones: [us-east-1a, us-east-1b, us-east-1c]
+  # Members join the Istio mesh with a native sidecar and stay reachable under
+  # STRICT mTLS. The operator must be in the mesh too (chart value
+  # podLabels."sidecar.istio.io/inject": "true").
+  mesh:
+    istio:
+      controlPlaneNamespace: istio-system
+      # Port 8080 callers are granted by your own AuthorizationPolicies.
+      applicationAccess: Policies
+---
+# Your policy for the application port. The operator's mesh-example-mesh policy
+# already admits peers and the operator on 8081.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: mesh-example-clients
+  namespace: fleets
+spec:
+  selector:
+    matchLabels:
+      celld.eric.dev/fleet: mesh-example
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/apps/sa/web"]
+      to:
+        - operation:
+            ports: ["8080"]

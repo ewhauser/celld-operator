@@ -5,7 +5,7 @@ sidebar:
   order: 4
 ---
 
-Each fleet gets a ClusterIP application Service named after the fleet on TCP 8080 and a headless peer Service named FLEET-peers on TCP 8081. The peer port declares `appProtocol: tcp` because peer RPC is an opaque byte stream; service meshes that honor the standard field, such as Istio, then proxy it as TCP instead of sniffing it as HTTP. No mesh-specific configuration is required. The operator creates both Services and a NetworkPolicy for fleet Pods. Your platform supplies the Gateway or Ingress controller, TLS, DNS and any client-side egress policy. Optional `spec.routing` lets the operator manage the application route and a narrowly scoped ingress policy.
+Each fleet gets a ClusterIP application Service named after the fleet on TCP 8080 and a headless peer Service named FLEET-peers on TCP 8081. The peer port declares `appProtocol: tcp` because peer RPC is an opaque byte stream; service meshes that honor the standard field, such as Istio, then proxy it as TCP instead of sniffing it as HTTP. Sidecars injected into a PERMISSIVE mesh need nothing more; for STRICT mTLS or Istio authorization, use [`spec.mesh.istio`](#istio-strict-mtls-and-authorization). The operator creates both Services and a NetworkPolicy for fleet Pods. Your platform supplies the Gateway or Ingress controller, TLS, DNS and any client-side egress policy. Optional `spec.routing` lets the operator manage the application route and a narrowly scoped ingress policy.
 
 By default, the generated policy admits application traffic only from Pods **in the same namespace** labelled celld.eric.dev/client-of: FLEET. For example, add this label to a client Deployment's Pod template:
 
@@ -28,6 +28,92 @@ follower service to finish startup. Do not replace these addresses with Pod IPs
 or gate peer DNS on application readiness. See [recovery](../../troubleshoot/recovery/).
 
 The operator cannot determine whether the CNI enforces NetworkPolicy. The chart's networkPolicyEnforced flag is an administrator assertion after checking enforcement; provisioning stays blocked until it is true. Read [install](../../start/install/) and [security boundaries](../../reference/security-boundaries/). Do not publish the peer port through ingress.
+
+## Istio STRICT mTLS and authorization
+
+Without mesh settings, a fleet's generated NetworkPolicy has no route to istiod,
+the operator's plaintext `/state` reads on 8081 fail under STRICT mTLS, and the
+first ALLOW AuthorizationPolicy that selects the members denies peer RPC,
+because nothing allows port 8081. Set `spec.mesh.istio` on a new fleet, or on a
+running one to roll it into the mesh (see below):
+
+```yaml
+spec:
+  mesh:
+    istio:
+      controlPlaneNamespace: istio-system # default
+      applicationAccess: Policies         # default AllowAll
+```
+
+The operator then:
+
+- labels the Pod template `sidecar.istio.io/inject: "true"` and
+  `celld.eric.dev/fleet: FLEET`, and requests a native sidecar, which starts
+  before celld and stops after it so the SIGTERM handoff to peers still has a
+  proxy;
+- excludes the EKS Pod Identity agent address from the proxy;
+- adds NetworkPolicy egress to istiod Pods labelled `app: istiod` in
+  `controlPlaneNamespace` on TCP 15012;
+- creates the ALLOW AuthorizationPolicy `FLEET-mesh`, which admits port 8081 only
+  from the fleet's ServiceAccount and the operator's (relaxed while members roll
+  into or out of the mesh; see below). With `AllowAll` it also
+  allows port 8080 from any caller, as outside the mesh. With `Policies`, Istio
+  denies port 8080 until an AuthorizationPolicy of yours allows the caller.
+
+Select members in your own policies with `celld.eric.dev/fleet: FLEET`; see the
+[istio-mesh sample](../../api/samples/#istio-mesh). NetworkPolicy still applies
+underneath: callers need the `celld.eric.dev/client-of` label or `spec.routing`
+as above. A DENY policy of yours that matches port 8081 overrides the operator's
+ALLOW and can break the fleet.
+
+The operator reads each member's `/state` on 8081 directly, so under STRICT mTLS
+its own Pods must be in the mesh. Set the chart value
+`podLabels."sidecar.istio.io/inject": "true"` (or label the operator namespace
+for injection); the chart passes the operator's ServiceAccount to
+`--operator-service-account`, which the fleet policy admits. With an operator
+outside the mesh, capacity samples and application status go missing. Revision
+installs must label the fleet namespace with `istio.io/rev`, since the pod label
+alone selects the default revision. Under a `REGISTRY_ONLY` outbound policy,
+add ServiceEntries for S3, STS and your collector.
+
+`controlPlaneNamespace` and `applicationAccess` are mutable and change only
+policies. Adding or removing `spec.mesh` on a running fleet rolls members one at
+a time, like any template change, and members keep their disks. While the fleet
+is a mix of meshed and unmeshed members, an unmeshed member's peer RPC is
+plaintext with no mesh identity, so before the first member rolls the operator:
+
+- creates the PeerAuthentication `FLEET-mesh`, which sets the peer port 8081 to
+  `PERMISSIVE` for the fleet's Pods whatever the mesh or namespace mode is;
+- drops the identity requirement from the peer-port rule in `FLEET-mesh`, so any
+  source the fleet NetworkPolicy admits (members and the operator) may call it.
+
+The operator checks actual proxy containers, including native sidecars and
+terminating Pods, before restoring the identity rule and deleting the
+PeerAuthentication. A missing injected proxy keeps the fleet in `Provisioning`;
+check the injector and namespace labels. After a fleet leaves the mesh it deletes
+both objects and closes istiod egress. Old sidecars retain istiod access throughout
+the roll, including during restarts and the final SIGTERM handoff. To
+join, add the block:
+
+```bash
+kubectl --context YOUR_CONTEXT -n fleets patch celldfleet my-fleet --type merge \
+  -p '{"spec":{"mesh":{"istio":{}}}}'
+```
+
+and use `"mesh":null` to leave. Watch the roll as for a
+[rolling upgrade](../../operate/upgrade-runtime/#rolling-upgrade). Replacement
+Pods explicitly disable injection when leaving, even in namespaces
+with automatic or revision injection. The operator retains the fleet annotation
+`celld.eric.dev/istio-control-plane` so this opt-out survives later reconciles and
+operator restarts. Fleets that never opted in keep their existing template and
+namespace injection behavior. A DestinationRule that forces `ISTIO_MUTUAL`
+toward the fleet breaks meshed
+members' calls to unmeshed ones; remove it for the roll. Update the
+per-fleet-namespace Role when upgrading: it now grants `get`, `create`, `update`
+and `delete` on `security.istio.io` AuthorizationPolicies and
+PeerAuthentications. The operator requires
+Istio's `security.istio.io/v1` API and reports `InfrastructureBlocked` without
+it. Native sidecars need Kubernetes 1.29 or later.
 
 ## Optional Gateway API routing
 

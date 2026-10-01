@@ -107,7 +107,8 @@ func desiredRoutingPolicy(f *fleet.CelldFleet) *unstructured.Unstructured {
 }
 
 // Routing has separate ownership from workloads and storage. It may be updated
-// or garbage-collected without granting any runtime lifecycle authority.
+// or garbage-collected without granting any runtime lifecycle authority. The
+// mesh AuthorizationPolicy shares this ownership.
 func (r *Reconciler) applyRouting(ctx context.Context, f *fleet.CelldFleet, desired *unstructured.Unstructured) (*unstructured.Unstructured, error) {
 	desired.SetLabels(labels(f))
 	owner := metav1.NewControllerRef(f, fleet.GroupVersion.WithKind("CelldFleet"))
@@ -124,7 +125,10 @@ func (r *Reconciler) applyRouting(ctx context.Context, f *fleet.CelldFleet, desi
 	}
 	annotations[routingAnnotations] = string(encoded)
 	desired.SetAnnotations(annotations)
-	actual := routingObject(f, desired.GroupVersionKind())
+	actual := &unstructured.Unstructured{}
+	actual.SetGroupVersionKind(desired.GroupVersionKind())
+	actual.SetNamespace(desired.GetNamespace())
+	actual.SetName(desired.GetName())
 	if err := r.Get(ctx, client.ObjectKeyFromObject(actual), actual); err != nil {
 		if !apierrors.IsNotFound(err) {
 			return nil, err
@@ -164,7 +168,11 @@ func (r *Reconciler) applyRouting(ctx context.Context, f *fleet.CelldFleet, desi
 // Return true only after absence is observed. Finalizers must finish before
 // replacing a route kind or closing its supporting NetworkPolicy.
 func (r *Reconciler) removeRouting(ctx context.Context, f *fleet.CelldFleet, gvk schema.GroupVersionKind) (bool, error) {
-	obj := routingObject(f, gvk)
+	return r.removeOwned(ctx, f, routingObject(f, gvk))
+}
+
+// removeOwned deletes obj when this fleet owns it, as removeRouting describes.
+func (r *Reconciler) removeOwned(ctx context.Context, f *fleet.CelldFleet, obj *unstructured.Unstructured) (bool, error) {
 	if err := r.Get(ctx, client.ObjectKeyFromObject(obj), obj); err != nil {
 		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
 			return true, nil

@@ -25,6 +25,10 @@ const (
 
 type Options struct {
 	OperatorNamespace string
+	// OperatorServiceAccount is the operator's ServiceAccount, the mesh identity
+	// a fleet's AuthorizationPolicy admits for /state reads. Empty selects
+	// DefaultOperatorServiceAccount.
+	OperatorServiceAccount string
 
 	// MemberReplacementDelay is how long one PersistentFleet member may stay
 	// down, while every other member is ready, before the operator replaces it
@@ -243,6 +247,7 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 		// one member at a time.
 		template.Annotations = map[string]string{restartTokenAnnotation: token}
 	}
+	meshTemplate(f, &template)
 	return template
 }
 
@@ -391,6 +396,7 @@ func prerequisites(f *fleet.CelldFleet, opts Options) []client.Object {
 	if k := exportKafka(f.Spec.Export); k != nil {
 		policy.Spec.Egress = append(policy.Spec.Egress, kafkaRule(k))
 	}
+	policy.Spec.Egress = append(policy.Spec.Egress, meshEgress(f)...)
 	// A fleet tolerates losing any one member, so voluntary evictions such as
 	// node drains proceed one at a time. A member that is not Ready counts
 	// against the budget, so a drain waits for the previous member to return.

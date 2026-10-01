@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"strings"
 	"testing"
@@ -187,7 +188,8 @@ func (x *operationFixture) syncWorkload() {
 		spec.SchedulingGates = nil
 		spec.NodeName = fmt.Sprintf("host-%d", i)
 		owner := metav1.OwnerReference{APIVersion: "apps/v1", Kind: "StatefulSet", Name: x.f.Name, UID: w.GetUID(), Controller: new(true)}
-		podLabels := labels(x.f)
+		// Pods carry the template's labels, as the workload controllers copy them.
+		podLabels := maps.Clone(podTemplateOf(w).Labels)
 		switch w := w.(type) {
 		case *appsv1.StatefulSet:
 			spec.Containers[0].Image = w.Spec.Template.Spec.Containers[0].Image
@@ -221,6 +223,11 @@ func (x *operationFixture) syncWorkload() {
 				t.Fatal(err)
 			}
 			spec.Volumes = append(spec.Volumes, corev1.Volume{Name: "data", PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: claim.Name}})
+		}
+		// Simulate the requested Istio native sidecar as admission would. Mesh
+		// membership is observed from containers, not just template labels.
+		if podLabels[istioInjectLabel] == "true" {
+			spec.InitContainers = append(spec.InitContainers, corev1.Container{Name: "istio-proxy", RestartPolicy: new(corev1.ContainerRestartPolicyAlways)})
 		}
 		if x.admit != nil {
 			x.admit(&spec)
