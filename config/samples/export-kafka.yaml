@@ -1,0 +1,42 @@
+apiVersion: celld.eric.dev/v1alpha1
+kind: CelldFleet
+metadata:
+  name: export-kafka-example
+  namespace: fleets
+spec:
+  profile: Bucket
+  replicas: 3
+  # Replace with a celld built with the export-kafka feature.
+  runtimeImage: ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29
+  serviceAccountName: runtime
+  storage:
+    bucket: replace-with-dedicated-bucket
+    region: us-east-1
+    sizeGiB: 10
+  placement:
+    azCount: 3
+    zones: [us-east-1a, us-east-1b, us-east-1c]
+  execution:
+    # Room for the default 256 MiB export queue.
+    memoryLimit: 2Gi
+  export:
+    sink: Kafka
+    classes: [Cart, Order]
+    kafka:
+      brokers:
+        - kafka-0.kafka.kafka.svc:9092
+        - kafka-1.kafka.kafka.svc:9092
+        - kafka-2.kafka.kafka.svc:9092
+      # Create it first, with max.message.bytes >= 1114112.
+      topic: celld-changes
+      retryMilliseconds: 30000
+      # A Secret key holding librdkafka settings, for example
+      # security.protocol=SASL_SSL, sasl.mechanisms=SCRAM-SHA-512,
+      # sasl.username and sasl.password.
+      propertiesSecretKeyRef:
+        name: kafka-client
+        key: kafka.properties
+      egress:
+        podLabels:
+          app.kubernetes.io/name: kafka
+        namespace: kafka

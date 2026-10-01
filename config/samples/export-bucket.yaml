@@ -1,0 +1,27 @@
+apiVersion: celld.eric.dev/v1alpha1
+kind: CelldFleet
+metadata:
+  name: export-bucket-example
+  namespace: fleets
+spec:
+  profile: Bucket
+  replicas: 3
+  # Replace with a fork release that ships change export; none does yet.
+  runtimeImage: ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29
+  serviceAccountName: runtime
+  storage:
+    bucket: replace-with-dedicated-bucket
+    region: us-east-1
+    sizeGiB: 10
+  placement:
+    azCount: 3
+    zones: [us-east-1a, us-east-1b, us-east-1c]
+  export:
+    sink: Bucket
+    classes: [Cart, Order]
+    excludeTables: [Cart.audit_log]
+    bucket:
+      # Optional; the runtime ServiceAccount must be able to write it.
+      name: replace-with-export-bucket
+      flushMilliseconds: 10000
+      retentionDays: 30
