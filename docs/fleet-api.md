@@ -86,8 +86,9 @@ ports to labeled broker Pods (`podLabels`, with optional `namespace`) or to a
 Create the topic before the fleet; the sink never creates it. librdkafka
 properties such as SASL credentials stay in the Secret. Kafka needs a celld
 built with the `export-kafka` feature, which the fork's release images leave
-out, so it also needs a custom `runtimeImage`. The blob-stream sink is not
-supported yet.
+out, so it also needs a custom `runtimeImage`. The operator does not support
+celld's blob-stream sink, and the reserved `CELLD_EXPORT` prefix keeps
+`spec.env` from selecting it.
 
 The export queue (`queueBytes`, 256 MiB by default) is held in the celld
 process, so size `execution.memoryLimit` for it. Export starts with the cells a
