@@ -266,8 +266,8 @@ spec:
                 - message: env may not override operator-owned or reserved celld variables
                   rule: self.all(e, !(['CELLD_NODE','CELLD_ADVERTISE','CELLD_BUCKET','CELLD_DURABILITY','CELLD_ADDR','CELLD_INTERNAL_ADDR','CELLD_WATCH','CELLD_TTL_MS','CELLD_SHUTDOWN_TOTAL_MS','CELLD_TOKIO_THREADS','CELLD_MAX_RESIDENT_CELLS','CELLD_IDLE_EVICT_S'].exists(n,
                     n == e.name) || e.name.startsWith('CELLD_REEXEC_') || e.name.startsWith('CELLD_OTEL')
-                    || e.name.startsWith('CELLD_UNSAFE_') || e.name.startsWith('CELLD_TEST_')
-                    || e.name.startsWith('CELLD_STRICT_')))
+                    || e.name.startsWith('CELLD_EXPORT') || e.name.startsWith('CELLD_UNSAFE_')
+                    || e.name.startsWith('CELLD_TEST_') || e.name.startsWith('CELLD_STRICT_')))
               execution:
                 description: |-
                   Per-fleet runtime sizing. Immutable after creation: the operator never rolls
@@ -318,6 +318,180 @@ spec:
                   rule: '!has(self.memoryLimit) || !has(self.memoryRequest) || quantity(self.memoryLimit).isGreaterThan(quantity(self.memoryRequest))
                     || quantity(self.memoryLimit).compareTo(quantity(self.memoryRequest))
                     == 0'
+              export:
+                description: |-
+                  Optional change export of the cells' SQLite changes; omission leaves it
+                  disabled. Needs a celld with change export. Immutable because the
+                  operator does not roll out ordinary pod-template changes.
+                properties:
+                  bucket:
+                    description: Bucket sink settings.
+                    properties:
+                      flushBytes:
+                        description: Buffered bytes that trigger an early flush (CELLD_EXPORT_FLUSH_BYTES).
+                          celld default 8388608.
+                        format: int64
+                        minimum: 1
+                        type: integer
+                      flushMilliseconds:
+                        description: Flush interval and watermark cadence (CELLD_EXPORT_FLUSH_MS).
+                          celld default 10000.
+                        format: int64
+                        minimum: 1
+                        type: integer
+                      name:
+                        description: |-
+                          A bucket for the export other than the fleet bucket, on the same
+                          endpoint and credentials (CELLD_EXPORT_BUCKET). The fleet's
+                          ServiceAccount must be able to write it.
+                        maxLength: 63
+                        minLength: 3
+                        pattern: ^[a-z0-9][a-z0-9-]*[a-z0-9]$
+                        type: string
+                      retentionDays:
+                        description: |-
+                          Days after which a node deletes its export objects
+                          (CELLD_EXPORT_RETENTION). Unset leaves the lifecycle to the bucket.
+                        format: int32
+                        maximum: 36500
+                        minimum: 1
+                        type: integer
+                    type: object
+                  classes:
+                    description: |-
+                      Durable Object classes to export (CELLD_EXPORT_CLASSES). Unset exports
+                      every application class plus D1 databases and KV namespaces. Queue
+                      brokers, Workflow instances and cron cells are never exported.
+                    items:
+                      maxLength: 128
+                      minLength: 1
+                      pattern: ^[^,\s]+$
+                      type: string
+                    maxItems: 64
+                    type: array
+                    x-kubernetes-list-type: set
+                  excludeTables:
+                    description: Tables never exported, as Class.table (CELLD_EXPORT_TABLES).
+                    items:
+                      maxLength: 256
+                      pattern: ^[^,.\s]+\.[^,\s]+$
+                      type: string
+                    maxItems: 128
+                    type: array
+                    x-kubernetes-list-type: set
+                  kafka:
+                    description: Kafka sink settings, required with the Kafka sink.
+                    properties:
+                      brokers:
+                        description: Bootstrap servers as host:port (CELLD_EXPORT_KAFKA_BROKERS).
+                        items:
+                          maxLength: 261
+                          pattern: ^[^,\s]+:[0-9]{1,5}$
+                          type: string
+                        maxItems: 16
+                        minItems: 1
+                        type: array
+                        x-kubernetes-list-type: set
+                      egress:
+                        description: |-
+                          The brokers, for one TCP egress rule on the brokers' ports: labeled
+                          broker Pods, or a cidr that may be a whole network, such as a managed
+                          cluster's subnets.
+                        properties:
+                          cidr:
+                            description: Single collector address, /32 for IPv4 or
+                              /128 for IPv6.
+                            type: string
+                          namespace:
+                            description: Collector namespace; only valid with podLabels.
+                            type: string
+                          podLabels:
+                            additionalProperties:
+                              type: string
+                            description: Labels on collector pods. A namespace is
+                              optional for same-namespace pods.
+                            minProperties: 1
+                            type: object
+                        type: object
+                        x-kubernetes-validations:
+                        - message: exactly one of cidr or podLabels is required
+                          rule: has(self.cidr) != has(self.podLabels)
+                      propertiesSecretKeyRef:
+                        description: |-
+                          Same-namespace Secret key holding librdkafka properties (TLS, SASL,
+                          compression), mounted read-only as CELLD_EXPORT_KAFKA_PROPERTIES.
+                        properties:
+                          key:
+                            maxLength: 253
+                            minLength: 1
+                            pattern: ^[-._a-zA-Z0-9]+$
+                            type: string
+                          name:
+                            maxLength: 253
+                            minLength: 1
+                            pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                      retryMilliseconds:
+                        description: |-
+                          How long the sink retries a record before it counts as dropped
+                          (CELLD_EXPORT_RETRY_MS). celld default 30000.
+                        format: int64
+                        minimum: 1
+                        type: integer
+                      topic:
+                        description: |-
+                          The topic (CELLD_EXPORT_TOPIC). celld default celld-changes. Create it
+                          first; the sink never creates it.
+                        maxLength: 249
+                        pattern: ^[a-zA-Z0-9._-]+$
+                        type: string
+                    required:
+                    - brokers
+                    - egress
+                    type: object
+                  maxRecordBytes:
+                    description: Fragment size (CELLD_EXPORT_MAX_RECORD_BYTES). celld
+                      default 1048576.
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  maxTransactionBytes:
+                    description: |-
+                      Capture memory above which a transaction is exported as bulk
+                      (CELLD_EXPORT_MAX_TX_BYTES). celld default 4194304.
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  queueBytes:
+                    description: |-
+                      Shared memory budget for commits waiting on durability and records
+                      waiting on the sink (CELLD_EXPORT_QUEUE_BYTES). celld default 268435456;
+                      size the memory limit for it.
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  sink:
+                    default: Bucket
+                    description: |-
+                      Where records go: Bucket writes Parquet objects to the export bucket;
+                      Kafka produces to a topic and needs a celld built with the export-kafka feature.
+                    enum:
+                    - Bucket
+                    - Kafka
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: kafka is required with the Kafka sink and only valid with
+                    it; bucket is only valid with the Bucket sink
+                  rule: 'self.sink == ''Kafka'' ? has(self.kafka) && !has(self.bucket)
+                    : !has(self.kafka)'
+                - message: maxRecordBytes must not exceed queueBytes
+                  rule: '!has(self.maxRecordBytes) || !has(self.queueBytes) || self.maxRecordBytes
+                    <= self.queueBytes'
               lifecycle:
                 description: Per-fleet shutdown and termination budgets. Immutable
                   after creation.
@@ -1231,8 +1405,8 @@ spec:
             - message: preview configuration cannot change once enabled
               rule: '!has(oldSelf.previews) || (has(self.previews) && self.previews
                 == oldSelf.previews)'
-            - message: runtime storage, layout, placement, execution, lifecycle, env
-                and telemetry are fixed at creation
+            - message: runtime storage, layout, placement, execution, lifecycle, env,
+                telemetry and export are fixed at creation
               rule: self.profile == oldSelf.profile && self.serviceAccountName ==
                 oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement
                 == oldSelf.placement && has(self.execution) == has(oldSelf.execution)
@@ -1241,10 +1415,15 @@ spec:
                 || self.lifecycle == oldSelf.lifecycle) && has(self.env) == has(oldSelf.env)
                 && (!has(self.env) || self.env == oldSelf.env) && has(self.telemetry)
                 == has(oldSelf.telemetry) && (!has(self.telemetry) || self.telemetry
-                == oldSelf.telemetry) && self.bucketWorkload == oldSelf.bucketWorkload
+                == oldSelf.telemetry) && has(self.export) == has(oldSelf.export) &&
+                (!has(self.export) || self.export == oldSelf.export) && self.bucketWorkload
+                == oldSelf.bucketWorkload
             - message: preview storage must use a separate bucket from the parent
                 runtime
               rule: '!has(self.previews) || self.previews.storage.bucket != self.storage.bucket'
+            - message: export must not write to the preview bucket
+              rule: '!has(self.previews) || !has(self.export) || !has(self.export.bucket)
+                || !has(self.export.bucket.name) || self.export.bucket.name != self.previews.storage.bucket'
             - message: shared prefixes and scratch overrides require Bucket profile
               rule: self.profile == 'Bucket' || (!has(self.storage.prefix) && !has(self.storage.scratch))
             - message: Ordered bucketWorkload requires Bucket profile

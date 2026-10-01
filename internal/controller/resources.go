@@ -145,6 +145,7 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 			env = append(env, corev1.EnvVar{Name: "OTEL_EXPORTER_OTLP_HEADERS", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: ref}})
 		}
 	}
+	env = append(env, exportEnv(s.Export)...)
 	spread := corev1.TopologySpreadConstraint{
 		MaxSkew:            1,
 		TopologyKey:        corev1.LabelTopologyZone,
@@ -221,6 +222,14 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 		pod.Volumes = []corev1.Volume{{Name: "data", EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: &size}}}
 		pod.Containers[0].Resources.Requests[corev1.ResourceEphemeralStorage] = request
 		pod.Containers[0].Resources.Limits[corev1.ResourceEphemeralStorage] = size
+	}
+	if k := exportKafka(s.Export); k != nil && k.PropertiesSecretKeyRef != nil {
+		pod.Volumes = append(pod.Volumes, corev1.Volume{Name: exportKafkaVolume, Secret: &corev1.SecretVolumeSource{
+			SecretName:  k.PropertiesSecretKeyRef.Name,
+			Items:       []corev1.KeyToPath{{Key: k.PropertiesSecretKeyRef.Key, Path: exportKafkaPropertiesFile}},
+			DefaultMode: new(int32(0o440)),
+		}})
+		pod.Containers[0].VolumeMounts = append(pod.Containers[0].VolumeMounts, corev1.VolumeMount{Name: exportKafkaVolume, MountPath: exportKafkaDir, ReadOnly: true})
 	}
 	if orderedBucket(f) {
 		pod.SchedulingGates = []corev1.PodSchedulingGate{{Name: bucketZoneGate}}
@@ -379,6 +388,9 @@ func prerequisites(f *fleet.CelldFleet, opts Options) []client.Object {
 	if t := f.Spec.Telemetry; t != nil {
 		policy.Spec.Egress = append(policy.Spec.Egress, destinationRule(t.CollectorURL, t.Egress))
 	}
+	if k := exportKafka(f.Spec.Export); k != nil {
+		policy.Spec.Egress = append(policy.Spec.Egress, kafkaRule(k))
+	}
 	// A fleet tolerates losing any one member, so voluntary evictions such as
 	// node drains proceed one at a time. A member that is not Ready counts
 	// against the budget, so a drain waits for the previous member to return.
@@ -401,6 +413,27 @@ func applicationService(f *fleet.CelldFleet) *corev1.Service {
 	}
 }
 
+func kafkaRule(k *fleet.ExportKafkaSpec) networkingv1.NetworkPolicyEgressRule {
+	rule := networkingv1.NetworkPolicyEgressRule{To: []networkingv1.NetworkPolicyPeer{egressPeer(k.Egress)}}
+	for _, p := range fleet.KafkaBrokerPorts(k.Brokers) {
+		rule.Ports = append(rule.Ports, networkingv1.NetworkPolicyPort{Protocol: new(corev1.ProtocolTCP), Port: new(intstr.FromInt32(p))})
+	}
+	return rule
+}
+
+func egressPeer(egress fleet.CollectorEgress) networkingv1.NetworkPolicyPeer {
+	peer := networkingv1.NetworkPolicyPeer{}
+	if egress.CIDR != "" {
+		peer.IPBlock = &networkingv1.IPBlock{CIDR: egress.CIDR}
+	} else {
+		peer.PodSelector = &metav1.LabelSelector{MatchLabels: egress.PodLabels}
+		if egress.Namespace != "" {
+			peer.NamespaceSelector = &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": egress.Namespace}}
+		}
+	}
+	return peer
+}
+
 func destinationRule(rawURL string, egress fleet.CollectorEgress) networkingv1.NetworkPolicyEgressRule {
 	u, _ := url.Parse(rawURL) // validated before provisioning
 	p := int32(80)
@@ -411,14 +444,5 @@ func destinationRule(rawURL string, egress fleet.CollectorEgress) networkingv1.N
 		parsed, _ := strconv.Atoi(u.Port())
 		p = int32(parsed)
 	}
-	peer := networkingv1.NetworkPolicyPeer{}
-	if egress.CIDR != "" {
-		peer.IPBlock = &networkingv1.IPBlock{CIDR: egress.CIDR}
-	} else {
-		peer.PodSelector = &metav1.LabelSelector{MatchLabels: egress.PodLabels}
-		if egress.Namespace != "" {
-			peer.NamespaceSelector = &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": egress.Namespace}}
-		}
-	}
-	return networkingv1.NetworkPolicyEgressRule{To: []networkingv1.NetworkPolicyPeer{peer}, Ports: []networkingv1.NetworkPolicyPort{{Protocol: new(corev1.ProtocolTCP), Port: new(intstr.FromInt32(p))}}}
+	return networkingv1.NetworkPolicyEgressRule{To: []networkingv1.NetworkPolicyPeer{egressPeer(egress)}, Ports: []networkingv1.NetworkPolicyPort{{Protocol: new(corev1.ProtocolTCP), Port: new(intstr.FromInt32(p))}}}
 }

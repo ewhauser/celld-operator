@@ -26,6 +26,9 @@ func (f *CelldFleet) Default() {
 	if f.Spec.Placement.Mode == "" {
 		f.Spec.Placement.Mode = "Strict"
 	}
+	if f.Spec.Export != nil && f.Spec.Export.Sink == "" {
+		f.Spec.Export.Sink = "Bucket"
+	}
 }
 
 // Validate checks both runtime configuration and optional routing.
@@ -64,6 +67,9 @@ func (f *CelldFleet) ValidateRuntime() error {
 		return err
 	}
 	if err := validateTelemetry(s.Telemetry); err != nil {
+		return err
+	}
+	if err := validateExport(&s); err != nil {
 		return err
 	}
 	switch {

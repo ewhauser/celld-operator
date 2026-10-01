@@ -189,6 +189,21 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 	if err := c.Create(ctx, withTelemetry); err != nil {
 		t.Fatalf("valid telemetry rejected: %v", err)
 	}
+	withExport := base()
+	withExport.Name = "export-valid"
+	withExport.Spec.Export = &fleet.ExportSpec{Classes: []string{"Cart"}, Bucket: &fleet.ExportBucketSpec{RetentionDays: 7}}
+	if err := c.Create(ctx, withExport); err != nil {
+		t.Fatalf("valid bucket export rejected: %v", err)
+	}
+	if withExport.Spec.Export.Sink != "Bucket" {
+		t.Fatalf("export sink not defaulted: %q", withExport.Spec.Export.Sink)
+	}
+	withKafka := base()
+	withKafka.Name = "export-kafka"
+	withKafka.Spec.Export = &fleet.ExportSpec{Sink: "Kafka", Kafka: &fleet.ExportKafkaSpec{Brokers: []string{"kafka-0.kafka:9092"}, Egress: fleet.CollectorEgress{CIDR: "10.20.0.0/16"}, PropertiesSecretKeyRef: &fleet.SecretKeyRef{Name: "kafka-client", Key: "kafka.properties"}}}
+	if err := c.Create(ctx, withKafka); err != nil {
+		t.Fatalf("valid Kafka export rejected: %v", err)
+	}
 
 	// CEL cross-field rules reject at creation time.
 	invalid := []struct {
@@ -218,6 +233,20 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 		}},
 		{"telemetry invalid ratio", func(f *fleet.CelldFleet) {
 			f.Spec.Telemetry = &fleet.TelemetrySpec{CollectorURL: "http://collector:4318", Egress: fleet.CollectorEgress{PodLabels: map[string]string{"app": "otel"}}, Sampler: "traceidratio", SamplerArg: "2.0"}
+		}},
+		{"export env", func(f *fleet.CelldFleet) {
+			v := "1"
+			f.Spec.Env = []fleet.FleetEnvVar{{Name: "CELLD_EXPORT", Value: &v}}
+		}},
+		{"export Kafka without brokers", func(f *fleet.CelldFleet) { f.Spec.Export = &fleet.ExportSpec{Sink: "Kafka"} }},
+		{"export Kafka on the bucket sink", func(f *fleet.CelldFleet) {
+			f.Spec.Export = &fleet.ExportSpec{Kafka: &fleet.ExportKafkaSpec{Brokers: []string{"kafka:9092"}, Egress: fleet.CollectorEgress{CIDR: "10.0.0.0/8"}}}
+		}},
+		{"export record over queue", func(f *fleet.CelldFleet) {
+			f.Spec.Export = &fleet.ExportSpec{MaxRecordBytes: 2048, QueueBytes: 1024}
+		}},
+		{"export broker without port", func(f *fleet.CelldFleet) {
+			f.Spec.Export = &fleet.ExportSpec{Sink: "Kafka", Kafka: &fleet.ExportKafkaSpec{Brokers: []string{"kafka"}, Egress: fleet.CollectorEgress{CIDR: "10.0.0.0/8"}}}
 		}},
 		{"capacity minimum below azCount", func(f *fleet.CelldFleet) {
 			f.Spec.Placement = fleet.PlacementSpec{AZCount: 2, Zones: []string{"us-east-1a", "us-east-1b"}}
@@ -255,6 +284,7 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 		{"telemetry", func(f *fleet.CelldFleet) {
 			f.Spec.Telemetry = &fleet.TelemetrySpec{CollectorURL: "http://collector:4318", Egress: fleet.CollectorEgress{PodLabels: map[string]string{"app": "otel"}}}
 		}},
+		{"export", func(f *fleet.CelldFleet) { f.Spec.Export = &fleet.ExportSpec{} }},
 	} {
 		t.Run("immutable "+tc.name, func(t *testing.T) {
 			got := &fleet.CelldFleet{}

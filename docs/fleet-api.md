@@ -18,7 +18,7 @@ IAM roles, worker nodes and EBS CSI, remains administrator-owned.
 
 The mutable request fields are `replicas`, `capacity`, `runtimeImage` and
 `maintenance` and `routing`. Storage, layout, placement, execution sizing, lifecycle budgets,
-`env`, and `telemetry` are fixed at creation. `maintenance.paused` stops new
+`env`, `telemetry`, and `export` are fixed at creation. `maintenance.paused` stops new
 workload changes. A new `restartToken` requests a same-version restart. Restarts
 and upgrades are one-member rolling updates for both profiles;
 `allowCoordinatedDowntime` is accepted and ignored.
@@ -57,6 +57,46 @@ exclusive to the telemetry egress selector. A collector using a different port
 receives only its scoped rule. Telemetry is immutable after creation because
 ordinary pod-template changes are not rolled out. Rotate the headers Secret
 with a restart so new Pods read it.
+
+`spec.export` turns on celld's
+[change export](https://github.com/ewhauser/celld/blob/main/docs/export.md),
+which streams every committed change to the cells' SQLite databases out of
+celld; omission leaves it disabled. The operator emits `CELLD_EXPORT=1` and
+the `CELLD_EXPORT_*` settings below, and reserves the `CELLD_EXPORT` prefix in
+`spec.env`. Omitted fields keep celld's defaults.
+
+| field | celld setting |
+| --- | --- |
+| `sink` | `CELLD_EXPORT_SINK`: `Bucket` (default) or `Kafka` |
+| `classes` | `CELLD_EXPORT_CLASSES`, the classes to export |
+| `excludeTables` | `CELLD_EXPORT_TABLES`, `Class.table` entries never exported |
+| `maxTransactionBytes`, `maxRecordBytes`, `queueBytes` | `CELLD_EXPORT_MAX_TX_BYTES`, `CELLD_EXPORT_MAX_RECORD_BYTES`, `CELLD_EXPORT_QUEUE_BYTES` |
+| `bucket.name` | `CELLD_EXPORT_BUCKET`, an export bucket other than the fleet bucket |
+| `bucket.flushMilliseconds`, `bucket.flushBytes` | `CELLD_EXPORT_FLUSH_MS`, `CELLD_EXPORT_FLUSH_BYTES` |
+| `bucket.retentionDays` | `CELLD_EXPORT_RETENTION=<n>d` |
+| `kafka.brokers`, `kafka.topic`, `kafka.retryMilliseconds` | `CELLD_EXPORT_KAFKA_BROKERS`, `CELLD_EXPORT_TOPIC`, `CELLD_EXPORT_RETRY_MS` |
+| `kafka.propertiesSecretKeyRef` | `CELLD_EXPORT_KAFKA_PROPERTIES`, the Secret key mounted read-only at `/etc/celld/export/kafka.properties` |
+
+The Bucket sink writes Parquet objects under `export/changes/` in the fleet
+bucket, or in `bucket.name` on the same endpoint and credentials, so the
+fleet's ServiceAccount must be able to write there. It needs no new egress.
+The Kafka sink needs `kafka.egress`, which adds one TCP rule for the brokers'
+ports to labeled broker Pods (`podLabels`, with optional `namespace`) or to a
+`cidr`, which may cover a whole network such as a managed cluster's subnets.
+Create the topic before the fleet; the sink never creates it. librdkafka
+properties such as SASL credentials stay in the Secret. Kafka needs a celld
+built with the `export-kafka` feature, which the fork's release images leave
+out, so it also needs a custom `runtimeImage`. The blob-stream sink is not
+supported yet.
+
+The export queue (`queueBytes`, 256 MiB by default) is held in the celld
+process, so size `execution.memoryLimit` for it. Export starts with the cells a
+node activates once it is on; backfill earlier cells and schedule the
+reconciler with the `celld export` commands. celld reports export gauges
+(`celld.export.*`) through `spec.telemetry`. Change export needs a celld
+build that has it: see [runtime requirements](runtime-versions.md#change-export).
+Export is immutable after creation because ordinary pod-template changes are
+not rolled out.
 
 A bucket reservation permanently binds the bucket to the fleet UID. Recreating
 a fleet with the same name does not transfer ownership. Its

@@ -29,12 +29,13 @@ type CelldFleet struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 	// +kubebuilder:validation:XValidation:rule="!has(oldSelf.previews) || (has(self.previews) && self.previews == oldSelf.previews)",message="preview configuration cannot change once enabled"
-	// +kubebuilder:validation:XValidation:rule="self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement && has(self.execution) == has(oldSelf.execution) && (!has(self.execution) || self.execution == oldSelf.execution) && has(self.lifecycle) == has(oldSelf.lifecycle) && (!has(self.lifecycle) || self.lifecycle == oldSelf.lifecycle) && has(self.env) == has(oldSelf.env) && (!has(self.env) || self.env == oldSelf.env) && has(self.telemetry) == has(oldSelf.telemetry) && (!has(self.telemetry) || self.telemetry == oldSelf.telemetry) && self.bucketWorkload == oldSelf.bucketWorkload",message="runtime storage, layout, placement, execution, lifecycle, env and telemetry are fixed at creation"
+	// +kubebuilder:validation:XValidation:rule="self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement && has(self.execution) == has(oldSelf.execution) && (!has(self.execution) || self.execution == oldSelf.execution) && has(self.lifecycle) == has(oldSelf.lifecycle) && (!has(self.lifecycle) || self.lifecycle == oldSelf.lifecycle) && has(self.env) == has(oldSelf.env) && (!has(self.env) || self.env == oldSelf.env) && has(self.telemetry) == has(oldSelf.telemetry) && (!has(self.telemetry) || self.telemetry == oldSelf.telemetry) && has(self.export) == has(oldSelf.export) && (!has(self.export) || self.export == oldSelf.export) && self.bucketWorkload == oldSelf.bucketWorkload",message="runtime storage, layout, placement, execution, lifecycle, env, telemetry and export are fixed at creation"
 	Spec   CelldFleetSpec   `json:"spec"`
 	Status CelldFleetStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:validation:XValidation:rule="!has(self.previews) || self.previews.storage.bucket != self.storage.bucket",message="preview storage must use a separate bucket from the parent runtime"
+// +kubebuilder:validation:XValidation:rule="!has(self.previews) || !has(self.export) || !has(self.export.bucket) || !has(self.export.bucket.name) || self.export.bucket.name != self.previews.storage.bucket",message="export must not write to the preview bucket"
 // +kubebuilder:validation:XValidation:rule="self.profile == 'Bucket' || (!has(self.storage.prefix) && !has(self.storage.scratch))",message="shared prefixes and scratch overrides require Bucket profile"
 // +kubebuilder:validation:XValidation:rule="self.bucketWorkload != 'Ordered' || self.profile == 'Bucket'",message="Ordered bucketWorkload requires Bucket profile"
 // +kubebuilder:validation:XValidation:rule="self.placement.azCount == size(self.placement.zones)",message="azCount must equal the zones count"
@@ -90,12 +91,17 @@ type CelldFleetSpec struct {
 	// +kubebuilder:validation:MaxItems=32
 	// +listType=map
 	// +listMapKey=name
-	// +kubebuilder:validation:XValidation:rule="self.all(e, !(['CELLD_NODE','CELLD_ADVERTISE','CELLD_BUCKET','CELLD_DURABILITY','CELLD_ADDR','CELLD_INTERNAL_ADDR','CELLD_WATCH','CELLD_TTL_MS','CELLD_SHUTDOWN_TOTAL_MS','CELLD_TOKIO_THREADS','CELLD_MAX_RESIDENT_CELLS','CELLD_IDLE_EVICT_S'].exists(n, n == e.name) || e.name.startsWith('CELLD_REEXEC_') || e.name.startsWith('CELLD_OTEL') || e.name.startsWith('CELLD_UNSAFE_') || e.name.startsWith('CELLD_TEST_') || e.name.startsWith('CELLD_STRICT_')))",message="env may not override operator-owned or reserved celld variables"
+	// +kubebuilder:validation:XValidation:rule="self.all(e, !(['CELLD_NODE','CELLD_ADVERTISE','CELLD_BUCKET','CELLD_DURABILITY','CELLD_ADDR','CELLD_INTERNAL_ADDR','CELLD_WATCH','CELLD_TTL_MS','CELLD_SHUTDOWN_TOTAL_MS','CELLD_TOKIO_THREADS','CELLD_MAX_RESIDENT_CELLS','CELLD_IDLE_EVICT_S'].exists(n, n == e.name) || e.name.startsWith('CELLD_REEXEC_') || e.name.startsWith('CELLD_OTEL') || e.name.startsWith('CELLD_EXPORT') || e.name.startsWith('CELLD_UNSAFE_') || e.name.startsWith('CELLD_TEST_') || e.name.startsWith('CELLD_STRICT_')))",message="env may not override operator-owned or reserved celld variables"
 	Env []FleetEnvVar `json:"env,omitempty"`
 	// Optional OTLP collector; omission leaves telemetry disabled. Immutable
 	// because the operator does not roll out ordinary pod-template changes.
 	// +optional
 	Telemetry *TelemetrySpec `json:"telemetry,omitempty"`
+	// Optional change export of the cells' SQLite changes; omission leaves it
+	// disabled. Needs a celld with change export. Immutable because the
+	// operator does not roll out ordinary pod-template changes.
+	// +optional
+	Export *ExportSpec `json:"export,omitempty"`
 	// Optional public HTTP routing. Mutable without restarting the runtime.
 	// Omission removes operator-owned routes and their separate ingress policy.
 	// +optional
