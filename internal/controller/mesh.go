@@ -31,6 +31,10 @@ var (
 
 const (
 	istioInjectLabel = "sidecar.istio.io/inject"
+	// Remember explicit mesh management across removal of spec.mesh. This keeps
+	// namespace injection disabled afterward and retains the last control-plane
+	// destination until the final sidecar has exited.
+	istioHistoryAnnotation = "celld.eric.dev/istio-control-plane"
 	// FleetNameLabel names the fleet on meshed members, so your own
 	// AuthorizationPolicies can select them without the fleet UID. The
 	// workload selector stays FleetLabel.
@@ -51,6 +55,9 @@ const (
 
 func meshTemplate(f *fleet.CelldFleet, template *corev1.PodTemplateSpec) {
 	if f.Spec.Mesh == nil {
+		if f.Annotations[istioHistoryAnnotation] != "" {
+			template.Labels[istioInjectLabel] = "false"
+		}
 		return
 	}
 	template.Labels[istioInjectLabel] = "true"
@@ -60,6 +67,20 @@ func meshTemplate(f *fleet.CelldFleet, template *corev1.PodTemplateSpec) {
 	}
 	template.Annotations[istioNativeSidecar] = "true"
 	template.Annotations[istioExcludeOutbound] = podIdentityAgentCIDR
+}
+
+// rememberMesh records departure information before changing any workload or
+// policy. Fleet metadata and the workload have independent resourceVersion CAS.
+func (r *Reconciler) rememberMesh(ctx context.Context, f *fleet.CelldFleet) error {
+	if f.Spec.Mesh == nil || f.Annotations[istioHistoryAnnotation] == f.Spec.Mesh.Istio.ControlPlaneNamespace {
+		return nil
+	}
+	before := f.DeepCopy()
+	if f.Annotations == nil {
+		f.Annotations = map[string]string{}
+	}
+	f.Annotations[istioHistoryAnnotation] = f.Spec.Mesh.Istio.ControlPlaneNamespace
+	return r.Patch(ctx, f, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{}))
 }
 
 func meshEgress(f *fleet.CelldFleet) []networkingv1.NetworkPolicyEgressRule {
@@ -148,22 +169,25 @@ func meshMember(w client.Object) bool {
 
 // meshMixed reports whether the members may be a mix of meshed and unmeshed
 // Pods: the live template or any live Pod, terminating ones included, differs
-// from the desired membership. A fleet without a workload is not mixed; its
-// members start in the desired mode.
+// from the desired membership. A fleet without a workload still checks Pods:
+// garbage collection can leave a draining proxy after workload deletion.
 func (r *Reconciler) meshMixed(ctx context.Context, f *fleet.CelldFleet) (bool, error) {
 	want := f.Spec.Mesh != nil
+	if !want && f.Annotations[istioHistoryAnnotation] == "" {
+		// Preserve the behavior of fleets that never opted in, including those
+		// whose administrator independently configured namespace injection.
+		return false, nil
+	}
 	w := emptyObject(workload(f, r.Options))
-	if err := r.Get(ctx, client.ObjectKeyFromObject(f), w); err != nil {
-		if apierrors.IsNotFound(err) {
-			return false, nil
-		}
+	err := r.Get(ctx, client.ObjectKeyFromObject(f), w)
+	if err != nil && !apierrors.IsNotFound(err) {
 		return false, err
 	}
-	if w.GetLabels()[FleetLabel] != string(f.UID) {
+	if err == nil && w.GetLabels()[FleetLabel] != string(f.UID) {
 		// A foreign workload is reported by reconcileWorkload.
 		return false, nil
 	}
-	if meshMember(w) != want {
+	if err == nil && meshMember(w) != want {
 		return true, nil
 	}
 	pods := &corev1.PodList{}
@@ -171,11 +195,27 @@ func (r *Reconciler) meshMixed(ctx context.Context, f *fleet.CelldFleet) (bool, 
 		return false, err
 	}
 	for _, p := range pods.Items {
-		if (p.Labels[istioInjectLabel] == "true") != want {
+		if podHasIstioProxy(&p) != want {
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+// Injection labels express intent. The actual proxy may be a regular
+// container or a restartable init container (Kubernetes native sidecar).
+func podHasIstioProxy(p *corev1.Pod) bool {
+	for _, c := range p.Spec.Containers {
+		if c.Name == "istio-proxy" {
+			return true
+		}
+	}
+	for _, c := range p.Spec.InitContainers {
+		if c.Name == "istio-proxy" && c.RestartPolicy != nil && *c.RestartPolicy == corev1.ContainerRestartPolicyAlways {
+			return true
+		}
+	}
+	return false
 }
 
 // reconcileMesh keeps the peer port working through every membership state.
@@ -185,11 +225,7 @@ func (r *Reconciler) meshMixed(ctx context.Context, f *fleet.CelldFleet) (bool, 
 // NetworkPolicy admits, and the strict policy returns once the roll is done.
 // The objects are owned by the CelldFleet and garbage-collected after it,
 // which outlives the members' SIGTERM handoff.
-func (r *Reconciler) reconcileMesh(ctx context.Context, f *fleet.CelldFleet) error {
-	mixed, err := r.meshMixed(ctx, f)
-	if err != nil {
-		return err
-	}
+func (r *Reconciler) reconcileMesh(ctx context.Context, f *fleet.CelldFleet, mixed bool) error {
 	if f.Spec.Mesh == nil && !mixed {
 		return r.removeMesh(ctx, f)
 	}
@@ -221,7 +257,7 @@ func meshAPIError(err error) error {
 // have none to delete.
 func (r *Reconciler) removeMesh(ctx context.Context, f *fleet.CelldFleet) error {
 	for _, gvk := range []schema.GroupVersionKind{peerAuthenticationGVK, authorizationPolicyGVK} {
-		if _, err := r.removeOwned(ctx, f, meshObject(f, gvk)); err != nil && !apierrors.IsForbidden(err) {
+		if _, err := r.removeOwned(ctx, f, meshObject(f, gvk)); err != nil && (!apierrors.IsForbidden(err) || f.Annotations[istioHistoryAnnotation] != "") {
 			return err
 		}
 	}

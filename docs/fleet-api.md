@@ -103,8 +103,14 @@ a time. Until every member Pod matches, the operator keeps a PeerAuthentication
 `FLEET-mesh` that makes port 8081 `PERMISSIVE` and drops the identity requirement
 from the peer-port rule, since an unmeshed member's plaintext peer RPC has no
 identity; the fleet NetworkPolicy still limits 8081 to members and the operator.
-It restores the strict rule and deletes the PeerAuthentication when the roll
-completes, and deletes both objects once a fleet has left the mesh. The operator reads each member's `/state`
+It checks actual proxy containers, including native sidecars and terminating
+Pods, before restoring the strict rule and deleting the PeerAuthentication.
+Missing injection keeps the fleet in `Provisioning`. Departure retains istiod
+egress until the final proxy exits, then deletes both mesh objects and closes
+that egress. Replacement Pods disable injection explicitly; the retained fleet
+annotation `celld.eric.dev/istio-control-plane` keeps this opt-out after operator
+restarts, even in a namespace configured for injection. Fleets that never opted
+in keep their previous template. The operator reads each member's `/state`
 on 8081 directly, so under STRICT mTLS the operator Pods must be in the mesh too.
 See [Istio networking](../site/src/content/docs/configure/networking.md#istio-strict-mtls-and-authorization).
 

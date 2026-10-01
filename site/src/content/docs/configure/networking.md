@@ -87,9 +87,12 @@ plaintext with no mesh identity, so before the first member rolls the operator:
 - drops the identity requirement from the peer-port rule in `FLEET-mesh`, so any
   source the fleet NetworkPolicy admits (members and the operator) may call it.
 
-Once every member Pod, terminating ones included, matches the desired
-membership, the operator restores the identity rule and deletes the
-PeerAuthentication. After a fleet leaves the mesh it deletes both objects. To
+The operator checks actual proxy containers, including native sidecars and
+terminating Pods, before restoring the identity rule and deleting the
+PeerAuthentication. A missing injected proxy keeps the fleet in `Provisioning`;
+check the injector and namespace labels. After a fleet leaves the mesh it deletes
+both objects and closes istiod egress. Old sidecars retain istiod access throughout
+the roll, including during restarts and the final SIGTERM handoff. To
 join, add the block:
 
 ```bash
@@ -98,11 +101,13 @@ kubectl --context YOUR_CONTEXT -n fleets patch celldfleet my-fleet --type merge 
 ```
 
 and use `"mesh":null` to leave. Watch the roll as for a
-[rolling upgrade](../../operate/upgrade-runtime/#rolling-upgrade). Members that
-already have a sidecar from namespace injection keep their mesh identity through
-the roll. A member leaving the mesh loses its istiod egress when the roll
-starts; its proxy keeps the configuration it has until the member is replaced.
-A DestinationRule that forces `ISTIO_MUTUAL` toward the fleet breaks meshed
+[rolling upgrade](../../operate/upgrade-runtime/#rolling-upgrade). Replacement
+Pods explicitly disable injection when leaving, even in namespaces
+with automatic or revision injection. The operator retains the fleet annotation
+`celld.eric.dev/istio-control-plane` so this opt-out survives later reconciles and
+operator restarts. Fleets that never opted in keep their existing template and
+namespace injection behavior. A DestinationRule that forces `ISTIO_MUTUAL`
+toward the fleet breaks meshed
 members' calls to unmeshed ones; remove it for the roll. Update the
 per-fleet-namespace Role when upgrading: it now grants `get`, `create`, `update`
 and `delete` on `security.istio.io` AuthorizationPolicies and

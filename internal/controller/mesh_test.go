@@ -338,6 +338,13 @@ func TestMeshMembershipRollsOneMemberAtATime(t *testing.T) {
 				t.Fatalf("no transition PeerAuthentication while leaving: %v", err)
 			}
 			rollMesh(x)
+			policy := &networkingv1.NetworkPolicy{}
+			if err := x.r.Get(t.Context(), client.ObjectKeyFromObject(x.f), policy); err != nil {
+				t.Fatal(err)
+			}
+			if istiodEgress(policy) != nil {
+				t.Fatal("istiod egress left open after the final proxy exited")
+			}
 			for _, gvk := range []schema.GroupVersionKind{authorizationPolicyGVK, peerAuthenticationGVK} {
 				obj := meshObject(x.f, gvk)
 				if err := x.r.Get(t.Context(), client.ObjectKeyFromObject(obj), obj); !apierrors.IsNotFound(err) {
@@ -345,5 +352,127 @@ func TestMeshMembershipRollsOneMemberAtATime(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Namespace injection must not put replacement Pods back in the mesh after
+// an explicit departure. The opt-out must survive later reconciles/restarts.
+func TestMeshDepartureDisablesNamespaceInjection(t *testing.T) {
+	x := newOperationFixture(t, "Bucket")
+	x.settle()
+	x.edit(func(f *fleet.CelldFleet) { f.Spec.Mesh = &fleet.MeshSpec{} })
+	x.operatorStep()
+	x.edit(func(f *fleet.CelldFleet) { f.Spec.Mesh = nil })
+	x.operatorStep()
+	if got := podTemplateOf(x.workload()).Labels[istioInjectLabel]; got != "false" {
+		t.Fatalf("departing template must override namespace injection, got %q", got)
+	}
+	x.operatorStep()
+	if got := podTemplateOf(x.workload()).Labels[istioInjectLabel]; got != "false" {
+		t.Fatalf("opt-out lost on later reconcile, got %q", got)
+	}
+}
+
+func TestMeshDepartureRetainsIstiodUntilLastProxyExits(t *testing.T) {
+	x := newOperationFixture(t, "PersistentFleet")
+	x.settle()
+	x.edit(func(f *fleet.CelldFleet) {
+		f.Spec.Mesh = &fleet.MeshSpec{Istio: fleet.IstioMeshSpec{ControlPlaneNamespace: "istio-canary"}}
+	})
+	x.operatorStep()
+	// Model a native sidecar that is still draining after the celld container.
+	p := x.pod("alpha-0")
+	p.Spec.InitContainers = []corev1.Container{{Name: "istio-proxy", RestartPolicy: new(corev1.ContainerRestartPolicyAlways)}}
+	p.Finalizers = []string{"test.example/hold"}
+	if err := x.r.Update(t.Context(), p); err != nil {
+		t.Fatal(err)
+	}
+	if err := x.r.Delete(t.Context(), p); err != nil {
+		t.Fatal(err)
+	}
+	x.edit(func(f *fleet.CelldFleet) { f.Spec.Mesh = nil })
+	x.operatorStep()
+	policy := &networkingv1.NetworkPolicy{}
+	if err := x.r.Get(t.Context(), client.ObjectKeyFromObject(x.f), policy); err != nil {
+		t.Fatal(err)
+	}
+	if e := istiodEgress(policy); e == nil || e.To[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != "istio-canary" {
+		t.Fatalf("draining sidecar lost its control-plane egress: %+v", e)
+	}
+	if _, err := peerAuthentication(t, x.r, x.f); err != nil {
+		t.Fatalf("draining sidecar lost transition policy: %v", err)
+	}
+}
+
+func TestMeshMembershipRequiresActualSidecar(t *testing.T) {
+	x := newOperationFixture(t, "Bucket")
+	x.settle()
+	x.edit(func(f *fleet.CelldFleet) { f.Spec.Mesh = &fleet.MeshSpec{} })
+	x.operatorStep()
+	// A label is an injection request, not proof that admission injected a proxy.
+	pods := &corev1.PodList{}
+	if err := x.r.List(t.Context(), pods, client.InNamespace(x.f.Namespace), client.MatchingLabels(labels(x.f))); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range pods.Items {
+		p.Labels[istioInjectLabel] = "true"
+		if err := x.r.Update(t.Context(), &p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mixed, err := x.r.meshMixed(t.Context(), x.f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !mixed {
+		t.Fatal("request labels were mistaken for injected sidecars")
+	}
+}
+
+func TestMeshMissingInjectionDoesNotReportProvisioned(t *testing.T) {
+	x := newOperationFixture(t, "Bucket")
+	x.settle()
+	x.admit = func(spec *corev1.PodSpec) { spec.InitContainers = nil }
+	x.edit(func(f *fleet.CelldFleet) { f.Spec.Mesh = &fleet.MeshSpec{} })
+	for range 8 {
+		x.operatorStep()
+		x.syncWorkload()
+	}
+	if !rolledOut(x.workload()) {
+		t.Fatal("workload fixture did not finish its roll")
+	}
+	reason(t, x.step(), "Provisioning")
+	if !peerRuleOpen(t, x.r, x.f) {
+		t.Fatal("missing injection restored the strict peer rule")
+	}
+}
+
+func TestMeshManagedCleanupReportsMissingRole(t *testing.T) {
+	f := fixture("alpha", "bucket-alpha", "Bucket")
+	f.Annotations = map[string]string{istioHistoryAnnotation: "istio-system"}
+	r := setup(t, f)
+	r.Client = interceptor.NewClient(r.Client.(client.WithWatch), interceptor.Funcs{Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+		if obj.GetObjectKind().GroupVersionKind() == authorizationPolicyGVK {
+			return apierrors.NewForbidden(authorizationPolicyGVK.GroupVersion().WithResource("authorizationpolicies").GroupResource(), key.Name, nil)
+		}
+		return c.Get(ctx, key, obj, opts...)
+	}})
+	reason(t, reconcile(t, r, f), "NamespaceAccessDenied")
+}
+
+func TestMeshDepartureWaitsForOrphanedProxy(t *testing.T) {
+	f := fixture("alpha", "bucket-alpha", "Bucket")
+	f.Annotations = map[string]string{istioHistoryAnnotation: "istio-system"}
+	r := setup(t, f)
+	p := &corev1.Pod{Name: "draining", Namespace: f.Namespace, Labels: labels(f), Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "istio-proxy"}}}}
+	if err := r.Create(t.Context(), p); err != nil {
+		t.Fatal(err)
+	}
+	mixed, err := r.meshMixed(t.Context(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !mixed {
+		t.Fatal("workload absence hid an orphaned proxy")
 	}
 }

@@ -224,6 +224,11 @@ func (x *operationFixture) syncWorkload() {
 			}
 			spec.Volumes = append(spec.Volumes, corev1.Volume{Name: "data", PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: claim.Name}})
 		}
+		// Simulate the requested Istio native sidecar as admission would. Mesh
+		// membership is observed from containers, not just template labels.
+		if podLabels[istioInjectLabel] == "true" {
+			spec.InitContainers = append(spec.InitContainers, corev1.Container{Name: "istio-proxy", RestartPolicy: new(corev1.ContainerRestartPolicyAlways)})
+		}
 		if x.admit != nil {
 			x.admit(&spec)
 		}

@@ -46,7 +46,24 @@ func (r *Reconciler) currentState(f *fleet.CelldFleet, h *loadedState) *loadedSt
 }
 
 func (r *Reconciler) reconcileWorkload(ctx context.Context, f *fleet.CelldFleet, h *loadedState) (ctrl.Result, error) {
-	for _, obj := range prerequisites(f, r.Options) {
+	if err := r.rememberMesh(ctx, f); err != nil {
+		return ctrl.Result{}, err
+	}
+	mixed, err := r.meshMixed(ctx, f)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	infrastructureFleet := f
+	if f.Spec.Mesh == nil && mixed {
+		// Old proxies still need certificates and xDS, including while draining
+		// or restarting during a stalled departure. Close egress only after
+		// absence of every proxy is observed.
+		infrastructureFleet = f.DeepCopy()
+		infrastructureFleet.Spec.Mesh = &fleet.MeshSpec{Istio: fleet.IstioMeshSpec{
+			ControlPlaneNamespace: f.Annotations[istioHistoryAnnotation],
+		}}
+	}
+	for _, obj := range prerequisites(infrastructureFleet, r.Options) {
 		var err error
 		if _, service := obj.(*corev1.Service); service {
 			// Allocated addresses make Services verify-only; their spec is the
@@ -62,7 +79,7 @@ func (r *Reconciler) reconcileWorkload(ctx context.Context, f *fleet.CelldFleet,
 			return r.report(ctx, f, h, "InfrastructureBlocked", err.Error(), false)
 		}
 	}
-	if err := r.reconcileMesh(ctx, f); err != nil {
+	if err := r.reconcileMesh(ctx, f, mixed); err != nil {
 		// Forbidden names the missing fleet-namespace Role rule (Reconcile).
 		if apierrors.IsConflict(err) || apierrors.IsForbidden(err) {
 			return ctrl.Result{}, err
@@ -78,7 +95,7 @@ func (r *Reconciler) reconcileWorkload(ctx context.Context, f *fleet.CelldFleet,
 	}
 	desired := workload(f, r.Options)
 	actual := emptyObject(desired)
-	err := r.Get(ctx, client.ObjectKeyFromObject(desired), actual)
+	err = r.Get(ctx, client.ObjectKeyFromObject(desired), actual)
 	if apierrors.IsNotFound(err) {
 		if conflict, err := r.foreignClaim(ctx, f, replicas(desired)); err != nil {
 			return ctrl.Result{}, err
@@ -192,6 +209,9 @@ func (r *Reconciler) reconcileWorkload(ctx context.Context, f *fleet.CelldFleet,
 	}
 	if !rolledOut(current) {
 		return r.report(ctx, f, h, "Provisioning", "Rolling out one member at a time; waiting for updated, ready replicas", true)
+	}
+	if mixed {
+		return r.report(ctx, f, h, "Provisioning", "Waiting for member sidecars to match the requested mesh membership; verify Istio injection", true)
 	}
 	return r.report(ctx, f, h, "Provisioned", "Workload rolled out and all replicas ready", true)
 }
