@@ -100,7 +100,43 @@ type CelldFleetSpec struct {
 	// Omission removes operator-owned routes and their separate ingress policy.
 	// +optional
 	Routing *RoutingSpec `json:"routing,omitempty"`
+	// Optional service mesh membership. Adding or removing it rolls members one
+	// at a time; until every member matches, the peer port accepts plaintext
+	// from any source the fleet NetworkPolicy admits. The settings inside
+	// change only the NetworkPolicy and AuthorizationPolicy.
+	// +optional
+	Mesh *MeshSpec `json:"mesh,omitempty"`
 }
+
+// MeshSpec places fleet members in a service mesh.
+type MeshSpec struct {
+	// Istio sidecar mode. Members get an injected sidecar, egress to istiod and
+	// an operator-owned AuthorizationPolicy, so they keep working under STRICT
+	// mTLS and alongside your own AuthorizationPolicies.
+	Istio IstioMeshSpec `json:"istio"`
+}
+
+type IstioMeshSpec struct {
+	// Namespace of the istiod Pods (label app=istiod) that serve sidecar
+	// configuration on TCP 15012. Default istio-system.
+	// +optional
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	ControlPlaneNamespace string `json:"controlPlaneNamespace,omitempty"`
+	// Who may call the application port 8080. AllowAll adds an ALLOW rule for
+	// port 8080 from any source, matching a fleet outside the mesh. Policies
+	// leaves port 8080 to AuthorizationPolicies you write; until one allows a
+	// caller, Istio denies it. Default AllowAll.
+	// +optional
+	// +kubebuilder:validation:Enum=AllowAll;Policies
+	ApplicationAccess string `json:"applicationAccess,omitempty"`
+}
+
+const (
+	DefaultIstioControlPlaneNamespace = "istio-system"
+	ApplicationAccessAllowAll         = "AllowAll"
+	ApplicationAccessPolicies         = "Policies"
+)
 
 // +kubebuilder:validation:XValidation:rule="has(self.value) != has(self.secretKeyRef)",message="exactly one of value or secretKeyRef is required"
 type FleetEnvVar struct {

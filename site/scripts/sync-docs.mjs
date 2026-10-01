@@ -62,7 +62,7 @@ const routeBySource = new Map(pages.map((page) => [page.source, routeOf(page)]))
 routeBySource.set('docs/README.md', 'start/overview/');
 routeBySource.set('README.md', 'start/overview/');
 routeBySource.set('config/samples', 'api/samples/');
-for (const file of ['bucket', 'bucket-ordered', 'capacity-shadow', 'capacity-external', 'maintenance-paused', 'persistent', 'tuned', 'preview', 'fleet-previews', 'preview-store', 'preview-seeded']) {
+for (const file of ['bucket', 'bucket-ordered', 'capacity-shadow', 'capacity-external', 'maintenance-paused', 'persistent', 'tuned', 'preview', 'fleet-previews', 'preview-store', 'preview-seeded', 'istio-mesh']) {
 	routeBySource.set(`config/samples/${file}.yaml`, `api/samples/#${file}`);
 }
 routeBySource.set('charts/celld-operator/values.yaml', 'api/helm-values/');
@@ -386,6 +386,7 @@ const sampleNotes = {
 	'fleet-previews.yaml': 'Platform-owned shared storage and routing configuration with small independent preview runtimes.',
 	'preview-store.yaml': 'Optional disposable shared MinIO store; replacing its Pod loses all preview data.',
 	'capacity-external.yaml': 'Ordered Bucket with an HPA targeting the CelldFleet /scale subresource; scale-in removes one member per step after survivor-capacity checks.',
+	'istio-mesh.yaml': 'Bucket fleet in the Istio mesh under STRICT mTLS, with port 8080 left to your own AuthorizationPolicy, shown after the fleet.',
 	'tuned.yaml': 'Immutable execution sizing and lifecycle budgets selected before creation.',
 	'persistent.yaml': 'Three-replica PersistentFleet on a Delete-policy CSI StorageClass with strict placement.',
 };

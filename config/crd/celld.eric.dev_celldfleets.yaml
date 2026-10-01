@@ -369,6 +369,40 @@ spec:
                     maxLength: 128
                     type: string
                 type: object
+              mesh:
+                description: |-
+                  Optional service mesh membership. Adding or removing it rolls members one
+                  at a time; until every member matches, the peer port accepts plaintext
+                  from any source the fleet NetworkPolicy admits. The settings inside
+                  change only the NetworkPolicy and AuthorizationPolicy.
+                properties:
+                  istio:
+                    description: |-
+                      Istio sidecar mode. Members get an injected sidecar, egress to istiod and
+                      an operator-owned AuthorizationPolicy, so they keep working under STRICT
+                      mTLS and alongside your own AuthorizationPolicies.
+                    properties:
+                      applicationAccess:
+                        description: |-
+                          Who may call the application port 8080. AllowAll adds an ALLOW rule for
+                          port 8080 from any source, matching a fleet outside the mesh. Policies
+                          leaves port 8080 to AuthorizationPolicies you write; until one allows a
+                          caller, Istio denies it. Default AllowAll.
+                        enum:
+                        - AllowAll
+                        - Policies
+                        type: string
+                      controlPlaneNamespace:
+                        description: |-
+                          Namespace of the istiod Pods (label app=istiod) that serve sidecar
+                          configuration on TCP 15012. Default istio-system.
+                        maxLength: 63
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                        type: string
+                    type: object
+                required:
+                - istio
+                type: object
               placement:
                 description: Allowed availability zones and scheduling strictness.
                   Immutable after creation.

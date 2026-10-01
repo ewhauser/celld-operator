@@ -68,6 +68,12 @@
         "type": "string"
       }
     },
+    "podLabels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
     "metrics": {
       "type": "object",
       "required": [

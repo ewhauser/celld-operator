@@ -190,6 +190,23 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 		t.Fatalf("valid telemetry rejected: %v", err)
 	}
 
+	withMesh := base()
+	withMesh.Name = "mesh-valid"
+	withMesh.Spec.Mesh = &fleet.MeshSpec{Istio: fleet.IstioMeshSpec{ApplicationAccess: fleet.ApplicationAccessPolicies}}
+	if err := c.Create(ctx, withMesh); err != nil {
+		t.Fatalf("valid mesh rejected: %v", err)
+	}
+	// Mesh settings other than membership change no Pod and stay mutable.
+	withMesh.Spec.Mesh.Istio = fleet.IstioMeshSpec{ControlPlaneNamespace: "istio-canary", ApplicationAccess: fleet.ApplicationAccessAllowAll}
+	if err := c.Update(ctx, withMesh); err != nil {
+		t.Fatalf("mesh settings rejected: %v", err)
+	}
+	// Membership rolls like any template change.
+	withMesh.Spec.Mesh = nil
+	if err := c.Update(ctx, withMesh); err != nil {
+		t.Fatalf("mesh removal rejected: %v", err)
+	}
+
 	// CEL cross-field rules reject at creation time.
 	invalid := []struct {
 		name string
@@ -218,6 +235,12 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 		}},
 		{"telemetry invalid ratio", func(f *fleet.CelldFleet) {
 			f.Spec.Telemetry = &fleet.TelemetrySpec{CollectorURL: "http://collector:4318", Egress: fleet.CollectorEgress{PodLabels: map[string]string{"app": "otel"}}, Sampler: "traceidratio", SamplerArg: "2.0"}
+		}},
+		{"mesh unknown application access", func(f *fleet.CelldFleet) {
+			f.Spec.Mesh = &fleet.MeshSpec{Istio: fleet.IstioMeshSpec{ApplicationAccess: "Open"}}
+		}},
+		{"mesh invalid control plane namespace", func(f *fleet.CelldFleet) {
+			f.Spec.Mesh = &fleet.MeshSpec{Istio: fleet.IstioMeshSpec{ControlPlaneNamespace: "Istio_System"}}
 		}},
 		{"capacity minimum below azCount", func(f *fleet.CelldFleet) {
 			f.Spec.Placement = fleet.PlacementSpec{AZCount: 2, Zones: []string{"us-east-1a", "us-east-1b"}}

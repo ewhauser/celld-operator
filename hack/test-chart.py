@@ -57,7 +57,16 @@ assert fullpod['containers'][0]['image'].endswith('@sha256:' + 'a' * 64)
 assert not any(arg.startswith('--launcher-image') for arg in fullpod['containers'][0]['args'])
 assert not any(doc['kind'] == 'PodDisruptionBudget' for doc in render('--set', 'replicaCount=1'))
 assert '--member-replacement-delay=10m' in fullpod['containers'][0]['args']
-for bad in ('fleetNamespaces={Bad_Name}', 'replicaCount=0', 'memberReplacementDelay=soon', 'metrics.serviceMonitor.enabled=true', 'metrics.port=8082', 'launcherImage=mutable:latest', 'image.digest=sha256:bad', 'podAnnotations.checks=1'):
+# The fleet AuthorizationPolicy admits the operator by this ServiceAccount.
+assert f"--operator-service-account={pod['serviceAccountName']}" in pod['containers'][0]['args']
+meshdeploy = next(doc for doc in render('--set-string', 'podLabels.sidecar\\.istio\\.io/inject=true') if doc['kind'] == 'Deployment')
+assert meshdeploy['spec']['template']['metadata']['labels']['sidecar.istio.io/inject'] == 'true'
+assert meshdeploy['spec']['selector'] == deploy['spec']['selector']
+# Custom labels cannot change selector or NetworkPolicy identity labels.
+custom = next(doc for doc in render('--set-string', 'podLabels.app\\.kubernetes\\.io/name=other,podLabels.app\\.kubernetes\\.io/instance=other') if doc['kind'] == 'Deployment')
+assert custom['spec']['template']['metadata']['labels']['app.kubernetes.io/name'] == 'celld-operator'
+assert custom['spec']['template']['metadata']['labels']['app.kubernetes.io/instance'] == 'example'
+for bad in ('fleetNamespaces={Bad_Name}', 'replicaCount=0', 'memberReplacementDelay=soon', 'metrics.serviceMonitor.enabled=true', 'metrics.port=8082', 'launcherImage=mutable:latest', 'image.digest=sha256:bad', 'podAnnotations.checks=1', 'podLabels.checks=1'):
     result = subprocess.run(['helm', 'template', 'example', CHART, '--set', bad], text=True, capture_output=True)
     assert result.returncode != 0, f'invalid chart values accepted: {bad}'
 print('Helm rendering, canonical RBAC, HA, monitoring and invalid-value checks passed.')
