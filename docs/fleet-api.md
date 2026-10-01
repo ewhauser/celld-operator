@@ -75,7 +75,7 @@ the `CELLD_EXPORT_*` settings below, and reserves the `CELLD_EXPORT` prefix in
 | `bucket.flushMilliseconds`, `bucket.flushBytes` | `CELLD_EXPORT_FLUSH_MS`, `CELLD_EXPORT_FLUSH_BYTES` |
 | `bucket.retentionDays` | `CELLD_EXPORT_RETENTION=<n>d` |
 | `kafka.brokers`, `kafka.topic`, `kafka.retryMilliseconds` | `CELLD_EXPORT_KAFKA_BROKERS`, `CELLD_EXPORT_TOPIC`, `CELLD_EXPORT_RETRY_MS` |
-| `kafka.propertiesSecretKeyRef` | `CELLD_EXPORT_KAFKA_PROPERTIES`, the Secret key mounted read-only at `/etc/celld/export/kafka.properties` |
+| `kafka.propertiesSecretKeyRef` | `CELLD_EXPORT_KAFKA_PROPERTIES=/etc/celld/export/<key>`; the whole Secret is mounted read-only there |
 
 The Bucket sink writes Parquet objects under `export/changes/` in the fleet
 bucket, or in `bucket.name` on the same endpoint and credentials, so the
@@ -84,7 +84,14 @@ The Kafka sink needs `kafka.egress`, which adds one TCP rule for the brokers'
 ports to labeled broker Pods (`podLabels`, with optional `namespace`) or to a
 `cidr`, which may cover a whole network such as a managed cluster's subnets.
 Create the topic before the fleet; the sink never creates it. librdkafka
-properties such as SASL credentials stay in the Secret. Kafka needs a celld
+settings for TLS, SASL, compression and batching go in the properties key, one
+`name=value` per line, so SASL credentials stay in the Secret. Every key of the
+Secret is mounted, so a private CA or client certificate rides in the same
+Secret and the properties name its file, for example
+`ssl.ca.location=/etc/celld/export/ca.crt`. celld refuses properties that
+weaken delivery: `acks` below `all`, `message.timeout.ms`,
+`delivery.timeout.ms`, and turning on `delivery.report.only.error` or
+`allow.auto.create.topics`. Kafka needs a celld
 built with the `export-kafka` feature, which the fork's release images leave
 out, so it also needs a custom `runtimeImage`. The operator does not support
 celld's blob-stream sink, and the reserved `CELLD_EXPORT` prefix keeps

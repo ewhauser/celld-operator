@@ -229,8 +229,9 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 	}
 	if k := exportKafka(s.Export); k != nil && k.PropertiesSecretKeyRef != nil {
 		pod.Volumes = append(pod.Volumes, corev1.Volume{Name: exportKafkaVolume, Secret: &corev1.SecretVolumeSource{
+			// Every key, so the properties can name the CA, client
+			// certificate and key the same Secret carries.
 			SecretName:  k.PropertiesSecretKeyRef.Name,
-			Items:       []corev1.KeyToPath{{Key: k.PropertiesSecretKeyRef.Key, Path: exportKafkaPropertiesFile}},
 			DefaultMode: new(int32(0o440)),
 		}})
 		pod.Containers[0].VolumeMounts = append(pod.Containers[0].VolumeMounts, corev1.VolumeMount{Name: exportKafkaVolume, MountPath: exportKafkaDir, ReadOnly: true})

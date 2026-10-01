@@ -9,9 +9,8 @@ import (
 )
 
 const (
-	exportKafkaVolume         = "export-kafka"
-	exportKafkaDir            = "/etc/celld/export"
-	exportKafkaPropertiesFile = "kafka.properties"
+	exportKafkaVolume = "export-kafka"
+	exportKafkaDir    = "/etc/celld/export"
 )
 
 func exportKafka(e *fleet.ExportSpec) *fleet.ExportKafkaSpec {
@@ -51,7 +50,7 @@ func exportEnv(e *fleet.ExportSpec) []corev1.EnvVar {
 		}
 		positive("CELLD_EXPORT_RETRY_MS", k.RetryMilliseconds)
 		if k.PropertiesSecretKeyRef != nil {
-			add("CELLD_EXPORT_KAFKA_PROPERTIES", exportKafkaDir+"/"+exportKafkaPropertiesFile)
+			add("CELLD_EXPORT_KAFKA_PROPERTIES", exportKafkaDir+"/"+k.PropertiesSecretKeyRef.Key)
 		}
 		return env
 	}

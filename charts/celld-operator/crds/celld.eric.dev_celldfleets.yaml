@@ -419,7 +419,10 @@ spec:
                       propertiesSecretKeyRef:
                         description: |-
                           Same-namespace Secret key holding librdkafka properties (TLS, SASL,
-                          compression), mounted read-only as CELLD_EXPORT_KAFKA_PROPERTIES.
+                          compression), one name=value per line, read as
+                          CELLD_EXPORT_KAFKA_PROPERTIES. Every key of the Secret is mounted
+                          read-only under /etc/celld/export, so the properties can name files the
+                          same Secret carries, such as ssl.ca.location=/etc/celld/export/ca.crt.
                         properties:
                           key:
                             maxLength: 253

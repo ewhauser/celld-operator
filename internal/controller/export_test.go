@@ -67,7 +67,7 @@ func TestKafkaExportRendersEnvSecretAndEgress(t *testing.T) {
 	env := pod.Containers[0].Env
 	for key, want := range map[string]string{
 		"CELLD_EXPORT": "1", "CELLD_EXPORT_SINK": "kafka", "CELLD_EXPORT_KAFKA_BROKERS": "kafka-0.kafka:9092,kafka-1.kafka:9092,kafka-tls.kafka:9093",
-		"CELLD_EXPORT_TOPIC": "cart-changes", "CELLD_EXPORT_RETRY_MS": "60000", "CELLD_EXPORT_KAFKA_PROPERTIES": "/etc/celld/export/kafka.properties",
+		"CELLD_EXPORT_TOPIC": "cart-changes", "CELLD_EXPORT_RETRY_MS": "60000", "CELLD_EXPORT_KAFKA_PROPERTIES": "/etc/celld/export/client.properties",
 	} {
 		if got, _ := envValue(env, key); got != want {
 			t.Errorf("%s = %q, want %q", key, got, want)
@@ -82,8 +82,9 @@ func TestKafkaExportRendersEnvSecretAndEgress(t *testing.T) {
 			volume = &pod.Volumes[i]
 		}
 	}
-	if volume == nil || volume.Secret == nil || volume.Secret.SecretName != "kafka-client" || len(volume.Secret.Items) != 1 || volume.Secret.Items[0].Key != "client.properties" || volume.Secret.Items[0].Path != "kafka.properties" {
-		t.Fatalf("properties Secret not mounted: %+v", pod.Volumes)
+	// The whole Secret, so properties can name its certificate files.
+	if volume == nil || volume.Secret == nil || volume.Secret.SecretName != "kafka-client" || len(volume.Secret.Items) != 0 {
+		t.Fatalf("properties Secret not mounted whole: %+v", pod.Volumes)
 	}
 	mounted := false
 	for _, m := range pod.Containers[0].VolumeMounts {

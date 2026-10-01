@@ -106,7 +106,10 @@ type ExportKafkaSpec struct {
 	// +kubebuilder:validation:Minimum=1
 	RetryMilliseconds int64 `json:"retryMilliseconds,omitempty"`
 	// Same-namespace Secret key holding librdkafka properties (TLS, SASL,
-	// compression), mounted read-only as CELLD_EXPORT_KAFKA_PROPERTIES.
+	// compression), one name=value per line, read as
+	// CELLD_EXPORT_KAFKA_PROPERTIES. Every key of the Secret is mounted
+	// read-only under /etc/celld/export, so the properties can name files the
+	// same Secret carries, such as ssl.ca.location=/etc/celld/export/ca.crt.
 	// +optional
 	PropertiesSecretKeyRef *SecretKeyRef `json:"propertiesSecretKeyRef,omitempty"`
 	// The brokers, for one TCP egress rule on the brokers' ports: labeled

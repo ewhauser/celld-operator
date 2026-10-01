@@ -30,9 +30,13 @@ spec:
       # Create it first, with max.message.bytes >= 1114112.
       topic: celld-changes
       retryMilliseconds: 30000
-      # A Secret key holding librdkafka settings, for example
-      # security.protocol=SASL_SSL, sasl.mechanisms=SCRAM-SHA-512,
-      # sasl.username and sasl.password.
+      # librdkafka settings, one name=value per line. Every key of the
+      # Secret is mounted under /etc/celld/export, so it can carry the CA:
+      #   security.protocol=SASL_SSL
+      #   sasl.mechanisms=SCRAM-SHA-512
+      #   sasl.username=celld
+      #   sasl.password=...
+      #   ssl.ca.location=/etc/celld/export/ca.crt
       propertiesSecretKeyRef:
         name: kafka-client
         key: kafka.properties
