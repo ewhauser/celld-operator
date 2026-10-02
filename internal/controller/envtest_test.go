@@ -288,7 +288,7 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 		})
 	}
 
-	// Only replicas, capacity, runtimeImage and maintenance may change after creation.
+	// Only replicas, capacity, runtimeImage, maintenance, export, routing and mesh may change after creation.
 	for _, tc := range []struct {
 		name string
 		edit func(*fleet.CelldFleet)
@@ -307,7 +307,6 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 		{"telemetry", func(f *fleet.CelldFleet) {
 			f.Spec.Telemetry = &fleet.TelemetrySpec{CollectorURL: "http://collector:4318", Egress: fleet.CollectorEgress{PodLabels: map[string]string{"app": "otel"}}}
 		}},
-		{"export", func(f *fleet.CelldFleet) { f.Spec.Export = &fleet.ExportSpec{} }},
 	} {
 		t.Run("immutable "+tc.name, func(t *testing.T) {
 			got := &fleet.CelldFleet{}
@@ -326,8 +325,17 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 	}
 	got.Spec.Replicas = 4
 	got.Spec.Maintenance = &fleet.MaintenanceSpec{Paused: true}
+	got.Spec.Export = &fleet.ExportSpec{Sink: "Kafka", Kafka: &fleet.ExportKafkaSpec{Brokers: []string{"kafka-0.kafka:9092"}, Egress: fleet.CollectorEgress{CIDR: "10.20.0.0/16"}}}
 	if err := c.Update(ctx, got); err != nil {
 		t.Fatalf("mutable fields rejected: %v", err)
+	}
+	got.Spec.Export.Kafka.Topic = "changed"
+	if err := c.Update(ctx, got); err != nil {
+		t.Fatalf("export change rejected: %v", err)
+	}
+	got.Spec.Export = nil
+	if err := c.Update(ctx, got); err != nil {
+		t.Fatalf("export removal rejected: %v", err)
 	}
 
 	// The cluster-scoped reservation is frozen entirely.

@@ -29,7 +29,7 @@ type CelldFleet struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 	// +kubebuilder:validation:XValidation:rule="!has(oldSelf.previews) || (has(self.previews) && self.previews == oldSelf.previews)",message="preview configuration cannot change once enabled"
-	// +kubebuilder:validation:XValidation:rule="self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement && has(self.execution) == has(oldSelf.execution) && (!has(self.execution) || self.execution == oldSelf.execution) && has(self.lifecycle) == has(oldSelf.lifecycle) && (!has(self.lifecycle) || self.lifecycle == oldSelf.lifecycle) && has(self.env) == has(oldSelf.env) && (!has(self.env) || self.env == oldSelf.env) && has(self.telemetry) == has(oldSelf.telemetry) && (!has(self.telemetry) || self.telemetry == oldSelf.telemetry) && has(self.export) == has(oldSelf.export) && (!has(self.export) || self.export == oldSelf.export) && self.bucketWorkload == oldSelf.bucketWorkload",message="runtime storage, layout, placement, execution, lifecycle, env, telemetry and export are fixed at creation"
+	// +kubebuilder:validation:XValidation:rule="self.profile == oldSelf.profile && self.serviceAccountName == oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement == oldSelf.placement && has(self.execution) == has(oldSelf.execution) && (!has(self.execution) || self.execution == oldSelf.execution) && has(self.lifecycle) == has(oldSelf.lifecycle) && (!has(self.lifecycle) || self.lifecycle == oldSelf.lifecycle) && has(self.env) == has(oldSelf.env) && (!has(self.env) || self.env == oldSelf.env) && has(self.telemetry) == has(oldSelf.telemetry) && (!has(self.telemetry) || self.telemetry == oldSelf.telemetry) && self.bucketWorkload == oldSelf.bucketWorkload",message="runtime storage, layout, placement, execution, lifecycle, env and telemetry are fixed at creation"
 	Spec   CelldFleetSpec   `json:"spec"`
 	Status CelldFleetStatus `json:"status,omitempty"`
 }
@@ -98,8 +98,9 @@ type CelldFleetSpec struct {
 	// +optional
 	Telemetry *TelemetrySpec `json:"telemetry,omitempty"`
 	// Optional change export of the cells' SQLite changes; omission leaves it
-	// disabled. Needs a celld with change export. Immutable because the
-	// operator does not roll out ordinary pod-template changes.
+	// disabled. Needs a celld with change export. Adding, changing or removing
+	// it rolls members one at a time; only cells activated on a member that
+	// exports are exported, so backfill cells activated before the change.
 	// +optional
 	Export *ExportSpec `json:"export,omitempty"`
 	// Optional public HTTP routing. Mutable without restarting the runtime.

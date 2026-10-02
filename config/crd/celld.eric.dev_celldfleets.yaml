@@ -321,8 +321,9 @@ spec:
               export:
                 description: |-
                   Optional change export of the cells' SQLite changes; omission leaves it
-                  disabled. Needs a celld with change export. Immutable because the
-                  operator does not roll out ordinary pod-template changes.
+                  disabled. Needs a celld with change export. Adding, changing or removing
+                  it rolls members one at a time; only cells activated on a member that
+                  exports are exported, so backfill cells activated before the change.
                 properties:
                   bucket:
                     description: Bucket sink settings.
@@ -1442,8 +1443,8 @@ spec:
             - message: preview configuration cannot change once enabled
               rule: '!has(oldSelf.previews) || (has(self.previews) && self.previews
                 == oldSelf.previews)'
-            - message: runtime storage, layout, placement, execution, lifecycle, env,
-                telemetry and export are fixed at creation
+            - message: runtime storage, layout, placement, execution, lifecycle, env
+                and telemetry are fixed at creation
               rule: self.profile == oldSelf.profile && self.serviceAccountName ==
                 oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement
                 == oldSelf.placement && has(self.execution) == has(oldSelf.execution)
@@ -1452,9 +1453,7 @@ spec:
                 || self.lifecycle == oldSelf.lifecycle) && has(self.env) == has(oldSelf.env)
                 && (!has(self.env) || self.env == oldSelf.env) && has(self.telemetry)
                 == has(oldSelf.telemetry) && (!has(self.telemetry) || self.telemetry
-                == oldSelf.telemetry) && has(self.export) == has(oldSelf.export) &&
-                (!has(self.export) || self.export == oldSelf.export) && self.bucketWorkload
-                == oldSelf.bucketWorkload
+                == oldSelf.telemetry) && self.bucketWorkload == oldSelf.bucketWorkload
             - message: preview storage must use a separate bucket from the parent
                 runtime
               rule: '!has(self.previews) || self.previews.storage.bucket != self.storage.bucket'
