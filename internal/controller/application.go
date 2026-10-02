@@ -74,7 +74,7 @@ func (r *Reconciler) observeApplication(ctx context.Context, f *fleet.CelldFleet
 	if !f.DeletionTimestamp.IsZero() {
 		return unknown("FleetDeleting")
 	}
-	w := emptyObject(workload(f, r.Options))
+	w := emptyWorkload(f)
 	if err := r.Get(ctx, client.ObjectKeyFromObject(f), w); err != nil || w.GetLabels()[FleetLabel] != string(f.UID) || !w.GetDeletionTimestamp().IsZero() {
 		return unknown("WorkloadUnavailable")
 	}
@@ -109,6 +109,7 @@ func (r *Reconciler) observeApplication(ctx context.Context, f *fleet.CelldFleet
 	wg.Wait()
 	out.ObservedAt = metav1.NewTime(r.capacityNow())
 	versions := map[controlplane.ApplicationVersion]int32{}
+	out.Nodes = make([]fleet.ApplicationNodeStatus, 0, len(samples))
 	progressing := false
 	for _, sample := range samples {
 		if sample.fresh && !sample.state.Fresh(r.capacityNow(), sample.started, applicationMaxAge) {
@@ -146,7 +147,7 @@ func (r *Reconciler) observeApplication(ctx context.Context, f *fleet.CelldFleet
 	if err != nil || !sameApplicationPods(pods, closing) {
 		return unknown("MembershipChanged")
 	}
-	currentWorkload := emptyObject(workload(f, r.Options))
+	currentWorkload := emptyWorkload(f)
 	if err := r.Get(ctx, client.ObjectKeyFromObject(f), currentWorkload); err != nil || currentWorkload.GetUID() != w.GetUID() || currentWorkload.GetLabels()[FleetLabel] != string(f.UID) || currentWorkload.GetGeneration() != w.GetGeneration() || replicas(currentWorkload) != replicas(w) || !currentWorkload.GetDeletionTimestamp().IsZero() {
 		return unknown("MembershipChanged")
 	}
@@ -167,17 +168,26 @@ func sameApplicationPods(before, after []corev1.Pod) bool {
 	if len(before) != len(after) {
 		return false
 	}
-	byName := map[string]corev1.Pod{}
-	for _, p := range before {
-		byName[p.Name] = p
-	}
-	for _, p := range after {
-		old, ok := byName[p.Name]
-		oldID, _ := podIdentity(&old)
-		id, _ := podIdentity(&p)
-		if !ok || old.UID != p.UID || oldID != id || old.Status.PodIP != p.Status.PodIP || podReady(&old) != podReady(&p) || !equality.Semantic.DeepEqual(old.DeletionTimestamp, p.DeletionTimestamp) || !equality.Semantic.DeepEqual(old.OwnerReferences, p.OwnerReferences) {
+	byName := make(map[string]*corev1.Pod, len(before))
+	for i := range before {
+		p := &before[i]
+		if _, exists := byName[p.Name]; exists {
 			return false
 		}
+		byName[p.Name] = p
+	}
+	for i := range after {
+		p := &after[i]
+		old, ok := byName[p.Name]
+		if !ok {
+			return false
+		}
+		oldID, _ := podIdentity(old)
+		id, _ := podIdentity(p)
+		if old.UID != p.UID || oldID != id || old.Status.PodIP != p.Status.PodIP || podReady(old) != podReady(p) || !equality.Semantic.DeepEqual(old.DeletionTimestamp, p.DeletionTimestamp) || !equality.Semantic.DeepEqual(old.OwnerReferences, p.OwnerReferences) {
+			return false
+		}
+		delete(byName, p.Name)
 	}
 	return true
 }

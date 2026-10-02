@@ -1,12 +1,12 @@
 package controller
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	fleet "github.com/ewhauser/celld-operator/api/v1alpha1"
 	"github.com/ewhauser/celld-operator/internal/capacity"
@@ -57,7 +57,7 @@ func readState(res *fleet.CelldStorageReservation) (*fleetState, error) {
 		return nil, errors.New("persisted fleet state exceeds bounded state limit")
 	}
 	var s fleetState
-	d := json.NewDecoder(bytes.NewBufferString(raw))
+	d := json.NewDecoder(strings.NewReader(raw))
 	if err := d.Decode(&s); err != nil {
 		return nil, err
 	}
@@ -119,14 +119,15 @@ func (r *Reconciler) reservationMatches(_ context.Context, f *fleet.CelldFleet, 
 	if h.err != nil || h.res.Spec.InitialReplicas < 1 || h.res.Spec.InitialReplicas > 100 {
 		return false
 	}
-	baseline := f.DeepCopy()
+	// Only the replica scalar changes; spec hashing does not mutate nested data.
+	baseline := *f
 	baseline.Spec.Replicas = h.res.Spec.InitialReplicas
 	want.InitialReplicas = h.res.Spec.InitialReplicas
-	want.SpecHash = specHash(baseline)
+	want.SpecHash = specHash(&baseline)
 	if equality.Semantic.DeepEqual(want, h.res.Spec) {
 		return true
 	}
-	want.SpecHash = legacyQualificationSpecHash(baseline)
+	want.SpecHash = legacyQualificationSpecHash(&baseline)
 	return equality.Semantic.DeepEqual(want, h.res.Spec)
 }
 func replicas(w client.Object) int32 {

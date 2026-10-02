@@ -198,7 +198,7 @@ func validateExport(s *CelldFleetSpec) error {
 			return fmt.Errorf("export.bucket flush and retention settings must be positive")
 		}
 		if b.Name != "" {
-			if !regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$`).MatchString(b.Name) {
+			if !bucketNamePattern.MatchString(b.Name) {
 				return fmt.Errorf("export.bucket.name must be a canonical bucket name")
 			}
 			if s.Previews != nil && b.Name == s.Previews.Storage.Bucket {

@@ -22,6 +22,8 @@ const seedReservationCreated = "celld.eric.dev/seed-reservation-created"
 const seedGate = "celld.eric.dev/seed-gate"
 const seedGateCanceled = "canceled"
 
+var seedDigestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
+
 func seedTerminal(s *fleet.CelldStorageReservation) bool {
 	return s.Status.Phase == "Succeeded" || s.Status.Phase == "Failed" || s.Status.Phase == "Canceled"
 }
@@ -221,7 +223,7 @@ func completedSeedReceipt(s *fleet.CelldStorageReservation, f *fleet.CelldFleet)
 		expected[o] = true
 	}
 	for _, o := range s.Status.Manifest.Objects {
-		if !expected[o.PreviewObjectReference] || o.SnapshotID == "" || len(o.SnapshotID) > 256 || o.SourceVersion == "" || len(o.SourceVersion) > 256 || !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(o.Digest) {
+		if !expected[o.PreviewObjectReference] || o.SnapshotID == "" || len(o.SnapshotID) > 256 || o.SourceVersion == "" || len(o.SourceVersion) > 256 || !seedDigestPattern.MatchString(o.Digest) {
 			return "", fmt.Errorf("seed manifest must contain exactly every selected object's snapshot, committed version and digest")
 		}
 		delete(expected, o.PreviewObjectReference)
@@ -256,7 +258,7 @@ func seedReceiptReady(f *fleet.CelldFleet, res *fleet.CelldStorageReservation) b
 	}
 	prefix := "ready:" + f.Spec.Storage.Initialization.Target.PreviewUID + ":"
 	v := res.Annotations[seedGate]
-	return strings.HasPrefix(v, prefix) && regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(strings.TrimPrefix(v, prefix))
+	return strings.HasPrefix(v, prefix) && seedDigestPattern.MatchString(strings.TrimPrefix(v, prefix))
 }
 
 // gateSeed is before ANY workload prerequisites or creation intent. The retained

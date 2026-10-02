@@ -113,11 +113,11 @@ func (r *Reconciler) healMembers(ctx context.Context, f *fleet.CelldFleet, sts *
 	if err := r.List(ctx, claims, client.InNamespace(f.Namespace), client.MatchingLabels(labels(f))); err != nil {
 		return "", "", false, err
 	}
-	podOf := map[string]*corev1.Pod{}
+	podOf := make(map[string]*corev1.Pod, len(pods))
 	for i := range pods {
 		podOf[pods[i].Name] = &pods[i]
 	}
-	claimOf := map[string]*corev1.PersistentVolumeClaim{}
+	claimOf := make(map[string]*corev1.PersistentVolumeClaim, len(claims.Items))
 	for i := range claims.Items {
 		claimOf[claims.Items[i].Name] = &claims.Items[i]
 	}
@@ -208,12 +208,15 @@ func (r *Reconciler) memberPods(ctx context.Context, f *fleet.CelldFleet, sts *a
 	if err := r.List(ctx, list, client.InNamespace(f.Namespace), client.MatchingLabels(labels(f))); err != nil {
 		return nil, err
 	}
-	var pods []corev1.Pod
-	for _, p := range list.Items {
-		if owner := metav1.GetControllerOf(&p); owner != nil && owner.UID == sts.UID {
-			pods = append(pods, p)
+	// List owns this working set. Compact it instead of allocating and growing
+	// a second slice of large Pod structs on every reconcile.
+	pods := list.Items[:0]
+	for i := range list.Items {
+		if owner := metav1.GetControllerOf(&list.Items[i]); owner != nil && owner.UID == sts.UID {
+			pods = append(pods, list.Items[i])
 		}
 	}
+	clear(list.Items[len(pods):])
 	return pods, nil
 }
 
@@ -239,8 +242,9 @@ func (r *Reconciler) growth(ctx context.Context, f *fleet.CelldFleet, sts *appsv
 	if err := r.List(ctx, claims, client.InNamespace(f.Namespace), client.MatchingLabels(labels(f))); err != nil {
 		return 0, "", err
 	}
-	kept := map[string]bool{}
-	for _, c := range claims.Items {
+	kept := make(map[string]bool, len(claims.Items))
+	for i := range claims.Items {
+		c := &claims.Items[i]
 		kept[c.Name] = c.DeletionTimestamp.IsZero()
 	}
 	end := applied + 1
@@ -259,7 +263,7 @@ func (r *Reconciler) growth(ctx context.Context, f *fleet.CelldFleet, sts *appsv
 	if !observed(sts) {
 		return applied, "Waiting for the StatefulSet to observe its spec before " + adding, nil
 	}
-	podOf := map[string]*corev1.Pod{}
+	podOf := make(map[string]*corev1.Pod, len(pods))
 	for i := range pods {
 		podOf[pods[i].Name] = &pods[i]
 	}

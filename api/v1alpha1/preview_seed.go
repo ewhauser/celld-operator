@@ -8,6 +8,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
+var previewObjectPattern = regexp.MustCompile(`^[A-Za-z0-9_$.-]+$`)
+
 // PreviewSeedSpec selects persisted objects, copied once before runtime startup.
 // Snapshots are consistent per object, not globally across the selection.
 type PreviewSeedSpec struct {
@@ -162,10 +164,9 @@ func (s *PreviewSeedSpec) Validate() error {
 	if len(validation.IsDNS1123Label(s.Source)) != 0 || len(s.Objects) < 1 || len(s.Objects) > 100 || (s.Alarms != "" && s.Alarms != "Clear" && s.Alarms != "Preserve") {
 		return fmt.Errorf("seed requires an approved source alias, 1-100 objects and Clear or Preserve alarms")
 	}
-	seen := map[PreviewObjectReference]bool{}
-	valid := regexp.MustCompile(`^[A-Za-z0-9_$.-]+$`)
+	seen := make(map[PreviewObjectReference]bool, len(s.Objects))
 	for _, o := range s.Objects {
-		if len(o.Class) > 128 || len(o.ID) > 256 || !valid.MatchString(o.Class) || !valid.MatchString(o.ID) || seen[o] {
+		if len(o.Class) > 128 || len(o.ID) > 256 || !previewObjectPattern.MatchString(o.Class) || !previewObjectPattern.MatchString(o.ID) || seen[o] {
 			return fmt.Errorf("seed objects require unique valid class and canonical ID pairs")
 		}
 		seen[o] = true

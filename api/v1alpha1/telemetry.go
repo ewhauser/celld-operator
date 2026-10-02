@@ -11,6 +11,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
+var samplerRatioPattern = regexp.MustCompile(`^(0(\.\d+)?|1(\.0+)?)$`)
+
 func validateTelemetry(s *TelemetrySpec) error {
 	if s == nil {
 		return nil
@@ -53,7 +55,7 @@ func validateTelemetry(s *TelemetrySpec) error {
 		}
 	case "traceidratio", "parentbased_traceidratio":
 		ratio, err := strconv.ParseFloat(s.SamplerArg, 64)
-		if err != nil || ratio < 0 || ratio > 1 || !regexp.MustCompile(`^(0(\.\d+)?|1(\.0+)?)$`).MatchString(s.SamplerArg) {
+		if err != nil || ratio < 0 || ratio > 1 || !samplerRatioPattern.MatchString(s.SamplerArg) {
 			return fmt.Errorf("telemetry.samplerArg must be between 0 and 1")
 		}
 	default:

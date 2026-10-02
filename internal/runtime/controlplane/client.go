@@ -50,8 +50,8 @@ func New(transport http.RoundTripper) *Client {
 	return &Client{http: &http.Client{Transport: transport, Timeout: callTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 }
 
-// readState fetches /state from the node's internal listener and requires a
-// complete, single JSON object.
+// readState fetches a bounded /state response from the node's internal listener.
+// The state and application decoders validate its complete JSON object.
 func (c *Client) readState(ctx context.Context, target Target) ([]byte, error) {
 	if net.ParseIP(target.IP) == nil {
 		return nil, errors.New("exact node IP required")
@@ -80,9 +80,6 @@ func (c *Client) readState(ctx context.Context, target Target) ([]byte, error) {
 	if len(data) > maxResponse {
 		return nil, errors.New("runtime response exceeds budget")
 	}
-	if err := validObject(data); err != nil {
-		return nil, err
-	}
 	return data, nil
 }
 
@@ -106,7 +103,8 @@ func (s State) Capacity(maxAge time.Duration) (Load, error) {
 	if s.Generation == "" {
 		return Load{}, ErrIdentity
 	}
-	return parseLoad(s.raw, s.ReceivedAt, s.ReceivedAt, maxAge)
+	// raw was checked by decodeState before this observation was returned.
+	return parseValidatedLoad(s.raw, s.ReceivedAt, s.ReceivedAt, maxAge)
 }
 
 func (c *Client) State(ctx context.Context, target Target) (State, error) {
@@ -126,6 +124,9 @@ func (c *Client) State(ctx context.Context, target Target) (State, error) {
 // decodeState inspects the shutdown object's version first, so an unknown
 // future shape neither breaks load collection nor supplies an identity.
 func decodeState(data []byte) (State, error) {
+	if err := validObject(data); err != nil {
+		return State{}, err
+	}
 	var wire struct {
 		Shutdown json.RawMessage `json:"shutdown"`
 	}

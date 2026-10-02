@@ -10,6 +10,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
+var bucketNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$`)
+var regionPattern = regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-\d+$`)
+
 func (f *CelldFleet) Default() {
 	if f.Spec.BucketWorkload == "" {
 		f.Spec.BucketWorkload = "Deployment"
@@ -96,9 +99,9 @@ func (f *CelldFleet) ValidateRuntime() error {
 		return fmt.Errorf("replicas must be between 1 and 100")
 	case s.ServiceAccountName == "" || len(validation.IsDNS1123Subdomain(s.ServiceAccountName)) != 0:
 		return fmt.Errorf("serviceAccountName must reference an existing ServiceAccount")
-	case !regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$`).MatchString(s.Storage.Bucket):
+	case !bucketNamePattern.MatchString(s.Storage.Bucket):
 		return fmt.Errorf("storage.bucket must be a canonical bucket name (3-63 lowercase letters, digits or hyphens)")
-	case !regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-\d+$`).MatchString(s.Storage.Region):
+	case !regionPattern.MatchString(s.Storage.Region):
 		return fmt.Errorf("storage.region must be an explicit AWS region")
 	case s.Storage.SizeGiB < 1 || s.Storage.SizeGiB > 16384:
 		return fmt.Errorf("storage.sizeGiB must be between 1 and 16384")

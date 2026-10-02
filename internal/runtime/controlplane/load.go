@@ -18,11 +18,23 @@ type Load struct {
 // parseLoad validates required capacity fields; optional cgroup measurements
 // are intentionally not converted to zero. The caller validates HTTP status.
 func parseLoad(data []byte, received, now time.Time, age time.Duration) (Load, error) {
+	if !fresh(received, now, age) {
+		return Load{}, errors.New("unavailable or stale HTTP state")
+	}
+	if err := validObject(data); err != nil {
+		return Load{}, err
+	}
+	return parseValidatedLoad(data, received, now, age)
+}
+
+// parseValidatedLoad reuses the full-response validation performed by State.
+// Nested RawMessages are therefore already checked for duplicate names/depth.
+func parseValidatedLoad(data []byte, received, now time.Time, age time.Duration) (Load, error) {
 	var s Load
 	if !fresh(received, now, age) {
 		return s, errors.New("unavailable or stale HTTP state")
 	}
-	m, err := decodeObject(data)
+	m, err := decodeValidatedObject(data)
 	if err != nil {
 		return s, err
 	}
@@ -31,7 +43,7 @@ func parseLoad(data []byte, received, now time.Time, age time.Duration) (Load, e
 			return s, err
 		}
 	}
-	load, err := decodeObject(m["node_load"])
+	load, err := decodeValidatedObject(m["node_load"])
 	if err != nil {
 		return s, err
 	}
@@ -64,6 +76,15 @@ func fresh(sample, now time.Time, age time.Duration) bool {
 func decodeObject(data []byte) (map[string]json.RawMessage, error) {
 	if err := validObject(data); err != nil {
 		return nil, err
+	}
+	return decodeValidatedObject(data)
+}
+
+// Only use for objects within a response that already passed validObject.
+func decodeValidatedObject(data []byte) (map[string]json.RawMessage, error) {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return nil, errors.New("expected JSON object")
 	}
 	var result map[string]json.RawMessage
 	if err := json.Unmarshal(data, &result); err != nil {

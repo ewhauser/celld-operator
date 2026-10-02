@@ -23,6 +23,7 @@ const previewCreated = "celld.eric.dev/preview-fleet-created"
 const previewParentFleetUID = "celld.eric.dev/preview-parent-fleet-uid"
 const previewSeedReservation = "celld.eric.dev/preview-seed-reservation"
 const previewURL = "celld.eric.dev/preview-url"
+const previewFleetRefIndex = "spec.fleetRef.name"
 
 // PreviewReconciler delegates all runtime and storage authority to CelldFleet.
 type PreviewReconciler struct {
@@ -292,6 +293,9 @@ func (r *PreviewReconciler) report(ctx context.Context, p *fleet.CelldPreview, f
 }
 
 func (r *PreviewReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &fleet.CelldPreview{}, previewFleetRefIndex, previewFleetRefValues); err != nil {
+		return err
+	}
 	return ctrl.NewControllerManagedBy(mgr).For(&fleet.CelldPreview{}).Owns(&fleet.CelldFleet{}).
 		Watches(&fleet.CelldStorageReservation{}, handler.EnqueueRequestsFromMapFunc(func(_ context.Context, o client.Object) []ctrl.Request {
 			seed := o.(*fleet.CelldStorageReservation)
@@ -301,20 +305,28 @@ func (r *PreviewReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			return []ctrl.Request{{Namespace: seed.Spec.FleetNamespace, Name: seed.Spec.Initialization.Target.PreviewName}}
 		})).
 		Watches(&fleet.CelldFleet{}, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, object client.Object) []ctrl.Request {
-			if object.(*fleet.CelldFleet).Spec.Previews == nil {
-				return nil
-			}
-			var previews fleet.CelldPreviewList
-			if err := r.List(ctx, &previews, client.InNamespace(object.GetNamespace())); err != nil {
-				ctrl.LoggerFrom(ctx).Error(err, "list previews for pool change")
-				return nil
-			}
-			var requests []ctrl.Request
-			for _, p := range previews.Items {
-				if p.Spec.FleetRef.Name == object.GetName() {
-					requests = append(requests, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&p)})
-				}
-			}
-			return requests
+			// The index is only for event fanout. Reconciliation continues to use
+			// direct reads for ownership, reservations and lifecycle arbitration.
+			return previewPoolRequests(ctx, mgr.GetClient(), object)
 		})).Complete(r)
+}
+
+func previewFleetRefValues(object client.Object) []string {
+	return []string{object.(*fleet.CelldPreview).Spec.FleetRef.Name}
+}
+
+func previewPoolRequests(ctx context.Context, reader client.Reader, object client.Object) []ctrl.Request {
+	if object.(*fleet.CelldFleet).Spec.Previews == nil {
+		return nil
+	}
+	var previews fleet.CelldPreviewList
+	if err := reader.List(ctx, &previews, client.InNamespace(object.GetNamespace()), client.MatchingFields{previewFleetRefIndex: object.GetName()}); err != nil {
+		ctrl.LoggerFrom(ctx).Error(err, "list previews for pool change")
+		return nil
+	}
+	requests := make([]ctrl.Request, 0, len(previews.Items))
+	for i := range previews.Items {
+		requests = append(requests, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&previews.Items[i])})
+	}
+	return requests
 }

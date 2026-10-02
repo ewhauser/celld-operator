@@ -46,12 +46,12 @@ func decodeApplication(data []byte, received time.Time) (Application, error) {
 	if !ok {
 		return Application{}, ErrUnsupported
 	}
-	deployment, err := decodeObject(raw)
+	deployment, err := decodeValidatedObject(raw)
 	if err != nil {
 		return Application{}, err
 	}
 	out := Application{Loaded: &ApplicationVersion{}, ReceivedAt: received}
-	var cells map[string]json.RawMessage
+	var cells map[string]*uint64
 	for k, p := range map[string]any{
 		"version": &out.Loaded.Version, "prefix": &out.Loaded.Prefix,
 		"generation": &out.LocalGeneration, "swapping": &out.SwappingCells, "cells": &cells,
@@ -63,15 +63,14 @@ func decodeApplication(data []byte, received time.Time) (Application, error) {
 	if out.Loaded.Version == "" || len(out.Loaded.Version) > 256 || out.Loaded.Prefix == "" || len(out.Loaded.Prefix) > 1024 || out.LocalGeneration == 0 || out.SwappingCells < 0 || out.SwappingCells > 1_000_000_000 {
 		return Application{}, errors.New("invalid deployment observation")
 	}
-	for cell := range cells {
-		var local uint64
-		if err := required(cells, cell, &local); err != nil {
-			return Application{}, err
+	for _, local := range cells {
+		if local == nil {
+			return Application{}, errors.New("missing cell generation")
 		}
-		if local > out.LocalGeneration {
+		if *local > out.LocalGeneration {
 			return Application{}, errors.New("inconsistent deployment generations")
 		}
-		if local != out.LocalGeneration {
+		if *local != out.LocalGeneration {
 			out.PendingCells++
 		}
 	}
