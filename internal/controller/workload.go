@@ -358,7 +358,9 @@ func (r *Reconciler) deleteWorkload(ctx context.Context, f *fleet.CelldFleet) (c
 			return r.report(ctx, f, nil, "DeletionBlocked", fmt.Sprintf("%T %s is not owned by this fleet; refusing deletion", w, w.GetName()), false)
 		}
 		if w.GetDeletionTimestamp().IsZero() {
-			if err := r.Delete(ctx, w, client.Preconditions{UID: new(w.GetUID())}, client.PropagationPolicy(metav1.DeletePropagationForeground)); err != nil && !apierrors.IsNotFound(err) {
+			// Ownership may change without changing UID. Fence deletion to the
+			// version whose ownership we checked, as well as its identity.
+			if err := r.Delete(ctx, w, client.Preconditions{UID: new(w.GetUID()), ResourceVersion: new(w.GetResourceVersion())}, client.PropagationPolicy(metav1.DeletePropagationForeground)); err != nil && !apierrors.IsNotFound(err) {
 				return ctrl.Result{}, err
 			}
 		}

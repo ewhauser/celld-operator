@@ -104,7 +104,16 @@ func (h *harness) createCluster() {
 	h.created = true
 	h.sh(5*time.Minute, "kind", "create", "cluster", "--name", h.name, "--image", "kindest/node:v1.31.4", "--config", configPath, "--kubeconfig", h.kubeconfig)
 	calico := h.writeFile("calico.yaml", verified(h.fetch(calicoURL, time.Minute), calicoSHA, calicoURL))
-	h.k("apply", "-f", calico)
+	// A newly booted API server can still time out during OpenAPI discovery on
+	// a busy local VM. Installation is idempotent, including a partially
+	// accepted apply; retry only this setup step before controller assertions.
+	h.waitFor("Calico installed through the ready API server", 2*time.Minute, func() bool {
+		out, err := h.try(command{args: h.kubectl("--request-timeout=15s", "apply", "-f", calico), timeout: 25 * time.Second})
+		if err != nil {
+			fmt.Println("Retrying Calico installation:", truncate(out, 300))
+		}
+		return err == nil
+	})
 	h.k("wait", "--for=condition=Ready", "nodes", "--all", "--timeout=240s")
 	if len(h.nodes) > 1 {
 		h.k("taint", "nodes", h.nodes[0], "node-role.kubernetes.io/control-plane:NoSchedule-")
