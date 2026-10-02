@@ -4,7 +4,7 @@ Provisioning requires an explicit registry-pinned OCI image ending in
 `@sha256:<64 lowercase hex digits>`. There is no default runtime image and no
 list of stock upstream releases accepted as substitutes.
 
-The required fork is based on upstream v0.6.0 and exposes its state through the
+The required fork is based on upstream v0.6.1 and exposes its state through the
 existing `/state` control plane. Every possible recovery participant must
 understand its native `bucket_complete` proof. See
 [the wire contract](runtime-control-plane.md) and [fork source](https://github.com/ewhauser/celld).
@@ -32,16 +32,34 @@ older fleet can upgrade in place.
 
 ## Change export
 
-`spec.export` needs a celld with change export, which is on the fork's `main`
-and is not in a fork release yet. No published image has it, including
-`v0.6.0-ewhauser.2`, which ignores the `CELLD_EXPORT_*` settings and exports
-nothing. Pin the first fork release that ships it once it is published. The
-Kafka sink also needs the `export-kafka` Cargo feature, which release images
-leave out.
+`spec.export` needs a celld with change export, which starts at
+`v0.6.1-ewhauser.1`. Earlier builds, including `v0.6.0-ewhauser.2`, ignore the
+`CELLD_EXPORT_*` settings and export nothing. The release image carries only
+the bucket sink; the Kafka sink also needs the `export-kafka` Cargo feature,
+which release images leave out.
 
 ## Published fork artifact
 
-Release `v0.6.0-ewhauser.2` has a Linux amd64/arm64 image index:
+Release `v0.6.1-ewhauser.1` has a Linux amd64/arm64 image index:
+
+```text
+ghcr.io/ewhauser/celld@sha256:e8dc139226269acf137b54b67cea42a3b6a7c6527ce968caa5d303c21c3b7b74
+```
+
+It is `0.6.0-ewhauser.2` moved onto upstream v0.6.1 (Python Workers, epoch GC
+through `CELLD_LTX_RETENTION_SECS`, configurable asset and Dynamic Worker size
+limits), plus change export and an optional DynamoDB control plane, both off by
+default. The operator sets neither `CELLD_CONTROL` nor the new upstream
+settings. Nodes roll from `0.6.0-ewhauser.2`. Set `CELLD_LTX_RETENTION_SECS`,
+deploy a Python Worker, or raise `CELLD_MAX_ASSET_FILE_BYTES` above 25 MiB only
+after every member runs this build.
+
+The source revision is `350202332f861e52b4f88b67670d1c0862d1cf59`; the index is
+also tagged `sha-350202332f861e52b4f88b67670d1c0862d1cf59`. Native binaries and
+checksums are attached to the
+[fork release](https://github.com/ewhauser/celld/releases/tag/v0.6.1-ewhauser.1).
+
+### v0.6.0-ewhauser.2
 
 ```text
 ghcr.io/ewhauser/celld@sha256:94f35ba6973942eb4aaad2830ee8ebe431e2a125940acf380e74782602980a2a
