@@ -48,15 +48,7 @@ func (h *harness) exerciseFaults() {
 		h.waitReplacedDisk("data-beta-1", 10*time.Minute)
 	}, h.freshDiskAfter("data-beta-1"))
 
-	h.fault("lost volume", func() {
-		// A backend disk that no longer exists: the PV object is removed
-		// without its CSI and protection finalizers, as after an EBS loss.
-		// Kubernetes marks the claim Lost and the operator replaces the member.
-		pv := str(h.get("pvc", "data-beta-0"), "spec", "volumeName")
-		h.k("delete", "pv", pv, "--wait=false")
-		h.k("patch", "pv", pv, "--type=merge", "-p", `{"metadata":{"finalizers":null}}`)
-		h.waitReplacedDisk("data-beta-0", 10*time.Minute)
-	}, h.freshDiskAfter("data-beta-0"))
+	h.exerciseReplacementLoss()
 
 	victim, node := h.memberOnSpareNode("beta")
 	h.fault("node failure", func() { h.failNode(node, victim) }, h.freshDiskAfter("data-"+victim))

@@ -79,8 +79,11 @@ func TestReliabilityPersistentClaimRepairRacesDeletion(t *testing.T) {
 	if got := x.podUIDs(); len(got) != len(beforePods) || got["alpha-1"] != beforePods["alpha-1"] {
 		t.Fatalf("replacement deleted the repaired claim's Pod: before=%v, after=%v", beforePods, got)
 	}
-	if action, _, _, err := x.r.healMembers(t.Context(), x.f, x.workload().(*appsv1.StatefulSet), true); err != nil || action != "" {
-		t.Fatalf("retry failed to observe the repaired claim: action=%q, err=%v", action, err)
+	if _, _, _, err := x.r.healMembers(t.Context(), x.f, x.workload().(*appsv1.StatefulSet), true); err != nil {
+		t.Fatalf("retry failed to release the aborted replacement: %v", err)
+	}
+	if c := x.claim("data-alpha-1"); c.UID != beforeClaims[c.Name] || !c.DeletionTimestamp.IsZero() || c.Status.Phase != corev1.ClaimBound {
+		t.Fatal("retry did not preserve the repaired claim for the member's restart")
 	}
 }
 
@@ -213,22 +216,31 @@ func TestReliabilityPersistentReplacementDeleteFailuresAndRestart(t *testing.T) 
 				if _, _, _, err := x.r.healMembers(t.Context(), x.f, x.workload().(*appsv1.StatefulSet), true); err != nil {
 					t.Fatal(err)
 				}
-				if _, present := x.podUIDs()["alpha-1"]; present {
-					t.Fatal("restart left the replaced Pod holding its terminating claim")
-				}
 				c = x.claim("data-alpha-1")
-				if c.DeletionTimestamp.IsZero() {
-					t.Fatal("restart did not resume deletion of the old claim")
-				}
-				// Simulate PVC protection after the last referencing Pod disappears.
-				c.Finalizers = nil
-				if err := x.r.Update(t.Context(), c); err != nil {
-					t.Fatal(err)
+				if target == "claim" {
+					if _, present := x.podUIDs()["alpha-1"]; present {
+						t.Fatal("restart left the committed replacement Pod holding its terminating claim")
+					}
+					if c.DeletionTimestamp.IsZero() {
+						t.Fatal("restart did not resume committed deletion of the old claim")
+					}
+					// Simulate PVC protection after the last referencing Pod disappears.
+					c.Finalizers = nil
+					if err := x.r.Update(t.Context(), c); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					if !c.DeletionTimestamp.IsZero() || c.UID != before["data-alpha-1"] {
+						t.Fatal("uncertain Pod deletion erased the retained disk")
+					}
+					if _, present := x.podUIDs()["alpha-1"]; present {
+						x.setMember("alpha-1", x.pod("alpha-1").CreationTimestamp.Time, corev1.ConditionTrue, x.clock)
+					}
 				}
 				x.clock = x.clock.Add(time.Second)
 				x.converge()
 				for name, uid := range x.claimUIDs() {
-					if changed := uid != before[name]; changed != (name == "data-alpha-1") {
+					if changed := uid != before[name]; changed != (name == "data-alpha-1" && target == "claim") {
 						t.Fatalf("restart changed the wrong disk %s: before=%s, after=%s", name, before[name], uid)
 					}
 				}
@@ -275,19 +287,13 @@ func TestReliabilityPersistentIncompleteSurvivorsRetainDisks(t *testing.T) {
 	}
 }
 
-// A real API server enforces both delete preconditions. The fake client does
-// not enforce UID, so name reuse must be qualified here as well as tested with
-// intercepted failure responses above.
+// A prepared replacement retains the original PVC observation across the
+// Pod deletion. A real API fixture qualifies preservation of a claim whose
+// identity, ownership or phase changed before that observation was consumed.
 func TestEnvtestReliabilityPersistentReplacementClaimChanged(t *testing.T) {
 	for _, change := range []string{"name-reused", "phase-repaired", "ownership-changed"} {
 		t.Run(change, func(t *testing.T) {
-			r, x := envtestSetup(t, "PersistentFleet")
-			x.provision(t, r)
-			tmpl := workload(x.fleet, r.Options).(*appsv1.StatefulSet).Spec.VolumeClaimTemplates[0]
-			old := &corev1.PersistentVolumeClaim{Name: claimName(x.fleet, 1), Namespace: x.fleet.Namespace, Labels: tmpl.Labels, Annotations: tmpl.Annotations, Spec: tmpl.Spec}
-			if err := r.Create(t.Context(), old); err != nil {
-				t.Fatal(err)
-			}
+			r, _, victim, old := replacementEnvtestFixture(t)
 			old.Status.Phase = corev1.ClaimLost
 			if err := r.Status().Update(t.Context(), old); err != nil {
 				t.Fatal(err)
@@ -302,12 +308,12 @@ func TestEnvtestReliabilityPersistentReplacementClaimChanged(t *testing.T) {
 				if err := r.Get(t.Context(), client.ObjectKeyFromObject(old), current); err != nil {
 					t.Fatal(err)
 				}
-				// There are no Pods here; simulate the absent protection controller.
+				// Simulate an external replacement releasing PVC protection.
 				current.Finalizers = nil
 				if err := r.Update(t.Context(), current); err != nil {
 					t.Fatal(err)
 				}
-				current = &corev1.PersistentVolumeClaim{Name: old.Name, Namespace: old.Namespace, Labels: tmpl.Labels, Annotations: tmpl.Annotations, Spec: tmpl.Spec}
+				current = &corev1.PersistentVolumeClaim{Name: old.Name, Namespace: old.Namespace, Labels: old.Labels, Annotations: old.Annotations, Spec: old.Spec}
 				if err := r.Create(t.Context(), current); err != nil {
 					t.Fatal(err)
 				}
@@ -322,8 +328,8 @@ func TestEnvtestReliabilityPersistentReplacementClaimChanged(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := r.replaceMember(t.Context(), observed, nil); !apierrors.IsConflict(err) {
-				t.Fatalf("stale replacement deleted a changed claim: %v", err)
+			if err := r.replaceMember(t.Context(), observed, victim); err != nil {
+				t.Fatalf("failed to abort replacement of the changed claim: %v", err)
 			}
 			got := &corev1.PersistentVolumeClaim{}
 			if err := r.Get(t.Context(), client.ObjectKeyFromObject(current), got); err != nil {

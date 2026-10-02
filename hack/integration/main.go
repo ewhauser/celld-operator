@@ -50,7 +50,7 @@ func main() {
 func realMain() (code int) {
 	var opts options
 	fs := flag.NewFlagSet("integration", flag.ContinueOnError)
-	fs.StringVar(&opts.suite, "suite", "all", "suite: all, lifecycle, maintenance, faults, partitions, external, upgrade, previews")
+	fs.StringVar(&opts.suite, "suite", "all", "suite: all, lifecycle, maintenance, faults, partitions, replacement, external, upgrade, previews")
 	fs.StringVar(&opts.runtimeImage, "runtime-image", os.Getenv("CELLD_RUNTIME_IMAGE"), "required immutable ghcr.io/ewhauser/celld@sha256:... fork image")
 	fs.StringVar(&opts.upgradeFrom, "upgrade-from", envOr("CELLD_UPGRADE_FROM_IMAGE", legacyRuntimeImage), "fork digest the maintenance suite upgrades a PersistentFleet from, on retained disks; \"none\" skips it")
 	fs.StringVar(&opts.upgradeMode, "upgrade-mode", envOr("CELLD_UPGRADE_MODE", "full-stop"), "how the maintenance suite moves a PersistentFleet onto --runtime-image: \"full-stop\", the documented procedure for a pair that cannot run together, or \"rolling\"")
@@ -86,7 +86,7 @@ func realMain() (code int) {
 		return 2
 	}
 	switch opts.suite {
-	case "all", "lifecycle", "maintenance", "faults", "partitions", "external", "upgrade", "previews":
+	case "all", "lifecycle", "maintenance", "faults", "partitions", "replacement", "external", "upgrade", "previews":
 	default:
 		fmt.Fprintln(os.Stderr, "unknown suite:", opts.suite)
 		return 2
@@ -189,6 +189,8 @@ func (h *harness) exercise() {
 		h.exerciseFaults()
 	case "partitions":
 		h.exercisePartitions()
+	case "replacement":
+		h.exerciseReplacement()
 	case "external":
 		h.exerciseExternal()
 	}

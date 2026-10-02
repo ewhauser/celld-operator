@@ -45,8 +45,9 @@ node-log settlement, or to replace members.
 The operator renders a StatefulSet and its prerequisites and applies them.
 The StatefulSet controller performs every restart and every scaling step, and
 celld recovers every node. The operator replaces a member that cannot come
-back on its own, so the fleet heals without an administrator. It keeps no
-lifecycle state.
+back on its own, so the fleet heals without an administrator. Ordinary rollout
+and scaling need no operator lifecycle state. A disk replacement keeps a bounded
+handoff record on its victim Pod until that Pod can be released.
 
 - **Rollout.** `RollingUpdate` with partition 0. Kubernetes restarts one member
   at a time, highest ordinal first, and waits for each one to be Ready. The
@@ -68,11 +69,12 @@ lifecycle state.
 - **Storage identity.** Before creating or growing the StatefulSet, the
   operator refuses to proceed if a claim at a member's name does not carry the
   fleet's UID label. A disk from another fleet is never adopted.
-- **No operator state.** The reservation annotation holds only capacity-policy
+- **Reservation state.** The reservation annotation holds only capacity-policy
   state, which exists once a fleet sets `spec.capacity`. The operator removes
   the annotation when there is none. Fields written by earlier releases are
   dropped on the first write, including claim identities, strict operations and
-  disruption times.
+  disruption times. A selected disk replacement uses its own Pod annotation,
+  index label and finalizer, described below; it adds no fleet-wide rollout state.
 
 The operator does not read `/state.node_log` and does not release the disks of
 removed members.
@@ -80,8 +82,8 @@ removed members.
 ### Self-healing
 
 No administrator is expected to intervene. The operator judges each member
-from what the cluster reports on each reconcile, takes at most one action per
-reconcile, and records nothing:
+from what the cluster reports on each reconcile and replaces at most one member
+at a time:
 
 - **A Pod on a node that no longer answers.** A member Pod still present more
   than two minutes after its termination grace has ended is force-deleted, so
@@ -90,8 +92,9 @@ reconcile, and records nothing:
   `ReadWriteOncePod` disk attaches to one node at a time. This applies to every
   StatefulSet fleet, including Ordered Bucket.
 - **A lost volume.** When Kubernetes marks a member's claim `Lost`, the volume
-  behind it no longer exists. The operator deletes the claim and the Pod, and
-  the StatefulSet recreates both.
+  behind it no longer exists. The operator commits deletion of the selected Pod
+  before deleting its original claim, using the handoff below. The StatefulSet
+  recreates both.
 - **A member that cannot come back.** A member that has stayed down for the
   replacement delay is treated as lost if every other member has been ready for
   five minutes. The delay defaults to 10 minutes (`--member-replacement-delay`).
@@ -102,8 +105,9 @@ reconcile, and records nothing:
   attaches, and a corrupt disk that keeps celld from starting. Leaders stop
   using a departed member within seconds, and every node sweeps dead leaders
   every 30 seconds. So once the rest of the fleet has been ready that long, no
-  session depends on the down member's disk. The operator deletes the claim and
-  the Pod, and the member returns on a fresh disk. Two cases are left alone
+  session depends on the down member's disk. The operator commits deletion of
+  the selected Pod before deleting its original claim, and the member returns
+  on a fresh disk. Two cases are left alone
   because a new disk would not help: a member waiting on its image or
   configuration, and a member already on a disk created for its current Pod.
   Only one down member is ever replaced this way. When two are down, replacing
@@ -126,6 +130,41 @@ reconcile, and records nothing:
   run and recorded as that step. A member the scheduler cannot place is named in the fleet's status. If the
   operator has not replaced it by the end of the replacement delay, the fleet
   reports `Blocked` with reason `MemberUnschedulable`.
+
+### Replacement handoff
+
+A Pod read and a PVC delete are separate API operations. Rereading the Pod
+before deleting its claim cannot close the race: the same Pod can recover after
+that read, or a new Pod can take its StatefulSet name. Replacement instead uses
+the Pod delete as the commitment point:
+
+1. The operator prepares the selected, non-terminating Pod with its own
+   finalizer and a record of the fleet UID and original claim's UID and
+   resourceVersion. A private `celld.eric.dev/replacement-fleet` label indexes
+   that hold by its original fleet UID.
+2. It deletes that exact Pod with UID and resourceVersion preconditions. A
+   recovery or metadata change before the delete makes it conflict, so the disk
+   is retained. The finalizer holds the terminating Pod's name and prevents the
+   StatefulSet from creating a successor against the old claim.
+3. Only an acknowledged Pod delete allows the record to be marked committed.
+   An interrupted prepared handoff always aborts and keeps the disk, including
+   an externally deleted Pod or a successful delete whose response was lost.
+4. A committed handoff deletes only the recorded claim, with both UID and
+   resourceVersion preconditions. A live claim changed since preparation is
+   retained. A claim at the same name with a different UID is never deleted.
+5. Once deletion of the original claim is durably accepted, or that claim UID
+   is absent, the operator removes its own finalizer, handoff record and index
+   label. It does not wait for the PVC to disappear: Kubernetes' PVC protection
+   needs the old Pod to finish before it can finish deleting an attached claim.
+
+A new reconciler aborts prepared records and resumes committed ones from these
+persisted objects. This cleanup runs before runtime validation and normal
+workload gates, and includes indexed Pods outside the current replica range.
+The private index still finds a hold after the ordinary fleet label or owner
+reference changes; that drift aborts disk deletion and releases the hold.
+Pausing or deleting the fleet releases its holds without starting another disk
+delete. An already accepted deletion cannot be undone. Ordinary rollouts,
+scale-in and Pod restarts do not use this handoff and retain their disks.
 
 For a replaced disk, the new member answers recovery for its old disk with a
 conclusive "no fragment" (`0.5.1-ewhauser.7`; earlier builds refuse until the
@@ -183,6 +222,10 @@ happened first.
   disks as lost, and on runtimes before `0.5.1-ewhauser.7` it stalls recovery.
 - The ClusterRole no longer needs PersistentVolume, Node or VolumeAttachment
   reads, and the namespaced Role no longer needs to create claims.
+- Disk replacement uses the existing namespaced Pod update permission for its
+  handoff record and finalizer. Before rolling back to an operator that does not
+  recognize those records, let current replacements finish and release their
+  holds.
 
 ## Migration
 

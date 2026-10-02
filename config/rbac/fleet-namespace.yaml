@@ -20,15 +20,15 @@ rules:
   - apiGroups: ['']
     resources: [services]
     verbs: [get, create, update]
-  # Delete removes a member's claim, bound to its UID, when its volume is gone or
-  # the member cannot come back, and every claim once a deleted fleet's
+  # Delete removes a member's original claim, bound to its UID and version,
+  # after its Pod deletion commits, and every claim once a deleted fleet's
   # StatefulSet is gone. The StatefulSet creates claims.
   - apiGroups: ['']
     resources: [persistentvolumeclaims]
     verbs: [get, list, delete]
-  # Update releases the zone scheduling gate of Ordered Bucket Pods. Delete
-  # replaces a PersistentFleet member that cannot come back on its own, and
-  # force-deletes a member Pod left on a node that no longer answers.
+  # Update releases the zone scheduling gate of Ordered Bucket Pods and manages
+  # a PersistentFleet replacement's handoff record, index label and finalizer.
+  # Delete commits that replacement and force-deletes a Pod on a lost node.
   - apiGroups: ['']
     resources: [pods]
     verbs: [get, list, update, delete]
