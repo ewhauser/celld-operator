@@ -34,11 +34,36 @@ older fleet can upgrade in place.
 
 `spec.export` needs a celld with change export, which starts at
 `v0.6.1-ewhauser.1`. Earlier builds, including `v0.6.0-ewhauser.2`, ignore the
-`CELLD_EXPORT_*` settings and export nothing. The release image carries only
-the bucket sink; the Kafka sink also needs the `export-kafka` Cargo feature,
-which release images leave out.
+`CELLD_EXPORT_*` settings and export nothing. The default release image carries
+only the bucket sink. Starting with `v0.6.1-ewhauser.3`, the `-kafka` image
+variant includes both the bucket sink and the Kafka sink (`export-kafka`).
+Pin that variant's verified manifest digest for `spec.export.sink: Kafka`.
+Compiling in Kafka support does not enable export; `spec.export` still controls
+whether and where changes are exported.
 
 ## Published fork artifact
+
+Release `v0.6.1-ewhauser.3` publishes a Kafka-enabled Linux amd64/arm64
+image index, used by the operator's integration and release qualification:
+
+```text
+ghcr.io/ewhauser/celld@sha256:d880dae9f8e14d55740fbcf361d01e32cefca113b631a6e9cf99f5f1f1edbc4e
+```
+
+This is the `v0.6.1-ewhauser.3-kafka` variant, built with `export-kafka`.
+It supports the bucket and Kafka sinks; export remains disabled unless
+configured. The default release image omits Kafka. The source revision is
+`5fa3bd04cefd08169dd49a9cf9cf46d65faaa775`. The image is also tagged
+`sha-5fa3bd04cefd08169dd49a9cf9cf46d65faaa775-kafka`.
+Native default and Kafka binaries, build records, and checksums are attached to
+the [fork release](https://github.com/ewhauser/celld/releases/tag/v0.6.1-ewhauser.3).
+
+The release retains the `0.6.1-ewhauser.2` storage and export improvements.
+Kafka artifact availability introduces no storage-format change; existing
+`0.6.1-ewhauser` fleets can roll to this runtime. Follow the source/target
+qualification requirements above before upgrading a deployed fleet.
+
+### v0.6.1-ewhauser.1
 
 Release `v0.6.1-ewhauser.1` has a Linux amd64/arm64 image index:
 
