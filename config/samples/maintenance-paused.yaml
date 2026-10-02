@@ -13,7 +13,7 @@ spec:
     # restartToken: maintenance-2026-09
   # Use the same verified sha256 digest through a registry mirror when needed.
   # The mirrored image must be the qualified celld fork artifact.
-  runtimeImage: 123456789012.dkr.ecr.us-east-1.amazonaws.com/cache/celld@sha256:d880dae9f8e14d55740fbcf361d01e32cefca113b631a6e9cf99f5f1f1edbc4e
+  runtimeImage: 123456789012.dkr.ecr.us-east-1.amazonaws.com/cache/celld@sha256:1c0d854cd2af39fa439f163d5b88a19c7bccefd25fe35e2c0e1f43b3d886f424
   # There is no default compatible pin; omission blocks provisioning.
   serviceAccountName: runtime
   storage:

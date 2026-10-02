@@ -14,10 +14,10 @@ Use an explicit compatible fork image; the operator supplies no default runtime 
 | Capacity policy | Metrics Server for built-in observations; Prometheus is optional. |
 
 The [fork release](https://github.com/ewhauser/celld/releases/tag/v0.6.1-ewhauser.3)
-is based on upstream v0.6.1. Its Kafka-enabled Linux amd64/arm64 index is:
+is based on upstream v0.6.1. Its standard Linux amd64/arm64 index is:
 
 ```text
-ghcr.io/ewhauser/celld@sha256:d880dae9f8e14d55740fbcf361d01e32cefca113b631a6e9cf99f5f1f1edbc4e
+ghcr.io/ewhauser/celld@sha256:1c0d854cd2af39fa439f163d5b88a19c7bccefd25fe35e2c0e1f43b3d886f424
 ```
 
 The source revision is `5fa3bd04cefd08169dd49a9cf9cf46d65faaa775`. Verify
@@ -26,9 +26,10 @@ an unreachable peer as holding no copy of a write, and it lets an idle leader
 stop depending on a departed member; stock upstream releases do neither. A
 syntactically valid pin does not establish runtime/storage-format qualification.
 
-Use the `0.6.1-ewhauser.3-kafka` artifact above for new fleets. It includes
-both bucket and Kafka sinks; export remains off until configured. Older fork builds
-have these known issues and fixes:
+Use the standard `0.6.1-ewhauser.3` artifact above for new fleets. Select the
+[Kafka variant](../../contracts/runtime-versions/#kafka-variant) explicitly only
+when Kafka export is needed; export remains off until configured. Older fork
+builds have these known issues and fixes:
 
 | Build | Behavior |
 | --- | --- |

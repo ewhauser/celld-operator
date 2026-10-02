@@ -43,25 +43,41 @@ whether and where changes are exported.
 
 ## Published fork artifact
 
-Release `v0.6.1-ewhauser.3` publishes a Kafka-enabled Linux amd64/arm64
-image index, used by the operator's integration and release qualification:
+Release `v0.6.1-ewhauser.3` publishes a standard Linux amd64/arm64 image
+index, used by the operator's integration and release qualification and
+recommended for fleets that do not need Kafka export:
 
 ```text
-ghcr.io/ewhauser/celld@sha256:d880dae9f8e14d55740fbcf361d01e32cefca113b631a6e9cf99f5f1f1edbc4e
+ghcr.io/ewhauser/celld@sha256:1c0d854cd2af39fa439f163d5b88a19c7bccefd25fe35e2c0e1f43b3d886f424
 ```
 
-This is the `v0.6.1-ewhauser.3-kafka` variant, built with `export-kafka`.
-It supports the bucket and Kafka sinks; export remains disabled unless
-configured. The default release image omits Kafka. The source revision is
-`5fa3bd04cefd08169dd49a9cf9cf46d65faaa775`. The image is also tagged
-`sha-5fa3bd04cefd08169dd49a9cf9cf46d65faaa775-kafka`.
-Native default and Kafka binaries, build records, and checksums are attached to
+The standard image includes the bucket export sink. Export remains disabled
+unless configured. The source revision is
+`5fa3bd04cefd08169dd49a9cf9cf46d65faaa775`, and the image is also tagged
+`sha-5fa3bd04cefd08169dd49a9cf9cf46d65faaa775`.
+Native standard and Kafka binaries, build records, and checksums are attached to
 the [fork release](https://github.com/ewhauser/celld/releases/tag/v0.6.1-ewhauser.3).
 
 The release retains the `0.6.1-ewhauser.2` storage and export improvements.
 Kafka artifact availability introduces no storage-format change; existing
 `0.6.1-ewhauser` fleets can roll to this runtime. Follow the source/target
 qualification requirements above before upgrading a deployed fleet.
+
+### Kafka variant
+
+For `spec.export.sink: Kafka`, explicitly select the
+`v0.6.1-ewhauser.3-kafka` variant, built with `export-kafka`:
+
+```text
+ghcr.io/ewhauser/celld@sha256:d880dae9f8e14d55740fbcf361d01e32cefca113b631a6e9cf99f5f1f1edbc4e
+```
+
+This Linux amd64/arm64 index supports both bucket and Kafka sinks and comes
+from the same source revision as the standard image. It is also tagged
+`sha-5fa3bd04cefd08169dd49a9cf9cf46d65faaa775-kafka`.
+The [Kafka example](../config/samples/export-kafka.yaml) pins this variant.
+Other fleets should use the standard image above; the operator does not
+switch runtime images automatically when export settings change.
 
 ### v0.6.1-ewhauser.1
 

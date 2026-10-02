@@ -6,7 +6,7 @@ metadata:
   name: development
   namespace: previews
 spec:
-  runtimeImage: ghcr.io/ewhauser/celld@sha256:d880dae9f8e14d55740fbcf361d01e32cefca113b631a6e9cf99f5f1f1edbc4e
+  runtimeImage: ghcr.io/ewhauser/celld@sha256:1c0d854cd2af39fa439f163d5b88a19c7bccefd25fe35e2c0e1f43b3d886f424
   profile: Bucket
   replicas: 1
   serviceAccountName: celld-runtime
@@ -19,7 +19,7 @@ spec:
     zones: [us-east-1a]
     mode: Relaxed
   previews:
-    runtimeImage: ghcr.io/ewhauser/celld@sha256:d880dae9f8e14d55740fbcf361d01e32cefca113b631a6e9cf99f5f1f1edbc4e
+    runtimeImage: ghcr.io/ewhauser/celld@sha256:1c0d854cd2af39fa439f163d5b88a19c7bccefd25fe35e2c0e1f43b3d886f424
     serviceAccountName: preview-runtime
     zone: us-east-1a
     storage:
