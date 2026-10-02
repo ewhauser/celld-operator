@@ -92,8 +92,10 @@ Secret and the properties name its file, for example
 weaken delivery: `acks` below `all`, `message.timeout.ms`,
 `delivery.timeout.ms`, and turning on `delivery.report.only.error` or
 `allow.auto.create.topics`. Kafka needs a celld
-built with the `export-kafka` feature, which the fork's release images leave
-out, so it also needs a custom `runtimeImage`. The operator does not support
+built with the `export-kafka` feature. Starting with `v0.6.1-ewhauser.3`,
+the fork publishes a `-kafka` image variant with this feature; pin its verified
+manifest digest in `runtimeImage` (see [runtime requirements](runtime-versions.md#change-export)).
+The default image includes only the bucket sink. The operator does not support
 celld's blob-stream sink, and the reserved `CELLD_EXPORT` prefix keeps
 `spec.env` from selecting it.
 

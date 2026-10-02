@@ -5,7 +5,7 @@ metadata:
   name: routed-example
   namespace: default
 spec:
-  runtimeImage: ghcr.io/ewhauser/celld@sha256:4b9eb5656054580e7dd5ed2bbd9ee8b641ecd60c317437e9be63f4e3ae333f29
+  runtimeImage: ghcr.io/ewhauser/celld@sha256:1c0d854cd2af39fa439f163d5b88a19c7bccefd25fe35e2c0e1f43b3d886f424
   profile: Bucket
   bucketWorkload: Ordered
   replicas: 3

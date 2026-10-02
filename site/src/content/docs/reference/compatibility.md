@@ -13,21 +13,23 @@ Use an explicit compatible fork image; the operator supplies no default runtime 
 | Persistent storage | EBS CSI (hostpath CSI in local tests), RWOP, `Delete` reclaim policy and `WaitForFirstConsumer`. |
 | Capacity policy | Metrics Server for built-in observations; Prometheus is optional. |
 
-The [fork release](https://github.com/ewhauser/celld/releases/tag/v0.6.1-ewhauser.1)
-is based on upstream v0.6.1. Its published Linux amd64/arm64 index is:
+The [fork release](https://github.com/ewhauser/celld/releases/tag/v0.6.1-ewhauser.3)
+is based on upstream v0.6.1. Its standard Linux amd64/arm64 index is:
 
 ```text
-ghcr.io/ewhauser/celld@sha256:e8dc139226269acf137b54b67cea42a3b6a7c6527ce968caa5d303c21c3b7b74
+ghcr.io/ewhauser/celld@sha256:1c0d854cd2af39fa439f163d5b88a19c7bccefd25fe35e2c0e1f43b3d886f424
 ```
 
-The source revision is `350202332f861e52b4f88b67670d1c0862d1cf59`. Verify
+The source revision is `5fa3bd04cefd08169dd49a9cf9cf46d65faaa775`. Verify
 source, platform and digest for the artifact you deploy. The fork never counts
 an unreachable peer as holding no copy of a write, and it lets an idle leader
 stop depending on a departed member; stock upstream releases do neither. A
 syntactically valid pin does not establish runtime/storage-format qualification.
 
-Use the `0.6.1-ewhauser.1` artifact above for new fleets. Older fork builds
-have these known issues and fixes:
+Use the standard `0.6.1-ewhauser.3` artifact above for new fleets. Select the
+[Kafka variant](../../contracts/runtime-versions/#kafka-variant) explicitly only
+when Kafka export is needed; export remains off until configured. Older fork
+builds have these known issues and fixes:
 
 | Build | Behavior |
 | --- | --- |
@@ -39,6 +41,8 @@ have these known issues and fixes:
 | `0.6.0-ewhauser.1` | Carries every `0.5.1-ewhauser.7` fix onto upstream v0.6.0. |
 | `0.6.0-ewhauser.2` | Adds OTLP metrics and `OTEL_RESOURCE_ATTRIBUTES` support and drops the unused strict disk-removal and `/state.node_log` APIs. |
 | `0.6.1-ewhauser.1` | Moves to upstream v0.6.1 and adds change export (bucket sink in release images) and the optional DynamoDB control plane. |
+| `0.6.1-ewhauser.2` | Reduces storage and change-export CPU and allocation overhead. |
+| `0.6.1-ewhauser.3` | Adds release binaries and a multi-architecture `-kafka` image with the Kafka sink compiled in. |
 
 A fleet on `0.6.0-ewhauser.1` rolls to `0.6.0-ewhauser.2`, which rolls to
 `0.6.1-ewhauser.1`. A PersistentFleet
