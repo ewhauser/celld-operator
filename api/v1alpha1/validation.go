@@ -26,6 +26,9 @@ func (f *CelldFleet) Default() {
 	if f.Spec.Placement.Mode == "" {
 		f.Spec.Placement.Mode = "Strict"
 	}
+	if f.Spec.Export != nil && f.Spec.Export.Sink == "" {
+		f.Spec.Export.Sink = "Bucket"
+	}
 	if m := f.Spec.Mesh; m != nil {
 		if m.Istio.ControlPlaneNamespace == "" {
 			m.Istio.ControlPlaneNamespace = DefaultIstioControlPlaneNamespace
@@ -72,6 +75,9 @@ func (f *CelldFleet) ValidateRuntime() error {
 		return err
 	}
 	if err := validateTelemetry(s.Telemetry); err != nil {
+		return err
+	}
+	if err := validateExport(&s); err != nil {
 		return err
 	}
 	if err := validateMesh(s.Mesh); err != nil {

@@ -30,6 +30,15 @@ every fork build the same way. Builds that predate `node_log`, such as
 `0.5.1-ewhauser.3` and `.4`, restart, upgrade and scale like later ones, so an
 older fleet can upgrade in place.
 
+## Change export
+
+`spec.export` needs a celld with change export, which is on the fork's `main`
+and is not in a fork release yet. No published image has it, including
+`v0.6.0-ewhauser.2`, which ignores the `CELLD_EXPORT_*` settings and exports
+nothing. Pin the first fork release that ships it once it is published. The
+Kafka sink also needs the `export-kafka` Cargo feature, which release images
+leave out.
+
 ## Published fork artifact
 
 Release `v0.6.0-ewhauser.2` has a Linux amd64/arm64 image index:

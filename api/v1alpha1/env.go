@@ -26,7 +26,7 @@ func validateFleetEnv(entries []FleetEnvVar) error {
 	}
 	seen := make(map[string]bool, len(entries))
 	for _, e := range entries {
-		if len(e.Name) > 128 || !celldEnvName.MatchString(e.Name) || ownedCelldEnv[e.Name] || strings.HasPrefix(e.Name, "CELLD_REEXEC_") || strings.HasPrefix(e.Name, "CELLD_OTEL") || strings.HasPrefix(e.Name, "CELLD_UNSAFE_") || strings.HasPrefix(e.Name, "CELLD_TEST_") || strings.HasPrefix(e.Name, "CELLD_STRICT_") {
+		if len(e.Name) > 128 || !celldEnvName.MatchString(e.Name) || ownedCelldEnv[e.Name] || strings.HasPrefix(e.Name, "CELLD_REEXEC_") || strings.HasPrefix(e.Name, "CELLD_OTEL") || strings.HasPrefix(e.Name, "CELLD_EXPORT") || strings.HasPrefix(e.Name, "CELLD_UNSAFE_") || strings.HasPrefix(e.Name, "CELLD_TEST_") || strings.HasPrefix(e.Name, "CELLD_STRICT_") {
 			return fmt.Errorf("env name %q is invalid or reserved", e.Name)
 		}
 		if seen[e.Name] {
