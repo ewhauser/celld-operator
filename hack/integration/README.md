@@ -24,7 +24,7 @@ make integration-upgrade
 cluster.
 
 The Make targets use the verified fork digest in `hack/runtime-image.txt`
-(v0.6.0-ewhauser.2). `CELLD_RUNTIME_IMAGE` or `--runtime-image` selects another
+(v0.6.1-ewhauser.1). `CELLD_RUNTIME_IMAGE` or `--runtime-image` selects another
 immutable fork digest. There is no upstream or
 unpinned fallback. To qualify an already published operator image without
 rebuilding the manager, pass
@@ -93,7 +93,7 @@ Bucket fleet (`alpha`) and a PersistentFleet (`beta`), and checks:
 - A runtime upgrade on retained disks moves a three-member PersistentFleet
   under write load from the legacy v0.5.1-ewhauser.3 digest to the pinned
   runtime. The legacy digest lacks `node_log` and provisions like any other.
-  A 0.5.1-based build cannot run beside the pinned 0.6.0-based one, so the
+  A 0.5.1-based build cannot run beside the pinned 0.6-based one, so the
   suite runs the documented full-stop procedure: pause, scale the StatefulSet
   to zero, then set the image and resume in one change. `--upgrade-mode rolling`
   (or `CELLD_UPGRADE_MODE`) rolls instead, for a pair that can run together.
