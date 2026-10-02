@@ -48,3 +48,37 @@ func TestLegacyQualificationReservation(t *testing.T) {
 		})
 	}
 }
+
+func TestExportReservationCompat(t *testing.T) {
+	f := fixture("export", "export-bucket", "Bucket")
+	f.Spec.Export = &fleet.ExportSpec{Sink: "Kafka", Kafka: &fleet.ExportKafkaSpec{Brokers: []string{"kafka-0.kafka:9092"}, Egress: fleet.CollectorEgress{CIDR: "10.20.0.0/16"}}}
+	without := f.DeepCopy()
+	without.Spec.Export = nil
+	if specHash(f) != specHash(without) {
+		t.Fatal("export changed the reservation hash")
+	}
+	matches := func(f *fleet.CelldFleet, res *fleet.CelldStorageReservation) bool {
+		return (&Reconciler{}).reservationMatches(t.Context(), f, &loadedState{res: res}, fleetReservationSpec(f))
+	}
+	// A fleet created without export, then given one, keeps its reservation.
+	res := &fleet.CelldStorageReservation{Spec: fleetReservationSpec(without)}
+	if !matches(f, res) {
+		t.Fatal("adding export rejected the existing reservation")
+	}
+	// v0.0.8 and v0.0.9 hashed export into the reservation.
+	res.Spec.SpecHash = legacyExportSpecHash(f)
+	if res.Spec.SpecHash == specHash(f) {
+		t.Fatal("legacy export hash must differ from the current hash")
+	}
+	if !matches(f, res) {
+		t.Fatal("v0.0.9 export reservation rejected for its original fleet")
+	}
+	changed := f.DeepCopy()
+	changed.Spec.Export.Kafka.Topic = "other"
+	if matches(changed, res) {
+		t.Fatal("v0.0.9 export reservation accepted a changed export")
+	}
+	if legacyExportSpecHash(without) != "" {
+		t.Fatal("fleet without export has a legacy export hash")
+	}
+}

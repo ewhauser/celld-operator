@@ -17,8 +17,8 @@ is converted in place. Infrastructure outside Kubernetes, including bucket,
 IAM roles, worker nodes and EBS CSI, remains administrator-owned.
 
 The mutable request fields are `replicas`, `capacity`, `runtimeImage`,
-`maintenance`, `routing` and `mesh`. Storage, layout, placement, execution sizing, lifecycle
-budgets, `env`, `telemetry` and `export` are fixed at creation. `maintenance.paused` stops new
+`maintenance`, `export`, `routing` and `mesh`. Storage, layout, placement, execution sizing, lifecycle
+budgets, `env` and `telemetry` are fixed at creation. `maintenance.paused` stops new
 workload changes. A new `restartToken` requests a same-version restart. Restarts
 and upgrades are one-member rolling updates for both profiles;
 `allowCoordinatedDowntime` is accepted and ignored.
@@ -103,8 +103,13 @@ node activates once it is on; backfill earlier cells and schedule the
 reconciler with the `celld export` commands. celld reports export gauges
 (`celld.export.*`) through `spec.telemetry`. Change export needs a celld
 build that has it: see [runtime requirements](runtime-versions.md#change-export).
-Export is immutable after creation because ordinary pod-template changes are
-not rolled out.
+Adding, changing or removing export rolls members one at a time. The egress
+policy follows the new spec at the start of the rollout, so a member that still
+runs the old export can lose its sink until it is replaced; its queue fills and
+drops records as gaps rather than blocking writes. Cells activated on members
+that did not export yet are not exported: run the backfill once the rollout
+completes. A fleet created with export by v0.0.8 or v0.0.9 keeps its
+reservation only while that export is unchanged; recreate it to change export.
 
 A bucket reservation permanently binds the bucket to the fleet UID. Recreating
 a fleet with the same name does not transfer ownership. Its

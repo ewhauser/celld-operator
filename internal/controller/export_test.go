@@ -26,8 +26,8 @@ func TestBucketExportRendersEnv(t *testing.T) {
 	if err := f.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if specHash(f) == before {
-		t.Fatal("export missing from immutable reservation hash")
+	if specHash(f) != before {
+		t.Fatal("mutable export changed the reservation hash")
 	}
 	pod := podTemplate(f, Options{}).Spec
 	env := pod.Containers[0].Env

@@ -45,8 +45,9 @@ type Reconciler struct {
 	now                   func() time.Time
 }
 
-func digest(data []byte) string { h := sha256.Sum256(data); return hex.EncodeToString(h[:]) }
-func reservationSpecJSON(f *fleet.CelldFleet) []byte {
+func digest(data []byte) string                      { h := sha256.Sum256(data); return hex.EncodeToString(h[:]) }
+func reservationSpecJSON(f *fleet.CelldFleet) []byte { return reservationJSON(f, false) }
+func reservationJSON(f *fleet.CelldFleet, keepExport bool) []byte {
 	spec := f.Spec
 	// Preserve reservation hashes from before the opt-in Ordered layout existed.
 	if spec.BucketWorkload == "Deployment" {
@@ -58,10 +59,23 @@ func reservationSpecJSON(f *fleet.CelldFleet) []byte {
 	spec.Mesh = nil
 	spec.RuntimeImage = ""
 	spec.Maintenance = nil
+	if !keepExport {
+		spec.Export = nil
+	}
 	b, _ := json.Marshal(spec)
 	return b
 }
 func specHash(f *fleet.CelldFleet) string { return digest(reservationSpecJSON(f)) }
+
+// legacyExportSpecHash is the hash v0.0.8 and v0.0.9 wrote for a fleet created
+// with export, when export was immutable. Such a fleet keeps matching while its
+// export is unchanged; changing it needs a reservation written by this version.
+func legacyExportSpecHash(f *fleet.CelldFleet) string {
+	if f.Spec.Export == nil {
+		return ""
+	}
+	return digest(reservationJSON(f, true))
+}
 func legacyQualificationSpecHash(f *fleet.CelldFleet) string {
 	b := reservationSpecJSON(f)
 	// v0.0.2 serialized this required field immediately before profile. Restore

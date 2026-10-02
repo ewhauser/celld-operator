@@ -127,8 +127,16 @@ func (r *Reconciler) reservationMatches(_ context.Context, f *fleet.CelldFleet, 
 	if equality.Semantic.DeepEqual(want, h.res.Spec) {
 		return true
 	}
-	want.SpecHash = legacyQualificationSpecHash(&baseline)
-	return equality.Semantic.DeepEqual(want, h.res.Spec)
+	for _, legacy := range []string{legacyExportSpecHash(&baseline), legacyQualificationSpecHash(&baseline)} {
+		if legacy == "" {
+			continue
+		}
+		want.SpecHash = legacy
+		if equality.Semantic.DeepEqual(want, h.res.Spec) {
+			return true
+		}
+	}
+	return false
 }
 func replicas(w client.Object) int32 {
 	switch w := w.(type) {
