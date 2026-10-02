@@ -11,8 +11,9 @@ import (
 
 func paused(f *fleet.CelldFleet) bool { return f.Spec.Maintenance != nil && f.Spec.Maintenance.Paused }
 func (r *Reconciler) pauseFleet(ctx context.Context, f *fleet.CelldFleet) (ctrl.Result, error) {
-	// Nothing is in flight outside the workload controller; pausing only stops
-	// new workload changes.
+	// The early replacement cleanup releases our Pod holds without starting a
+	// disk deletion. Pausing here stops new workload changes; an already accepted
+	// Kubernetes deletion cannot be undone.
 	return r.report(ctx, f, nil, "MaintenancePaused", "Workload changes suspended", false)
 }
 func (r *Reconciler) deleteFleet(ctx context.Context, f *fleet.CelldFleet) (ctrl.Result, error) {

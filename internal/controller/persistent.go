@@ -23,7 +23,8 @@ import (
 //
 // The fleet heals itself; no administrator is expected to intervene. A member
 // that cannot come back on its own is replaced, judged from what the cluster
-// reports on each reconcile, and nothing about it is recorded:
+// reports on each reconcile. A selected replacement briefly records its
+// handoff on the victim Pod so interrupted API writes can be resolved safely:
 //
 //   - A member Pod still present well after its termination grace is on a
 //     node that no longer answers. It is force-deleted so the StatefulSet can
@@ -92,6 +93,9 @@ func (r *Reconciler) memberReplacementDelay() time.Duration {
 // settled reports that the StatefulSet already runs the operator's spec and
 // has observed it.
 func (r *Reconciler) healMembers(ctx context.Context, f *fleet.CelldFleet, sts *appsv1.StatefulSet, settled bool) (action, note string, blocked bool, err error) {
+	if handled, err := r.resumeReplacements(ctx, f); handled || err != nil {
+		return "Finishing or aborting an interrupted member replacement", "", false, err
+	}
 	pods, err := r.memberPods(ctx, f, sts)
 	if err != nil {
 		return "", "", false, err
@@ -150,6 +154,9 @@ func (r *Reconciler) healMembers(ctx context.Context, f *fleet.CelldFleet, sts *
 				return fmt.Sprintf("Replacing member %s: deleting its Pod so its old disk can be released", name), "", false, nil
 			}
 		case c != nil && c.Status.Phase == corev1.ClaimLost && fresh(ordinal):
+			if p == nil || !p.DeletionTimestamp.IsZero() {
+				return "", fmt.Sprintf("Waiting for member %s's Pod before replacing its lost disk", name), false, nil
+			}
 			if err := r.replaceMember(ctx, c, p); err != nil {
 				return "", "", false, err
 			}
@@ -338,35 +345,6 @@ func schedulerReason(s *corev1.PodCondition) string {
 // being recreated, or that the scheduler has not tried yet, is undecided.
 func scheduleDecided(p *corev1.Pod) bool {
 	return p != nil && p.DeletionTimestamp.IsZero() && (p.Spec.NodeName != "" || unschedulable(p) != nil)
-}
-
-// replaceMember deletes a member's claim and Pod. The claim is released once
-// its Pod is gone, and the StatefulSet recreates both.
-func (r *Reconciler) replaceMember(ctx context.Context, c *corev1.PersistentVolumeClaim, p *corev1.Pod) error {
-	if p != nil {
-		// Pods and claims are listed separately. Recheck the Pod before making
-		// its claim irreversibly terminating: the StatefulSet may have already
-		// restarted it, or it may have recovered, on the same retained disk.
-		current := &corev1.Pod{}
-		if err := r.Get(ctx, client.ObjectKeyFromObject(p), current); err != nil {
-			return err
-		}
-		if current.UID != p.UID || current.ResourceVersion != p.ResourceVersion {
-			return apierrors.NewConflict(corev1.Resource("pods"), p.Name, fmt.Errorf("member changed before disk replacement"))
-		}
-	}
-	// The phase and identity that justified replacement must still match. A
-	// Lost claim can bind again between observation and deletion without its
-	// UID changing; retry reconciliation rather than destroy that repaired disk.
-	if err := r.Delete(ctx, c, client.Preconditions{UID: new(c.UID), ResourceVersion: new(c.ResourceVersion)}); err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
-	if p != nil && p.DeletionTimestamp.IsZero() {
-		if err := r.Delete(ctx, p, client.Preconditions{UID: new(p.UID), ResourceVersion: new(p.ResourceVersion)}); err != nil && !apierrors.IsNotFound(err) {
-			return err
-		}
-	}
-	return nil
 }
 
 func waitingOnConfig(p *corev1.Pod) bool {

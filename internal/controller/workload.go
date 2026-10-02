@@ -27,8 +27,9 @@ import (
 // (ADR 0023, ADR 0024). The operator renders the desired objects, applies
 // them, steps contraction one member at a time, grows a PersistentFleet one
 // run of kept or fresh disks at a time, and replaces a StatefulSet member that
-// cannot come back on its own (persistent.go). It persists nothing but
-// capacity-policy state, once a fleet sets spec.capacity.
+// cannot come back on its own (persistent.go). The reservation stores only
+// capacity-policy state, once a fleet sets spec.capacity. A selected disk
+// replacement keeps a bounded handoff record and finalizer on its victim Pod.
 //
 // Bucket fleets run CELLD_DURABILITY=bucket: their disks are caches.
 // PersistentFleet runs CELLD_DURABILITY=fleet on a StatefulSet whose members

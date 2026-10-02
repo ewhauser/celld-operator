@@ -114,6 +114,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (ctrl.Result, error) {
 	f.Default()
+	if handled, err := r.resumeReplacements(ctx, f); handled || err != nil {
+		return ctrl.Result{RequeueAfter: time.Second}, err
+	}
 	if !f.DeletionTimestamp.IsZero() {
 		return r.deleteFleet(ctx, f)
 	}

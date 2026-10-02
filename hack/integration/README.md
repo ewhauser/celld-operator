@@ -17,6 +17,7 @@ make integration-lifecycle
 make integration-maintenance
 make integration-faults
 make integration-partitions
+make integration-replacement
 make integration-external
 make integration-upgrade
 ```
@@ -64,8 +65,7 @@ Bucket fleet (`alpha`) and a PersistentFleet (`beta`), and checks:
 - storage-scope conflicts and refusal of a foreign PVC;
 - that admission rejects invalid specs;
 - that Pods run celld directly, with no launcher and no scheduling gate;
-- that `/state.node_log` reports fleet durability, which shows the runtime got
-  the operator's configuration;
+- that `/state.shutdown` reports the expected schema and runtime generation;
 - that template drift is converged. The StatefulSet may start rolling the
   drifted template first; at most one member rolls, and every disk is kept.
 
@@ -136,6 +136,33 @@ readable. A replaced disk comes back with a fresh identity, and every other disk
 is kept. A forced Bucket Pod delete loses nothing. The continuous writer and the
 probe Pods that read writes back run on the operator's node, which no fault
 disturbs.
+
+**replacement** runs the lost-volume fault alone, after the common isolation
+checks and growth to three members. It also runs as part of **faults**. The
+selected Pod first receives an operator finalizer that holds its name; deletion
+of that exact Pod commits with UID and resourceVersion preconditions. Only an
+acknowledged Pod delete permits deletion of the recorded original PVC
+UID/resourceVersion. The hold is released as soon as claim deletion is durably
+accepted, so normal PVC protection can finish after the old Pod exits. The
+scenario requires a fresh Pod/PVC/PV/CSI identity for that member, retained
+identities for the other disks, no leaked replacement record, private index label
+or finalizer, and every acknowledged write readable.
+
+The handoff record includes its original fleet UID. A private
+`celld.eric.dev/replacement-fleet` label lets cleanup find its holds even if an
+ordinary fleet label or owner reference changes; that drift aborts disk deletion
+and releases the hold. Cleanup removes the record, private label and finalizer
+together.
+
+Typed Pod/PVC watches start before the fault and print the observed API
+transitions. A Pod read immediately after the old claim's deletion timestamp can
+show the original Pod still held after that deletion was accepted. The hold can
+be released before this read arrives; the trace reports that limit explicitly,
+without inferring order from cross-resource resourceVersions. A prepared handoff
+interrupted before commitment keeps the disk; a committed handoff can resume
+after a manager restart. Fake and real API replay regressions target every write
+boundary. The live manager kills occur during rollout, contraction and network
+partitions, rather than at a deterministic disk-replacement boundary.
 
 **partitions** also runs as part of **faults**. It tests three separate failures
 under continuous write load: the operator cannot read one healthy member's
