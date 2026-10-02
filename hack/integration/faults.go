@@ -15,8 +15,7 @@ import (
 // after each one the fleet must settle with every acknowledged write readable.
 // No step is repaired by hand.
 func (h *harness) exerciseFaults() {
-	h.scale("beta", 3)
-	h.writeLedger("beta")
+	h.exercisePartitions()
 
 	h.fault("graceful Pod delete", func() {
 		h.k("-n", "fleets", "delete", "pod", "beta-1", "--wait=false")

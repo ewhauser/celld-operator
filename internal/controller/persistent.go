@@ -144,7 +144,7 @@ func (r *Reconciler) healMembers(ctx context.Context, f *fleet.CelldFleet, sts *
 			// A replacement in progress: a scheduled Pod holds the claim until
 			// it is gone. An unscheduled one does not.
 			if p != nil && p.DeletionTimestamp.IsZero() && p.Spec.NodeName != "" && fresh(ordinal) {
-				if err := r.Delete(ctx, p, client.Preconditions{UID: new(p.UID)}); err != nil && !apierrors.IsNotFound(err) {
+				if err := r.Delete(ctx, p, client.Preconditions{UID: new(p.UID), ResourceVersion: new(p.ResourceVersion)}); err != nil && !apierrors.IsNotFound(err) {
 					return "", "", false, err
 				}
 				return fmt.Sprintf("Replacing member %s: deleting its Pod so its old disk can be released", name), "", false, nil
@@ -343,11 +343,26 @@ func scheduleDecided(p *corev1.Pod) bool {
 // replaceMember deletes a member's claim and Pod. The claim is released once
 // its Pod is gone, and the StatefulSet recreates both.
 func (r *Reconciler) replaceMember(ctx context.Context, c *corev1.PersistentVolumeClaim, p *corev1.Pod) error {
-	if err := r.Delete(ctx, c, client.Preconditions{UID: new(c.UID)}); err != nil && !apierrors.IsNotFound(err) {
+	if p != nil {
+		// Pods and claims are listed separately. Recheck the Pod before making
+		// its claim irreversibly terminating: the StatefulSet may have already
+		// restarted it, or it may have recovered, on the same retained disk.
+		current := &corev1.Pod{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(p), current); err != nil {
+			return err
+		}
+		if current.UID != p.UID || current.ResourceVersion != p.ResourceVersion {
+			return apierrors.NewConflict(corev1.Resource("pods"), p.Name, fmt.Errorf("member changed before disk replacement"))
+		}
+	}
+	// The phase and identity that justified replacement must still match. A
+	// Lost claim can bind again between observation and deletion without its
+	// UID changing; retry reconciliation rather than destroy that repaired disk.
+	if err := r.Delete(ctx, c, client.Preconditions{UID: new(c.UID), ResourceVersion: new(c.ResourceVersion)}); err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
 	if p != nil && p.DeletionTimestamp.IsZero() {
-		if err := r.Delete(ctx, p, client.Preconditions{UID: new(p.UID)}); err != nil && !apierrors.IsNotFound(err) {
+		if err := r.Delete(ctx, p, client.Preconditions{UID: new(p.UID), ResourceVersion: new(p.ResourceVersion)}); err != nil && !apierrors.IsNotFound(err) {
 			return err
 		}
 	}
@@ -355,9 +370,10 @@ func (r *Reconciler) replaceMember(ctx context.Context, c *corev1.PersistentVolu
 }
 
 func waitingOnConfig(p *corev1.Pod) bool {
-	return slices.ContainsFunc(p.Status.ContainerStatuses, func(s corev1.ContainerStatus) bool {
+	waiting := func(s corev1.ContainerStatus) bool {
 		return s.State.Waiting != nil && slices.Contains(configWaits, s.State.Waiting.Reason)
-	})
+	}
+	return slices.ContainsFunc(p.Status.ContainerStatuses, waiting) || slices.ContainsFunc(p.Status.InitContainerStatuses, waiting)
 }
 
 // readySince reports when a ready Pod last became ready.
@@ -421,7 +437,7 @@ func (r *Reconciler) deleteClaims(ctx context.Context, f *fleet.CelldFleet) (boo
 	for i := range claims.Items {
 		c := &claims.Items[i]
 		if c.DeletionTimestamp.IsZero() {
-			if err := r.Delete(ctx, c, client.Preconditions{UID: new(c.UID)}); err != nil && !apierrors.IsNotFound(err) {
+			if err := r.Delete(ctx, c, client.Preconditions{UID: new(c.UID), ResourceVersion: new(c.ResourceVersion)}); err != nil && !apierrors.IsNotFound(err) {
 				return false, err
 			}
 		}

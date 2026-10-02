@@ -239,9 +239,22 @@ func (h *harness) waitWatching(description string, timeout time.Duration, d *dis
 // killOperator force-deletes the running manager Pod, the way a node loss
 // or OOM kill removes it, and waits for its replacement.
 func (h *harness) killOperator() {
-	for _, pod := range items(decode(h.k("-n", operatorNS, "get", "pods", "-l", "app.kubernetes.io/name=celld-operator,pod-template-hash", "-o", "json"))) {
+	const selector = "app.kubernetes.io/name=celld-operator,pod-template-hash"
+	pods := items(decode(h.k("-n", operatorNS, "get", "pods", "-l", selector, "-o", "json")))
+	assert(len(pods) > 0, "manager restart has no target Pod")
+	previous := map[string]bool{}
+	for _, pod := range pods {
+		previous[uidOf(pod)] = true
 		h.k("-n", operatorNS, "delete", "pod", nameOf(pod), "--grace-period=0", "--force", "--wait=false")
 	}
+	h.wait("replacement manager has a new Ready Pod UID", func() bool {
+		for _, pod := range items(decode(h.k("-n", operatorNS, "get", "pods", "-l", selector, "-o", "json"))) {
+			if uidOf(pod) != "" && !previous[uidOf(pod)] && podReady(pod) {
+				return true
+			}
+		}
+		return false
+	})
 	h.k("-n", operatorNS, "rollout", "status", "deployment/celld-operator", "--timeout=180s")
 	fmt.Println("Killed the manager Pod; its replacement is running")
 }

@@ -16,6 +16,7 @@ make integration
 make integration-lifecycle
 make integration-maintenance
 make integration-faults
+make integration-partitions
 make integration-external
 make integration-upgrade
 ```
@@ -136,6 +137,22 @@ is kept. A forced Bucket Pod delete loses nothing. The continuous writer and the
 probe Pods that read writes back run on the operator's node, which no fault
 disturbs.
 
+**partitions** also runs as part of **faults**. It tests three separate failures
+under continuous write load: the operator cannot read one healthy member's
+private API; one member loses peer RPC in both directions; and the entire fleet
+loses S3 access while the manager is killed and restarted. Calico Deny policies
+apply only to the selected fleet/port in the disposable cluster. Probes prove
+connectivity before the fault, denial during it, and connectivity after removal.
+An exec/API failure does not count as proof of a partition. Each partition lasts
+at least 30 seconds after denial is established, across multiple reconciles and
+the runtime's ten-second lease TTL. Every retained disk must keep its PVC/PV/CSI
+identity; every acknowledged write must read back after recovery. The observation
+and S3 faults also require member Pod identities to remain unchanged.
+The observation fault enables Shadow capacity collection, proves three healthy
+samples first, restarts the manager under the deny to close existing keep-alive
+connections, requires two useful/covered samples with `PendingCapacity`, and
+requires full coverage again after restoring connectivity.
+
 **external** uses a real HPA and Metrics Server to write the Bucket fleet's
 `/scale` subresource. It checks that External mode never fights the HPA, that
 a lowered maximum contracts the fleet one member at a time with the ledger
@@ -176,6 +193,12 @@ Pod, and no scenario replaces the store. The suites do not qualify:
 - Istio, IRSA or Datadog admission;
 - AWS EBS deletion, EC2 node loss, prolonged S3 partitions or managed service
   behavior.
+
+The partition scenarios exercise temporary loss of connectivity, not deletion
+of MinIO data or loss of every replicated disk. Calico policy enforcement can
+leave established TCP connections alive; denial is proved with new connections.
+The suite therefore qualifies recovery from blocked new connections rather than
+proving that every packet on every pre-existing stream was dropped.
 
 For the single-node operator-backed preview CLI suite, including multi-object
 state cloning, see [local preview integration](../../docs/preview-integration.md)

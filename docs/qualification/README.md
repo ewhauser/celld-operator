@@ -11,6 +11,7 @@ and journal executor remain available in Git history.
 | --- | --- | --- |
 | `make check` | Typed wire decoding, exact identities, immutable failures, rendered workloads, rollout and contraction steps, self-healing actions and the cases they leave alone, adoption of earlier fleet state and unit/fake-client regressions; race detector and lint. | Simulated runtime and Kubernetes effects. |
 | `make test-envtest` | Real API admission, reservation/workload compare-and-swap and exact cleanup preconditions. | No workload controllers or CSI driver. |
+| `make test-reliability` | Repeated API-boundary faults, committed writes with lost responses, restart/replay, HTTP outages and stale-observation safety. | Deterministic fake-client and transport effects; real API races remain in envtest. |
 | `make test-linux` | The controller tests on Linux, inside a container of the pinned runtime image. | A test container is not runtime-image qualification. |
 | Disposable Kind integration | Real workload controllers, networking, hostpath CSI and acknowledged application writes against an explicitly supplied fork artifact. | Local storage and simulated zones are not EKS/EBS. |
 | AWS/EBS deployment | User reports v0.0.2 deployed with PersistentFleet and EBS volumes successfully. | The deployment has no archived failure or deletion test receipt here. |
@@ -35,21 +36,24 @@ with `--member-replacement-delay=5m`. For PersistentFleet the suites exercise:
 - scale-in that keeps the removed member's disk, and growth that reattaches it;
 - fleet deletion that removes compute, then disks, and keeps the bucket
   reservation.
+- operator observation, peer RPC and S3 partitions, including manager restart
+  during S3 loss, with every disk kept and every acknowledged write checked.
 
-This page does not yet record a run of these suites against the current
-lifecycle. Hostpath CSI has no attach operation; use the AWS deployment's CSI
-events and EBS records to verify detach and deletion.
+The [reliability report](reliability/README.md) records the local fault matrix,
+reproduced regressions and partition evidence. It does not stand in for the full
+lifecycle/maintenance/upgrade matrix. Hostpath CSI has no attach operation; use
+the AWS deployment's CSI events and EBS records to verify detach and deletion.
 
 Run the disposable suite with an actual published fork image digest:
 
 ```sh
-CELLD_RUNTIME_IMAGE=ghcr.io/ewhauser/celld@sha256:3e6c45392310add318952e45427db3316251a912ea7fd8d2fbff438fd2cc9f7f \
+CELLD_RUNTIME_IMAGE="$(cat hack/runtime-image.txt)" \
 go run ./hack/integration --suite all
 ```
 
-The command pins the published `0.6.0-ewhauser.1` fork artifact, the same digest as
-`hack/runtime-image.txt`, which `make integration` uses. Individual suites are
-`lifecycle`, `maintenance`, `faults`, `external` and `upgrade`. `all` omits
+The command pins the published fork artifact in `hack/runtime-image.txt`, which
+`make integration` uses. Individual suites are `lifecycle`, `maintenance`,
+`faults`, `partitions`, `external` and `upgrade`. `all` omits
 `upgrade`, which installs the released v0.0.5 operator, lets its launcher
 retire a member's disk, upgrades the operator and requires the member to
 rejoin on that disk with every write readable. The maintenance suite

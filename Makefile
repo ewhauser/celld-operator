@@ -49,6 +49,14 @@ build:
 test:
 	go test $(RACE) $(GO_PACKAGES)
 
+# Deterministic fault sweeps also run once in normal `test`. Repeat them with
+# a recorded ordering seed to catch state leaking between outage/recovery runs.
+RELIABILITY_RUNS ?= 5
+RELIABILITY_SEED ?= 1
+.PHONY: test-reliability
+test-reliability:
+	go test $(RACE) ./internal/controller ./hack/integration -run 'Test(Reliability|ObservationReliability|PartitionProof)' -shuffle=$(RELIABILITY_SEED) -count=$(RELIABILITY_RUNS)
+
 # envtest runs the reconciler against a real kube-apiserver and etcd (no kubelet).
 # The suite skips when KUBEBUILDER_ASSETS is unset, so plain `make test` stays hermetic.
 ENVTEST_K8S_VERSION ?= 1.37.0
@@ -98,7 +106,7 @@ manifests-check:
 	python3 hack/check-generated.py
 
 # Actual Kind workloads, strict fork runtime and hostpath CSI RWOP/Delete storage.
-.PHONY: integration-store-images integration integration-lifecycle integration-maintenance integration-faults integration-external integration-upgrade
+.PHONY: integration-store-images integration integration-lifecycle integration-maintenance integration-faults integration-partitions integration-external integration-upgrade
 integration-store-images:
 	bash hack/build-integration-store.sh
 integration: integration-store-images
@@ -109,6 +117,8 @@ integration-maintenance: integration-store-images
 	go run ./hack/integration --suite maintenance
 integration-faults: integration-store-images
 	go run ./hack/integration --suite faults
+integration-partitions: integration-store-images
+	go run ./hack/integration --suite partitions
 integration-external: integration-store-images
 	go run ./hack/integration --suite external
 integration-upgrade: integration-store-images

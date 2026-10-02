@@ -14,8 +14,10 @@ make test-linux  # Controller tests cross-compiled and run on Linux (Docker)
 make lint-linux  # golangci-lint analyzing GOOS=linux (catches Linux-only files)
 make build       # Build packages and bin/celld-operator
 make test        # go test -race ./...
+make test-reliability # Repeat API/HTTP fault sweeps and recovery races five times
 make test-envtest # Reconciler tests against a real kube-apiserver/etcd (envtest)
 make integration-faults # Disposable Kind: faults against an explicitly supplied compatible fork image
+make integration-partitions # Disposable Kind: observation, peer RPC and S3 partitions
 make vet         # Standalone go vet
 make fmt         # Apply goimports through the pinned lint tool
 make lint        # Full lint suite
@@ -47,6 +49,18 @@ Docker Desktop must share the repository path; the default `/Users` share works,
 admission and defaulting, real resourceVersion conflicts on the reservation and
 workload CAS, and optimistic-lock merge patches. They skip silently when
 `KUBEBUILDER_ASSETS` is unset, so `make test` needs no network.
+
+The reliability sweeps fail every API call in provisioning, drift repair,
+capacity-state persistence and deletion. They cover rejected requests and writes
+that commit before their responses are lost, then restart the reconciler and
+require bounded recovery. HTTP fault cases require complete, fresh observations
+before scaling and restart stabilization after an outage. These cases run in
+normal `make test`; `make test-reliability` repeats them with the race detector
+and a recorded shuffle seed. Use `RELIABILITY_RUNS=10 RELIABILITY_SEED=123` to
+change the repetition and ordering. Real API ownership/identity races and
+committed-write replay cases run in `make test-envtest`. See
+[reliability qualification](docs/qualification/reliability/README.md) for the
+fault matrix, reproduced bugs and the boundary of the evidence.
 
 The optional pre-commit hook runs `make lint-new`:
 
