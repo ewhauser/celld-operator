@@ -262,10 +262,8 @@ func (r *Reconciler) contraction(ctx context.Context, f *fleet.CelldFleet, desir
 		victims = []string{id}
 	}
 	observation := r.Collector.Collect(ctx, policy)
-	for _, victim := range victims {
-		if err := ValidateSurvivors(*policy.Spec.Capacity, observation, ids, victim, r.capacityNow()); err != nil {
-			return "CapacityUncertain", err
-		}
+	if err := validateDonors(*policy.Spec.Capacity, observation, ids, victims, r.capacityNow()); err != nil {
+		return "CapacityUncertain", err
 	}
 	return "", nil
 }
@@ -353,7 +351,7 @@ func (r *Reconciler) converge(ctx context.Context, desired, actual client.Object
 // reservation stays permanent and prerequisites are retained, as for every
 // fleet.
 func (r *Reconciler) deleteWorkload(ctx context.Context, f *fleet.CelldFleet) (ctrl.Result, error) {
-	w := emptyObject(workload(f, r.Options))
+	w := emptyWorkload(f)
 	err := r.Get(ctx, client.ObjectKeyFromObject(f), w)
 	if err == nil {
 		if w.GetLabels()[FleetLabel] != string(f.UID) || len(w.GetOwnerReferences()) != 0 {
@@ -389,8 +387,11 @@ func (r *Reconciler) currentPods(ctx context.Context, f *fleet.CelldFleet, workl
 	if list.Continue != "" || len(list.Items) > 100 {
 		return nil, errors.New("pod working set exceeds fleet limit")
 	}
-	for _, p := range list.Items {
-		owner := metav1.GetControllerOf(&p)
+	// Pods in a Deployment usually share one ReplicaSet. Keep the authority
+	// read within this call, but validate every Pod's UID against that snapshot.
+	sets := make(map[string]*appsv1.ReplicaSet)
+	for i := range list.Items {
+		owner := metav1.GetControllerOf(&list.Items[i])
 		if owner == nil || owner.APIVersion != "apps/v1" {
 			return nil, errors.New("pod owner missing")
 		}
@@ -400,9 +401,13 @@ func (r *Reconciler) currentPods(ctx context.Context, f *fleet.CelldFleet, workl
 				return nil, errors.New("pod workload identity changed")
 			}
 		case owner.Kind == "ReplicaSet" && f.Spec.Profile == "Bucket" && !orderedBucket(f):
-			rs := &appsv1.ReplicaSet{}
-			if err := r.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: owner.Name}, rs); err != nil {
-				return nil, err
+			rs := sets[owner.Name]
+			if rs == nil {
+				rs = &appsv1.ReplicaSet{}
+				if err := r.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: owner.Name}, rs); err != nil {
+					return nil, err
+				}
+				sets[owner.Name] = rs
 			}
 			parent := metav1.GetControllerOf(rs)
 			if rs.UID != owner.UID || parent == nil || parent.UID != workloadUID || parent.Name != f.Name || parent.Kind != "Deployment" || !rs.DeletionTimestamp.IsZero() {
@@ -413,4 +418,14 @@ func (r *Reconciler) currentPods(ctx context.Context, f *fleet.CelldFleet, workl
 		}
 	}
 	return list.Items, nil
+}
+
+// emptyWorkload chooses the API read type without rendering and discarding a
+// Pod template, policies, quantities and claim templates. Get receives an
+// empty object so absent fields on the wire cannot retain desired values.
+func emptyWorkload(f *fleet.CelldFleet) client.Object {
+	if f.Spec.Profile == "Bucket" && !orderedBucket(f) {
+		return &appsv1.Deployment{}
+	}
+	return &appsv1.StatefulSet{}
 }

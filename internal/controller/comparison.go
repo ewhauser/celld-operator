@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"slices"
+
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -18,38 +20,36 @@ func matches(want, got client.Object) bool {
 	if got.GetLabels()[FleetLabel] != want.GetLabels()[FleetLabel] || len(got.GetOwnerReferences()) != 0 || !got.GetDeletionTimestamp().IsZero() {
 		return false
 	}
-	want = want.DeepCopyObject().(client.Object)
-	got = got.DeepCopyObject().(client.Object)
 	switch w := want.(type) {
 	case *appsv1.Deployment:
-		g := got.(*appsv1.Deployment)
-		for _, o := range []*appsv1.Deployment{w, g} {
-			if o.Spec.RevisionHistoryLimit == nil {
-				o.Spec.RevisionHistoryLimit = new(int32(10))
+		desired, actual := w.Spec.DeepCopy(), got.(*appsv1.Deployment).Spec.DeepCopy()
+		for _, o := range []*appsv1.DeploymentSpec{desired, actual} {
+			if o.RevisionHistoryLimit == nil {
+				o.RevisionHistoryLimit = new(int32(10))
 			}
-			if o.Spec.ProgressDeadlineSeconds == nil {
-				o.Spec.ProgressDeadlineSeconds = new(int32(600))
+			if o.ProgressDeadlineSeconds == nil {
+				o.ProgressDeadlineSeconds = new(int32(600))
 			}
-			normalizePod(&o.Spec.Template.Spec)
+			normalizePod(&o.Template.Spec)
 		}
-		return equality.Semantic.DeepEqual(w.Spec, g.Spec)
+		return equality.Semantic.DeepEqual(*desired, *actual)
 	case *appsv1.StatefulSet:
-		g := got.(*appsv1.StatefulSet)
-		for _, o := range []*appsv1.StatefulSet{w, g} {
-			if o.Spec.RevisionHistoryLimit == nil {
-				o.Spec.RevisionHistoryLimit = new(int32(10))
+		desired, actual := w.Spec.DeepCopy(), got.(*appsv1.StatefulSet).Spec.DeepCopy()
+		for _, o := range []*appsv1.StatefulSetSpec{desired, actual} {
+			if o.RevisionHistoryLimit == nil {
+				o.RevisionHistoryLimit = new(int32(10))
 			}
-			if o.Spec.Ordinals != nil && o.Spec.Ordinals.Start == 0 {
-				o.Spec.Ordinals = nil
+			if o.Ordinals != nil && o.Ordinals.Start == 0 {
+				o.Ordinals = nil
 			}
 			// MaxUnavailableStatefulSet clusters default the rolling bound to one,
 			// which is also the behavior without that feature gate.
-			if u := o.Spec.UpdateStrategy.RollingUpdate; u != nil && u.MaxUnavailable != nil && *u.MaxUnavailable == intstr.FromInt32(1) {
+			if u := o.UpdateStrategy.RollingUpdate; u != nil && u.MaxUnavailable != nil && *u.MaxUnavailable == intstr.FromInt32(1) {
 				u.MaxUnavailable = nil
 			}
-			normalizePod(&o.Spec.Template.Spec)
-			for i := range o.Spec.VolumeClaimTemplates {
-				claim := &o.Spec.VolumeClaimTemplates[i]
+			normalizePod(&o.Template.Spec)
+			for i := range o.VolumeClaimTemplates {
+				claim := &o.VolumeClaimTemplates[i]
 				if claim.Kind == "" {
 					claim.Kind = "PersistentVolumeClaim"
 				}
@@ -64,7 +64,7 @@ func matches(want, got client.Object) bool {
 				}
 			}
 		}
-		return equality.Semantic.DeepEqual(w.Spec, g.Spec)
+		return equality.Semantic.DeepEqual(*desired, *actual)
 	case *corev1.Service:
 		g := got.(*corev1.Service)
 		// Allocation is expected for ClusterIP Services, but conversion to/from
@@ -72,30 +72,33 @@ func matches(want, got client.Object) bool {
 		if (w.Spec.ClusterIP == corev1.ClusterIPNone) != (g.Spec.ClusterIP == corev1.ClusterIPNone) {
 			return false
 		}
-		for _, o := range []*corev1.Service{w, g} {
-			o.Spec.ClusterIP = ""
-			o.Spec.ClusterIPs = nil
-			o.Spec.IPFamilies = nil
-			if o.Spec.IPFamilyPolicy == nil {
-				o.Spec.IPFamilyPolicy = new(corev1.IPFamilyPolicySingleStack)
+		// Only port values are mutated below; other nested spec fields are read-only.
+		desired, actual := w.Spec, g.Spec
+		desired.Ports, actual.Ports = slices.Clone(desired.Ports), slices.Clone(actual.Ports)
+		for _, o := range []*corev1.ServiceSpec{&desired, &actual} {
+			o.ClusterIP = ""
+			o.ClusterIPs = nil
+			o.IPFamilies = nil
+			if o.IPFamilyPolicy == nil {
+				o.IPFamilyPolicy = new(corev1.IPFamilyPolicySingleStack)
 			}
-			if o.Spec.InternalTrafficPolicy == nil {
-				o.Spec.InternalTrafficPolicy = new(corev1.ServiceInternalTrafficPolicyCluster)
+			if o.InternalTrafficPolicy == nil {
+				o.InternalTrafficPolicy = new(corev1.ServiceInternalTrafficPolicyCluster)
 			}
-			if o.Spec.SessionAffinity == "" {
-				o.Spec.SessionAffinity = corev1.ServiceAffinityNone
+			if o.SessionAffinity == "" {
+				o.SessionAffinity = corev1.ServiceAffinityNone
 			}
-			for i := range o.Spec.Ports {
-				if o.Spec.Ports[i].Protocol == "" {
-					o.Spec.Ports[i].Protocol = corev1.ProtocolTCP
+			for i := range o.Ports {
+				if o.Ports[i].Protocol == "" {
+					o.Ports[i].Protocol = corev1.ProtocolTCP
 				}
 			}
 		}
-		return equality.Semantic.DeepEqual(w.Spec, g.Spec)
+		return equality.Semantic.DeepEqual(desired, actual)
 	case *networkingv1.NetworkPolicy:
-		return equality.Semantic.DeepEqual(w.Spec, got.(*networkingv1.NetworkPolicy).Spec)
+		return equality.Semantic.DeepEqual(&w.Spec, &got.(*networkingv1.NetworkPolicy).Spec)
 	case *policyv1.PodDisruptionBudget:
-		return equality.Semantic.DeepEqual(w.Spec, got.(*policyv1.PodDisruptionBudget).Spec)
+		return equality.Semantic.DeepEqual(&w.Spec, &got.(*policyv1.PodDisruptionBudget).Spec)
 	default:
 		return false
 	}

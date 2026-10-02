@@ -141,7 +141,6 @@ func (r *Reconciler) applyRouting(ctx context.Context, f *fleet.CelldFleet, desi
 	if !actual.GetDeletionTimestamp().IsZero() {
 		return nil, fmt.Errorf("%s %s is still deleting", actual.GetKind(), actual.GetName())
 	}
-	before := actual.DeepCopy()
 	var oldKeys []string
 	merged := actual.GetAnnotations()
 	if merged == nil {
@@ -156,11 +155,11 @@ func (r *Reconciler) applyRouting(ctx context.Context, f *fleet.CelldFleet, desi
 		delete(merged, k)
 	}
 	maps.Copy(merged, annotations)
-	actual.SetAnnotations(merged)
-	actual.Object["spec"] = desired.Object["spec"]
-	if equality.Semantic.DeepEqual(before.Object, actual.Object) {
+	if equality.Semantic.DeepEqual(actual.Object["spec"], desired.Object["spec"]) && maps.Equal(actual.GetAnnotations(), merged) {
 		return actual, nil
 	}
+	actual.SetAnnotations(merged)
+	actual.Object["spec"] = desired.Object["spec"]
 	// ResourceVersion fences concurrent edits, including an ownership change.
 	return actual, r.Update(ctx, actual)
 }
@@ -289,7 +288,8 @@ func routingFailure(err error) (metav1.ConditionStatus, string, string) {
 
 func routingReadiness(f *fleet.CelldFleet, route *unstructured.Unstructured) (metav1.ConditionStatus, string, string) {
 	if route.GroupVersionKind() == ingressGVK {
-		addresses, _, _ := unstructured.NestedSlice(route.Object, "status", "loadBalancer", "ingress")
+		value, _, _ := unstructured.NestedFieldNoCopy(route.Object, "status", "loadBalancer", "ingress")
+		addresses, _ := value.([]any)
 		for _, item := range addresses {
 			address, _ := item.(map[string]any)
 			ip, _, _ := unstructured.NestedString(address, "ip")
@@ -300,27 +300,18 @@ func routingReadiness(f *fleet.CelldFleet, route *unstructured.Unstructured) (me
 		}
 		return metav1.ConditionUnknown, "AwaitingAddress", "Ingress is configured; its controller has not reported an address"
 	}
-	parents, _, _ := unstructured.NestedSlice(route.Object, "status", "parents")
+	value, _, _ := unstructured.NestedFieldNoCopy(route.Object, "status", "parents")
+	parents, _ := value.([]any)
 	wanted := routeParent(f)
 	for _, item := range parents {
 		parent, _ := item.(map[string]any)
-		ref, _, _ := unstructured.NestedMap(parent, "parentRef")
-		if ref == nil {
+		value, _, _ := unstructured.NestedFieldNoCopy(parent, "parentRef")
+		ref, _ := value.(map[string]any)
+		if !routingParentMatches(wanted, ref, f.Namespace) {
 			continue
 		}
-		if _, ok := ref["namespace"]; !ok {
-			ref["namespace"] = f.Namespace
-		}
-		if _, ok := ref["group"]; !ok {
-			ref["group"] = routeGVK.Group
-		}
-		if _, ok := ref["kind"]; !ok {
-			ref["kind"] = "Gateway"
-		}
-		if !equality.Semantic.DeepEqual(wanted, ref) {
-			continue
-		}
-		conditions, _, _ := unstructured.NestedSlice(parent, "conditions")
+		value, _, _ = unstructured.NestedFieldNoCopy(parent, "conditions")
+		conditions, _ := value.([]any)
 		accepted, resolved := false, false
 		for _, item := range conditions {
 			c, _ := item.(map[string]any)
@@ -348,6 +339,33 @@ func routingReadiness(f *fleet.CelldFleet, route *unstructured.Unstructured) (me
 		}
 	}
 	return metav1.ConditionUnknown, "AwaitingAcceptance", "Waiting for current-generation Gateway acceptance and resolved references"
+}
+
+// Compare the string-valued parent identity without copying or mutating status.
+// Missing API defaults are applied during comparison; unexpected fields still
+// prevent a match, just as comparison of the normalized maps did.
+func routingParentMatches(wanted, actual map[string]any, namespace string) bool {
+	defaulted := 0
+	for key, expected := range wanted {
+		value, present := actual[key]
+		if !present {
+			switch key {
+			case "namespace":
+				value = namespace
+			case "group":
+				value = routeGVK.Group
+			case "kind":
+				value = "Gateway"
+			default:
+				return false
+			}
+			defaulted++
+		}
+		if text, ok := value.(string); !ok || text != expected {
+			return false
+		}
+	}
+	return len(actual)+defaulted == len(wanted)
 }
 
 func (r *Reconciler) reportRouting(ctx context.Context, key client.ObjectKey) error {

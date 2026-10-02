@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"slices"
 	"sync"
 	"time"
@@ -32,7 +34,28 @@ type Collector struct {
 	now     func() time.Time
 }
 
+const maxMetricsResponse = 1 << 20
+
+type metricsResponseTransport struct{ http.RoundTripper }
+
+func (t metricsResponseTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	response, err := t.RoundTripper.RoundTrip(req)
+	if err == nil && response.Body != nil {
+		// client-go also buffers error responses internally before Stream returns.
+		// Apply the budget below its decoder, while keeping Close on the real body.
+		response.Body = struct {
+			io.Reader
+			io.Closer
+		}{io.LimitReader(response.Body, maxMetricsResponse+1), response.Body}
+	}
+	return response, err
+}
+
 func NewCollector(c client.Client, config *rest.Config) (*Collector, error) {
+	config = rest.CopyConfig(config)
+	config.Wrap(func(transport http.RoundTripper) http.RoundTripper {
+		return metricsResponseTransport{transport}
+	})
 	k, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, err
@@ -115,9 +138,19 @@ func (c *Collector) sample(ctx context.Context, f *fleet.CelldFleet, p *corev1.P
 	}
 	metricsCtx, cancelMetrics := context.WithTimeout(ctx, 2*time.Second)
 	defer cancelMetrics()
-	data, err := c.metrics.Get().AbsPath("/apis/metrics.k8s.io/v1beta1/namespaces/" + p.Namespace + "/pods/" + p.Name).Do(metricsCtx).Raw()
+	// Bound the body while reading it. Raw would allocate the entire metrics
+	// response before the size check, including a malformed oversized response.
+	body, err := c.metrics.Get().AbsPath("/apis/metrics.k8s.io/v1beta1/namespaces/" + p.Namespace + "/pods/" + p.Name).Stream(metricsCtx)
+	var data []byte
+	if err == nil {
+		data, err = io.ReadAll(io.LimitReader(body, maxMetricsResponse+1))
+		closeErr := body.Close()
+		if err == nil {
+			err = closeErr
+		}
+	}
 	received := c.now()
-	if err == nil && len(data) <= 1024*1024 {
+	if err == nil && len(data) <= maxMetricsResponse {
 		type usage struct {
 			Name  string              `json:"name"`
 			Usage corev1.ResourceList `json:"usage"`

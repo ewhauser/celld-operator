@@ -178,7 +178,7 @@ func (r *Reconciler) meshMixed(ctx context.Context, f *fleet.CelldFleet) (bool, 
 		// whose administrator independently configured namespace injection.
 		return false, nil
 	}
-	w := emptyObject(workload(f, r.Options))
+	w := emptyWorkload(f)
 	err := r.Get(ctx, client.ObjectKeyFromObject(f), w)
 	if err != nil && !apierrors.IsNotFound(err) {
 		return false, err

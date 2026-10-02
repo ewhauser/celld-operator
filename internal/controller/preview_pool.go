@@ -39,14 +39,22 @@ func reservePreviewPool(ctx context.Context, c client.Client, p *fleet.CelldFlee
 	if p.Spec.Previews.Storage.Endpoint != nil {
 		want.Endpoint = p.Spec.Previews.Storage.Endpoint.URL
 	}
-	res := &fleet.CelldStorageReservation{Name: bucketReservationName(want.Bucket), Spec: want}
-	if err := c.Create(ctx, res); err != nil {
-		if !apierrors.IsAlreadyExists(err) {
-			return err
+	res := &fleet.CelldStorageReservation{Name: bucketReservationName(want.Bucket)}
+	key := client.ObjectKeyFromObject(res)
+	if err := c.Get(ctx, key, res); apierrors.IsNotFound(err) {
+		res.Spec = want
+		if err := c.Create(ctx, res); err != nil {
+			if !apierrors.IsAlreadyExists(err) {
+				return err
+			}
+			// Creation remains the atomic claim when two callers observed absence.
+			res = &fleet.CelldStorageReservation{}
+			if err := c.Get(ctx, key, res); err != nil {
+				return err
+			}
 		}
-		if err := c.Get(ctx, client.ObjectKeyFromObject(res), res); err != nil {
-			return err
-		}
+	} else if err != nil {
+		return err
 	}
 	if !equality.Semantic.DeepEqual(want, res.Spec) || len(res.OwnerReferences) != 0 || !res.DeletionTimestamp.IsZero() {
 		return fmt.Errorf("bucket is already reserved to another pool or dedicated fleet identity")

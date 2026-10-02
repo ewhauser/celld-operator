@@ -155,19 +155,29 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 	if err := verifySharedStorage(ctx, r.Client, f); err != nil {
 		return r.report(ctx, f, nil, "StorageScopeConflict", err.Error(), false)
 	}
-	reservation := &fleet.CelldStorageReservation{Name: reservationName(f), Spec: fleetReservationSpec(f)}
-	expected := reservation.Spec
+	expected := fleetReservationSpec(f)
+	reservation := &fleet.CelldStorageReservation{Name: reservationName(f)}
 	if f.Spec.Storage.Initialization != nil {
 		var err error
 		reservation, err = ensureSeedReservation(ctx, r.Client, f)
 		if err != nil {
 			return r.report(ctx, f, nil, "SeedReservationBlocked", err.Error(), false)
 		}
-	} else if err := r.Create(ctx, reservation); err != nil {
-		if !apierrors.IsAlreadyExists(err) {
-			return ctrl.Result{}, err
-		}
-		if err := r.Get(ctx, types.NamespacedName{Name: reservation.Name}, reservation); err != nil {
+	} else {
+		key := client.ObjectKeyFromObject(reservation)
+		if err := r.Get(ctx, key, reservation); apierrors.IsNotFound(err) {
+			reservation.Spec = expected
+			if err := r.Create(ctx, reservation); apierrors.IsAlreadyExists(err) {
+				// Create remains the arbitration point for an unreserved scope.
+				// Decode its winner into an empty object and verify it below.
+				reservation = &fleet.CelldStorageReservation{}
+				if err := r.Get(ctx, key, reservation); err != nil {
+					return ctrl.Result{}, err
+				}
+			} else if err != nil {
+				return ctrl.Result{}, err
+			}
+		} else if err != nil {
 			return ctrl.Result{}, err
 		}
 	}
@@ -291,7 +301,7 @@ func (r *Reconciler) report(ctx context.Context, f *fleet.CelldFleet, h *loadedS
 		f.Status.Reservation = reservationName(f)
 	}
 	f.Status.ObservedGeneration = f.Generation
-	observed := emptyObject(workload(f, r.Options))
+	observed := emptyWorkload(f)
 	var ready int32
 	serving := false
 	// A forbidden read means the fleet namespace lacks the operator Role; the

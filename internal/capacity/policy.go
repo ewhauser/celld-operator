@@ -53,7 +53,9 @@ func fresh(t, now time.Time, age time.Duration) bool {
 func fingerprint(v any) string {
 	b, _ := json.Marshal(v)
 	h := sha256.Sum256(b)
-	return hex.EncodeToString(h[:])
+	var encoded [sha256.Size * 2]byte
+	hex.Encode(encoded[:], h[:])
+	return string(encoded[:])
 }
 func reset(s *State) {
 	s.HighSince = time.Time{}
@@ -73,7 +75,7 @@ func reset(s *State) {
 func Evaluate(p fleet.CapacityPolicy, old State, o Observation, current int32) State {
 	s := old
 	s.Actionable = false
-	s.Stamps = make(map[string]Stamp, len(old.Stamps))
+	s.Stamps = nil
 	if old.Addition != nil {
 		addition := *old.Addition
 		s.Addition = &addition
@@ -82,6 +84,7 @@ func Evaluate(p fleet.CapacityPolicy, old State, o Observation, current int32) S
 	s.Decision = fleet.CapacityStatus{Mode: p.Mode, DesiredReplicas: current}
 	hold := func(reason, message string) State { s.Decision.Reason = reason; s.Decision.Message = message; return s }
 	if p.Validate() != nil || current < 1 || current > 100 || o.At.IsZero() || o.At.Before(old.LastObservation) || o.At.Before(old.LastAction) || o.At.Before(old.PendingSince) {
+		s.Stamps = make(map[string]Stamp)
 		reset(&s)
 		return hold("InvalidObservation", "Invalid configuration, replica count or clock rewind; history retained")
 	}
@@ -98,6 +101,13 @@ func Evaluate(p fleet.CapacityPolicy, old State, o Observation, current int32) S
 		s.Membership = membership
 	}
 	intermediate := !old.LastObservation.IsZero() && o.At.Sub(old.LastObservation) < Seconds(p.SampleIntervalSeconds)
+	// Intermediate reads must keep the previous source watermarks. Avoid building
+	// a replacement map that would be discarded after validating the samples.
+	if intermediate {
+		s.Stamps = old.Stamps
+	} else {
+		s.Stamps = make(map[string]Stamp, min(len(o.Samples), 100))
+	}
 	if !fresh(old.LastObservation, o.At, Seconds(p.MaxAgeSeconds)) {
 		reset(&s)
 	}
@@ -106,7 +116,7 @@ func Evaluate(p fleet.CapacityPolicy, old State, o Observation, current int32) S
 	}
 	complete := o.Complete && len(o.Samples) == int(current)
 	high, low, newSources := false, true, true
-	seen := map[string]bool{}
+	seen := make(map[string]bool, min(len(o.Samples), 100))
 	for _, v := range o.Samples {
 		validID := v.Identity != "" && !seen[v.Identity]
 		seen[v.Identity] = true
@@ -125,15 +135,12 @@ func Evaluate(p fleet.CapacityPolicy, old State, o Observation, current int32) S
 		if !v.RuntimeAt.After(prev.Runtime) || !v.MetricsAt.After(prev.Metrics) {
 			newSources = false
 		}
-		s.Stamps[v.Identity] = Stamp{v.RuntimeAt, v.MetricsAt}
+		if !intermediate {
+			s.Stamps[v.Identity] = Stamp{v.RuntimeAt, v.MetricsAt}
+		}
 		pressured := v.Pressured || v.Backlog || v.CPU >= int64(p.CPUHighMillicores) || v.MemoryMiB >= int64(p.MemoryHighMiB)
 		high = high || pressured
 		low = low && !pressured && v.CPU < int64(p.CPULowMillicores) && v.MemoryMiB < int64(p.MemoryLowMiB)
-	}
-	// Intermediate reads can invalidate a window, but must not consume an
-	// observation slot or advance source watermarks used for positive evidence.
-	if intermediate {
-		s.Stamps = old.Stamps
 	}
 	s.Decision.PendingReplicas = max(0, current-s.Decision.UsefulReplicas)
 	if s.Decision.PendingReplicas > 0 {
@@ -252,7 +259,7 @@ func LowDemand(p fleet.CapacityPolicy, o Observation, current int32) bool {
 	if p.Validate() != nil || !o.Complete || o.At.IsZero() || len(o.Samples) != int(current) {
 		return false
 	}
-	seen := map[string]bool{}
+	seen := make(map[string]bool, min(len(o.Samples), 100))
 	for _, v := range o.Samples {
 		if v.Identity == "" || seen[v.Identity] || !v.Ready || v.Pressured || v.Backlog || v.CPU < 0 || v.MemoryMiB < 0 || v.CPU >= int64(p.CPULowMillicores) || v.MemoryMiB >= int64(p.MemoryLowMiB) || v.Window < Seconds(p.MinWindowSeconds) || v.Window > Seconds(p.MaxWindowSeconds) {
 			return false

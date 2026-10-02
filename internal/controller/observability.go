@@ -82,17 +82,23 @@ func boolean(value bool) float64 {
 	return 0
 }
 func publishFleetMetrics(f *fleet.CelldFleet, state stateFootprint, now time.Time) {
-	values := map[string]float64{
-		"operation_bytes":  float64(state.bytes),
-		"desired_replicas": float64(f.Status.DesiredReplicas), "applied_replicas": float64(f.Status.AppliedReplicas),
-		"observed_replicas": float64(f.Status.ObservedReplicas), "ready_replicas": float64(f.Status.ReadyReplicas),
-		"joining_replicas": float64(f.Status.JoiningReplicas), "terminating_replicas": float64(f.Status.TerminatingReplicas),
-		"replica_observation_valid": boolean(f.Status.ReplicaObservationValid),
-		"blocked":                   boolean(meta.IsStatusConditionTrue(f.Status.Conditions, "Blocked")),
-		"blocked_age_seconds":       secondsSince(f.Status.BlockedSince, now),
+	values := [...]struct {
+		name  string
+		value float64
+	}{
+		{"operation_bytes", float64(state.bytes)},
+		{"desired_replicas", float64(f.Status.DesiredReplicas)},
+		{"applied_replicas", float64(f.Status.AppliedReplicas)},
+		{"observed_replicas", float64(f.Status.ObservedReplicas)},
+		{"ready_replicas", float64(f.Status.ReadyReplicas)},
+		{"joining_replicas", float64(f.Status.JoiningReplicas)},
+		{"terminating_replicas", float64(f.Status.TerminatingReplicas)},
+		{"replica_observation_valid", boolean(f.Status.ReplicaObservationValid)},
+		{"blocked", boolean(meta.IsStatusConditionTrue(f.Status.Conditions, "Blocked"))},
+		{"blocked_age_seconds", secondsSince(f.Status.BlockedSince, now)},
 	}
-	for name, value := range values {
-		fleetGauges[name].WithLabelValues(f.Namespace, f.Name).Set(value)
+	for _, metric := range values {
+		fleetGauges[metric.name].WithLabelValues(f.Namespace, f.Name).Set(metric.value)
 	}
 	publishCapacityMetrics(f)
 }
@@ -115,9 +121,10 @@ func publishCapacityMetrics(f *fleet.CelldFleet) {
 	if slices.Contains(capacity.Reasons, c.Reason) {
 		current = c.Reason
 	}
-	for _, reason := range append(slices.Clone(capacity.Reasons), "Other") {
+	for _, reason := range capacity.Reasons {
 		capacityDecision.WithLabelValues(f.Namespace, f.Name, reason).Set(boolean(reason == current))
 	}
+	capacityDecision.WithLabelValues(f.Namespace, f.Name, "Other").Set(boolean(current == "Other"))
 }
 func (r *Reconciler) observeReplicaCounts(ctx context.Context, f *fleet.CelldFleet) {
 	f.Status.ObservedReplicas, f.Status.JoiningReplicas, f.Status.TerminatingReplicas = 0, 0, 0
