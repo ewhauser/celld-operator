@@ -38,6 +38,11 @@ use a new version. Do not overwrite or delete the partial publication. A failed
 run may leave an image, chart, protected tag, or draft; rerunning the whole
 workflow with the same version will fail its publication guard.
 
+Within the chart publication job, Helm's manifest-not-found error while tagging
+is retried twice after short delays, using identical chart bytes. Other errors
+fail immediately. This handles registry visibility delays without relaxing the
+new-version requirement for failed workflow runs.
+
 No registry PAT or signing key is needed. GHCR uses the job's short-lived
 `GITHUB_TOKEN`; Sigstore uses GitHub OIDC. Any future credentials belong in a
 protected deployment environment, with only the permissions the job needs.

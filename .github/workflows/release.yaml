@@ -220,7 +220,7 @@ jobs:
           owner="${REPOSITORY%%/*}"
           owner="${owner,,}"
           printf '%s' "$GH_TOKEN" | helm registry login ghcr.io --username "$GH_USER" --password-stdin
-          helm push "dist/celld-operator-${version}.tgz" "oci://ghcr.io/${owner}/charts" 2>&1 | tee dist/helm-push.txt
+          python3 hack/push-release-chart.py "dist/celld-operator-${version}.tgz" "oci://ghcr.io/${owner}/charts" dist/helm-push.txt
           chart_digest="$(sed -n 's/^Digest: //p' dist/helm-push.txt)"
           test -n "$chart_digest"
           mkdir -p dist/verified
