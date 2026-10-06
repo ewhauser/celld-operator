@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -196,6 +197,68 @@ func TestProfileChangeIsRefused(t *testing.T) {
 	}
 	if len(list.Items) != 1 || *list.Items[0].Spec.Replicas != 3 {
 		t.Fatal("workload disrupted")
+	}
+}
+
+// Execution, lifecycle, env and telemetry roll out through the workload
+// template. The reservation keeps verifying through the creation-time record,
+// which a reservation from an earlier release receives on its first reconcile.
+func TestTuningChangeRollsOut(t *testing.T) {
+	f := fixture("alpha", "bucket-alpha", "PersistentFleet")
+	r := setup(t, f)
+	f = reconcile(t, r, f)
+	res := &fleet.CelldStorageReservation{}
+	if err := r.Get(t.Context(), client.ObjectKey{Name: reservationName(f)}, res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Annotations[tuningKey] != tuningRecord(f) {
+		t.Fatalf("new reservation lacks its tuning record: %q", res.Annotations[tuningKey])
+	}
+	// Simulate a reservation created before records existed.
+	delete(res.Annotations, tuningKey)
+	if err := r.Update(t.Context(), res); err != nil {
+		t.Fatal(err)
+	}
+	early := f.DeepCopy()
+	early.Spec.Execution = &fleet.ExecutionSpec{MemoryLimit: "2Gi"}
+	if err := r.Update(t.Context(), early); err != nil {
+		t.Fatal(err)
+	}
+	got := reconcile(t, r, early)
+	reason(t, got, "StorageScopeConflict")
+	if c := meta.FindStatusCondition(got.Status.Conditions, "Ready"); !strings.Contains(c.Message, "restore them") {
+		t.Fatalf("conflict lacks recovery hint: %s", c.Message)
+	}
+	// Restoring the original values lets the record be written.
+	got.Spec.Execution = nil
+	if err := r.Update(t.Context(), got); err != nil {
+		t.Fatal(err)
+	}
+	f = reconcile(t, r, got)
+	if err := r.Get(t.Context(), client.ObjectKey{Name: reservationName(f)}, res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Annotations[tuningKey] != tuningRecord(f) {
+		t.Fatal("tuning record not backfilled")
+	}
+	f.Spec.Execution = &fleet.ExecutionSpec{MemoryRequest: "1Gi", MemoryLimit: "2Gi"}
+	if err := r.Update(t.Context(), f); err != nil {
+		t.Fatal(err)
+	}
+	got = reconcile(t, r, f)
+	if c := meta.FindStatusCondition(got.Status.Conditions, "Ready"); c != nil && c.Reason == "StorageScopeConflict" {
+		t.Fatalf("tuning change refused: %s", c.Message)
+	}
+	sts := &appsv1.StatefulSet{}
+	if err := r.Get(t.Context(), client.ObjectKeyFromObject(f), sts); err != nil {
+		t.Fatal(err)
+	}
+	resources := sts.Spec.Template.Spec.Containers[0].Resources
+	if resources.Requests.Memory().String() != "1Gi" || resources.Limits.Memory().String() != "2Gi" {
+		t.Fatalf("resized template not rolled out: %+v", resources)
+	}
+	if !matches(workload(got, r.Options), sts) {
+		t.Fatal("workload does not match the changed fleet")
 	}
 }
 

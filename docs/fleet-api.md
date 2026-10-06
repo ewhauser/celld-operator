@@ -17,8 +17,9 @@ is converted in place. Infrastructure outside Kubernetes, including bucket,
 IAM roles, worker nodes and EBS CSI, remains administrator-owned.
 
 The mutable request fields are `replicas`, `capacity`, `runtimeImage`,
-`maintenance`, `export`, `routing` and `mesh`. Storage, layout, placement, execution sizing, lifecycle
-budgets, `env` and `telemetry` are fixed at creation. `maintenance.paused` stops new
+`maintenance`, `export`, `routing`, `mesh`, `execution`, `lifecycle`, `env` and
+`telemetry`. Profile, service account, storage, layout and placement are fixed
+at creation. `maintenance.paused` stops new
 workload changes. A new `restartToken` requests a same-version restart. Restarts
 and upgrades are one-member rolling updates for both profiles;
 `allowCoordinatedDowntime` is accepted and ignored.
@@ -33,9 +34,8 @@ ready. The StatefulSet creates a fresh claim. See
 same-namespace `secretKeyRef` (`name` and `key`). Operator-owned identity,
 network, durability and storage settings and reserved prefixes such as
 `CELLD_REEXEC_` and `CELLD_STRICT_` cannot be overridden. The
-OpenTelemetry namespace is reserved for its dedicated API. Environment entries
-cannot be edited after fleet creation because the operator does not roll out
-ordinary pod-template changes. Secret values never enter the fleet API, status,
+OpenTelemetry namespace is reserved for its dedicated API. Changing environment
+entries rolls the fleet one member at a time. Secret values never enter the fleet API, status,
 or operator logs; Kubernetes resolves references when a Pod starts. Rotating a
 Secret does not update running processes: change `maintenance.restartToken` to
 restart the fleet after a rotation.
@@ -54,8 +54,9 @@ and adds one TCP rule for the collector URL's port, scoped to one IP address
 destination. The existing broad HTTPS rule for S3 and STS still permits other
 port 443 destinations; NetworkPolicy alone does not make HTTPS collector traffic
 exclusive to the telemetry egress selector. A collector using a different port
-receives only its scoped rule. Telemetry is immutable after creation because
-ordinary pod-template changes are not rolled out. Rotate the headers Secret
+receives only its scoped rule. Changing telemetry rolls the fleet one member at a
+time. The collector egress rule changes before the rollout starts, so members
+still running the old settings lose egress to a removed collector. Rotate the headers Secret
 with a restart so new Pods read it.
 
 `spec.export` turns on celld's
@@ -117,7 +118,15 @@ A bucket reservation permanently binds the bucket to the fleet UID. Recreating
 a fleet with the same name does not transfer ownership. Its
 `celld.eric.dev/current-operation` annotation holds only capacity-policy
 history and is removed when there is none; fleet status is a reconstructible
-projection.
+projection. The reservation hash covers the fleet's creation-time `execution`,
+`lifecycle`, `env` and `telemetry`, which the operator records in the
+`celld.eric.dev/reserved-tuning` annotation so the hash still verifies after
+they change. The record is trusted only when it reproduces the hash. A fleet
+created before this release gets its record on the first reconcile while those
+fields are unchanged, so upgrade the operator and let it reconcile before
+changing them. Otherwise the fleet reports `StorageScopeConflict` until the
+original values are restored. Preview fleets do not get a record, so their
+tuning remains tied to the reservation.
 [Preview configuration](previews.md) lives on an existing fleet under `spec.previews`.
 It reserves a separate preview bucket to that parent fleet UID, then binds each
 child fleet to a disjoint `storage.prefix` and `previewFleetRef`.

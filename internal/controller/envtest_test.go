@@ -288,7 +288,7 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 		})
 	}
 
-	// Only replicas, capacity, runtimeImage, maintenance, export, routing and mesh may change after creation.
+	// Profile, service account, storage, placement and layout are fixed at creation.
 	for _, tc := range []struct {
 		name string
 		edit func(*fleet.CelldFleet)
@@ -300,13 +300,6 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 		{"bucket", func(f *fleet.CelldFleet) { f.Spec.Storage.Bucket = "other-" + ns }},
 		{"zones", func(f *fleet.CelldFleet) { f.Spec.Placement.Zones = []string{"us-east-1b"} }},
 		{"serviceAccountName", func(f *fleet.CelldFleet) { f.Spec.ServiceAccountName = "other" }},
-		{"env", func(f *fleet.CelldFleet) {
-			value := "debug"
-			f.Spec.Env = []fleet.FleetEnvVar{{Name: "CELLD_LOG", Value: &value}}
-		}},
-		{"telemetry", func(f *fleet.CelldFleet) {
-			f.Spec.Telemetry = &fleet.TelemetrySpec{CollectorURL: "http://collector:4318", Egress: fleet.CollectorEgress{PodLabels: map[string]string{"app": "otel"}}}
-		}},
 	} {
 		t.Run("immutable "+tc.name, func(t *testing.T) {
 			got := &fleet.CelldFleet{}
@@ -336,6 +329,18 @@ func TestEnvtestAdmissionDefaultsAndImmutability(t *testing.T) {
 	got.Spec.Export = nil
 	if err := c.Update(ctx, got); err != nil {
 		t.Fatalf("export removal rejected: %v", err)
+	}
+	debug := "debug"
+	got.Spec.Env = []fleet.FleetEnvVar{{Name: "CELLD_LOG", Value: &debug}}
+	got.Spec.Telemetry = &fleet.TelemetrySpec{CollectorURL: "http://collector:4318", Egress: fleet.CollectorEgress{PodLabels: map[string]string{"app": "otel"}}}
+	if err := c.Update(ctx, got); err != nil {
+		t.Fatalf("env and telemetry change rejected: %v", err)
+	}
+	// Per-field validation still applies to updates.
+	bucket := "s3://elsewhere"
+	got.Spec.Env = []fleet.FleetEnvVar{{Name: "CELLD_BUCKET", Value: &bucket}}
+	if err := c.Update(ctx, got); !apierrors.IsInvalid(err) {
+		t.Fatalf("reserved env override accepted on update: %v", err)
 	}
 
 	// The cluster-scoped reservation is frozen entirely.
@@ -414,20 +419,31 @@ func TestEnvtestTuningAdmission(t *testing.T) {
 	if err := c.Create(ctx, f); err != nil {
 		t.Fatal(err)
 	}
-	// Both blocks are immutable, including adding or removing them.
-	for name, edit := range map[string]func(*fleet.CelldFleet){
-		"change cpu":       func(f *fleet.CelldFleet) { f.Spec.Execution.CPURequest = "2" },
-		"change shutdown":  func(f *fleet.CelldFleet) { f.Spec.Lifecycle.ShutdownSeconds = 100 },
-		"remove execution": func(f *fleet.CelldFleet) { f.Spec.Execution = nil },
+	// Both blocks may change, be added or be removed; the cross-field rules
+	// still reject an invalid update.
+	for _, tc := range []struct {
+		name  string
+		edit  func(*fleet.CelldFleet)
+		valid bool
+	}{
+		{"change cpu", func(f *fleet.CelldFleet) { f.Spec.Execution.CPURequest = "500m" }, true},
+		{"change shutdown", func(f *fleet.CelldFleet) { f.Spec.Lifecycle.ShutdownSeconds = 100 }, true},
+		{"memory limit below request", func(f *fleet.CelldFleet) { f.Spec.Execution.MemoryLimit = "512Mi" }, false},
+		{"grace inside shutdown", func(f *fleet.CelldFleet) { f.Spec.Lifecycle.ShutdownSeconds = 180 }, false},
+		{"remove execution", func(f *fleet.CelldFleet) { f.Spec.Execution = nil }, true},
 	} {
-		t.Run("immutable "+name, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			got := &fleet.CelldFleet{}
 			if err := c.Get(ctx, client.ObjectKeyFromObject(f), got); err != nil {
 				t.Fatal(err)
 			}
-			edit(got)
-			if err := c.Update(ctx, got); !apierrors.IsInvalid(err) {
-				t.Fatalf("tuning mutation accepted (%s): %v", name, err)
+			tc.edit(got)
+			err := c.Update(ctx, got)
+			if tc.valid && err != nil {
+				t.Fatalf("tuning change rejected (%s): %v", tc.name, err)
+			}
+			if !tc.valid && !apierrors.IsInvalid(err) {
+				t.Fatalf("invalid tuning accepted (%s): %v", tc.name, err)
 			}
 		})
 	}
@@ -436,17 +452,8 @@ func TestEnvtestTuningAdmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	plain.Spec.Lifecycle = &fleet.LifecycleSpec{ShutdownSeconds: 10, TerminationGraceSeconds: 30}
-	if err := c.Update(ctx, plain); !apierrors.IsInvalid(err) {
-		t.Fatalf("adding tuning after creation accepted: %v", err)
-	}
-	// Mutable fields still change on a tuned fleet.
-	got := &fleet.CelldFleet{}
-	if err := c.Get(ctx, client.ObjectKeyFromObject(f), got); err != nil {
-		t.Fatal(err)
-	}
-	got.Spec.Replicas = 4
-	if err := c.Update(ctx, got); err != nil {
-		t.Fatalf("replicas rejected on a tuned fleet: %v", err)
+	if err := c.Update(ctx, plain); err != nil {
+		t.Fatalf("adding tuning after creation rejected: %v", err)
 	}
 }
 

@@ -184,6 +184,9 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 		key := client.ObjectKeyFromObject(reservation)
 		if err := r.Get(ctx, key, reservation); apierrors.IsNotFound(err) {
 			reservation.Spec = expected
+			if record := tuningRecord(f); record != "" {
+				reservation.Annotations = map[string]string{tuningKey: record}
+			}
 			if err := r.Create(ctx, reservation); apierrors.IsAlreadyExists(err) {
 				// Create remains the arbitration point for an unreserved scope.
 				// Decode its winner into an empty object and verify it below.
@@ -201,7 +204,18 @@ func (r *Reconciler) reconcileFleet(ctx context.Context, f *fleet.CelldFleet) (c
 	// Load the persisted capacity history once; status is a projection.
 	h := r.currentState(f, r.hydrate(ctx, reservation))
 	if len(reservation.OwnerReferences) != 0 || !reservation.DeletionTimestamp.IsZero() || !r.reservationMatches(ctx, f, h, expected) {
-		return r.report(ctx, f, h, "StorageScopeConflict", "Bucket is permanently reserved to another fleet UID or immutable configuration; no resources adopted", false)
+		message := "Bucket is permanently reserved to another fleet UID or immutable configuration; no resources adopted"
+		if _, recorded := recordedTuning(reservation); !recorded && f.Spec.Storage.Initialization == nil {
+			message += ". If execution, lifecycle, env or telemetry changed before this operator recorded the fleet's creation-time values, restore them, wait for one reconcile, then reapply the change"
+		}
+		return r.report(ctx, f, h, "StorageScopeConflict", message, false)
+	}
+	if f.Spec.Storage.Initialization == nil {
+		// Seed reservations are compared exactly by the preview controller and
+		// keep no tuning record; preview tuning comes from the pool.
+		if err := r.recordTuning(ctx, f, h, expected); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	if ready, err := r.gateSeed(ctx, f, reservation); !ready || err != nil {
