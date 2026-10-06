@@ -1,4 +1,8 @@
 minimumReleaseAge: 4320
+# GHSA-ch52-4w7c-c8xp is fixed only in 4.3.0, published inside the release-age
+# window. Remove once 4.3.0 is older than minimumReleaseAge.
+minimumReleaseAgeExclude:
+  - http-cache-semantics@4.3.0
 allowBuilds:
   esbuild: true
   sharp: true

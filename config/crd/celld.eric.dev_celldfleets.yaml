@@ -221,8 +221,9 @@ spec:
                     <= self.maxAgeSeconds
               env:
                 description: |-
-                  Additional celld settings, fixed at creation. Secret values stay in the
-                  referenced Secret; changes to Secret data take effect only in new Pods.
+                  Additional celld settings. A change rolls the fleet one member at a time.
+                  Secret values stay in the referenced Secret; changes to Secret data take
+                  effect only in new Pods.
                 items:
                   properties:
                     name:
@@ -270,8 +271,8 @@ spec:
                     || e.name.startsWith('CELLD_TEST_') || e.name.startsWith('CELLD_STRICT_')))
               execution:
                 description: |-
-                  Per-fleet runtime sizing. Immutable after creation: the operator never rolls
-                  out a changed pod template. Omitted fields keep the prototype constants.
+                  Per-fleet runtime sizing. A change rolls the fleet one member at a time.
+                  Omitted fields keep the prototype constants.
                 properties:
                   cpuLimit:
                     description: 'CPU limit for the celld container. Default: none.'
@@ -497,8 +498,9 @@ spec:
                   rule: '!has(self.maxRecordBytes) || !has(self.queueBytes) || self.maxRecordBytes
                     <= self.queueBytes'
               lifecycle:
-                description: Per-fleet shutdown and termination budgets. Immutable
-                  after creation.
+                description: |-
+                  Per-fleet shutdown and termination budgets. A change rolls the fleet one
+                  member at a time.
                 properties:
                   shutdownSeconds:
                     description: celld total stop bound in seconds (CELLD_SHUTDOWN_TOTAL_MS).
@@ -1360,8 +1362,8 @@ spec:
                   rule: '!has(self.endpoint) || has(self.previewFleetRef)'
               telemetry:
                 description: |-
-                  Optional OTLP collector; omission leaves telemetry disabled. Immutable
-                  because the operator does not roll out ordinary pod-template changes.
+                  Optional OTLP collector; omission leaves telemetry disabled. A change
+                  rolls the fleet one member at a time.
                 properties:
                   collectorURL:
                     description: HTTP(S) collector base URL; celld appends /v1/traces
@@ -1443,17 +1445,10 @@ spec:
             - message: preview configuration cannot change once enabled
               rule: '!has(oldSelf.previews) || (has(self.previews) && self.previews
                 == oldSelf.previews)'
-            - message: runtime storage, layout, placement, execution, lifecycle, env
-                and telemetry are fixed at creation
+            - message: runtime storage, layout and placement are fixed at creation
               rule: self.profile == oldSelf.profile && self.serviceAccountName ==
                 oldSelf.serviceAccountName && self.storage == oldSelf.storage && self.placement
-                == oldSelf.placement && has(self.execution) == has(oldSelf.execution)
-                && (!has(self.execution) || self.execution == oldSelf.execution) &&
-                has(self.lifecycle) == has(oldSelf.lifecycle) && (!has(self.lifecycle)
-                || self.lifecycle == oldSelf.lifecycle) && has(self.env) == has(oldSelf.env)
-                && (!has(self.env) || self.env == oldSelf.env) && has(self.telemetry)
-                == has(oldSelf.telemetry) && (!has(self.telemetry) || self.telemetry
-                == oldSelf.telemetry) && self.bucketWorkload == oldSelf.bucketWorkload
+                == oldSelf.placement && self.bucketWorkload == oldSelf.bucketWorkload
             - message: preview storage must use a separate bucket from the parent
                 runtime
               rule: '!has(self.previews) || self.previews.storage.bucket != self.storage.bucket'

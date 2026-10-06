@@ -115,7 +115,94 @@ func (r *Reconciler) saveState(ctx context.Context, res *fleet.CelldStorageReser
 	// Never retry a reservation write using a refreshed resourceVersion.
 	return r.Update(ctx, res)
 }
+
+// reservationMatches verifies the frozen reservation against the fleet. The
+// hash binds execution, lifecycle, env and telemetry as they were at creation,
+// but those fields are mutable, so a fleet whose tuning has changed is checked
+// against its recorded creation-time tuning instead.
 func (r *Reconciler) reservationMatches(_ context.Context, f *fleet.CelldFleet, h *loadedState, want fleet.ReservationSpec) bool {
+	if hashMatches(f, h, want) {
+		return true
+	}
+	t, ok := recordedTuning(h.res)
+	if !ok {
+		return false
+	}
+	baseline := *f
+	t.apply(&baseline.Spec)
+	return hashMatches(&baseline, h, want)
+}
+
+// tuningKey records a fleet's creation-time execution, lifecycle, env and
+// telemetry on its reservation. The record needs no trust: it is used only
+// when substituting it into the fleet reproduces the frozen SpecHash, so it
+// can only restore the values the reservation was created with.
+const tuningKey = "celld.eric.dev/reserved-tuning"
+const maxTuningBytes = 64 * 1024
+
+type reservedTuning struct {
+	Execution *fleet.ExecutionSpec `json:"execution,omitempty"`
+	Lifecycle *fleet.LifecycleSpec `json:"lifecycle,omitempty"`
+	Env       []fleet.FleetEnvVar  `json:"env,omitempty"`
+	Telemetry *fleet.TelemetrySpec `json:"telemetry,omitempty"`
+}
+
+func tuningOf(s *fleet.CelldFleetSpec) reservedTuning {
+	return reservedTuning{Execution: s.Execution, Lifecycle: s.Lifecycle, Env: s.Env, Telemetry: s.Telemetry}
+}
+
+// apply replaces s's tuning. The caller passes a shallow copy; nested values
+// are shared, never mutated.
+func (t reservedTuning) apply(s *fleet.CelldFleetSpec) {
+	s.Execution, s.Lifecycle, s.Env, s.Telemetry = t.Execution, t.Lifecycle, t.Env, t.Telemetry
+}
+
+// tuningRecord is the annotation value for the fleet's current tuning, or ""
+// when it exceeds the record bound and cannot be recorded.
+func tuningRecord(f *fleet.CelldFleet) string {
+	b, err := json.Marshal(tuningOf(&f.Spec))
+	if err != nil || len(b) > maxTuningBytes {
+		return ""
+	}
+	return string(b)
+}
+
+func recordedTuning(res *fleet.CelldStorageReservation) (reservedTuning, bool) {
+	var t reservedTuning
+	raw := res.Annotations[tuningKey]
+	if raw == "" || len(raw) > maxTuningBytes {
+		return t, false
+	}
+	d := json.NewDecoder(strings.NewReader(raw))
+	d.DisallowUnknownFields()
+	if err := d.Decode(&t); err != nil {
+		return t, false
+	}
+	if err := d.Decode(new(any)); err != io.EOF {
+		return t, false
+	}
+	return t, true
+}
+
+// recordTuning writes the fleet's creation-time tuning to its reservation
+// while the fleet still carries it, so a later change can be verified against
+// the frozen hash. It reports whether it wrote. A fleet whose tuning changed
+// before any record was written stays a StorageScopeConflict until restored.
+func (r *Reconciler) recordTuning(ctx context.Context, f *fleet.CelldFleet, h *loadedState, want fleet.ReservationSpec) error {
+	record := tuningRecord(f)
+	if record == "" || h.res.Annotations[tuningKey] == record || !hashMatches(f, h, want) {
+		return nil
+	}
+	if h.res.Annotations == nil {
+		h.res.Annotations = map[string]string{}
+	}
+	h.res.Annotations[tuningKey] = record
+	// Never retry a reservation write using a refreshed resourceVersion.
+	return r.Update(ctx, h.res)
+}
+
+// hashMatches verifies the reservation against f exactly as written.
+func hashMatches(f *fleet.CelldFleet, h *loadedState, want fleet.ReservationSpec) bool {
 	if h.err != nil || h.res.Spec.InitialReplicas < 1 || h.res.Spec.InitialReplicas > 100 {
 		return false
 	}

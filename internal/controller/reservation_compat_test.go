@@ -82,3 +82,49 @@ func TestExportReservationCompat(t *testing.T) {
 		t.Fatal("fleet without export has a legacy export hash")
 	}
 }
+
+func TestTuningReservationRecord(t *testing.T) {
+	created := fixture("tuned", "tuned-bucket", "Bucket")
+	created.Spec.Execution = &fleet.ExecutionSpec{CPURequest: "250m", MemoryRequest: "512Mi", MemoryLimit: "1Gi"}
+	matches := func(f *fleet.CelldFleet, res *fleet.CelldStorageReservation) bool {
+		return (&Reconciler{}).reservationMatches(t.Context(), f, &loadedState{res: res}, fleetReservationSpec(f))
+	}
+	// A reservation written before tuning records existed has none.
+	res := &fleet.CelldStorageReservation{Spec: fleetReservationSpec(created)}
+	if !matches(created, res) {
+		t.Fatal("unchanged fleet rejected without a tuning record")
+	}
+	resized := created.DeepCopy()
+	resized.Spec.Execution.MemoryLimit = "2Gi"
+	value := "debug"
+	resized.Spec.Env = []fleet.FleetEnvVar{{Name: "CELLD_LOG", Value: &value}}
+	resized.Spec.Lifecycle = &fleet.LifecycleSpec{ShutdownSeconds: 25, TerminationGraceSeconds: 40}
+	if matches(resized, res) {
+		t.Fatal("changed tuning accepted without a record")
+	}
+	res.Annotations = map[string]string{tuningKey: tuningRecord(created)}
+	if !matches(resized, res) {
+		t.Fatal("changed tuning rejected with the creation-time record")
+	}
+	if !matches(created, res) {
+		t.Fatal("original tuning rejected with a record")
+	}
+	moved := resized.DeepCopy()
+	moved.Spec.Storage.Region = "us-west-2"
+	if matches(moved, res) {
+		t.Fatal("record let an immutable storage change through")
+	}
+	// The record is trusted only when it reproduces the frozen hash.
+	forged := resized.DeepCopy()
+	forged.Spec.Execution.MemoryLimit = "4Gi"
+	res.Annotations[tuningKey] = tuningRecord(forged)
+	if matches(resized, res) {
+		t.Fatal("record that does not reproduce the hash accepted")
+	}
+	for _, raw := range []string{`{"execution":{"memoryLimit":"1Gi"},"extra":1}`, `{} {}`, `not json`} {
+		res.Annotations[tuningKey] = raw
+		if _, ok := recordedTuning(res); ok {
+			t.Fatalf("malformed record decoded: %s", raw)
+		}
+	}
+}
