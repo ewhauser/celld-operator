@@ -4,7 +4,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 GO_PACKAGES := ./...
 RACE ?= -race
 GOLANGCI_LINT_VERSION ?= v2.13.2
-GOLANGCI_LINT := GOTOOLCHAIN=go1.27.1 CGO_ENABLED=0 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+GOLANGCI_LINT := GOTOOLCHAIN=go1.27.2 CGO_ENABLED=0 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 # A native lint binary that can analyze another GOOS; `go run` under GOOS=linux
 # would build a Linux executable that cannot run on a macOS host.
 GOLANGCI_LINT_BIN := bin/tools/golangci-lint
@@ -76,7 +76,7 @@ lint:
 	$(GOLANGCI_LINT) run ./...
 
 $(GOLANGCI_LINT_BIN):
-	GOTOOLCHAIN=go1.27.1 CGO_ENABLED=0 GOBIN=$(CURDIR)/bin/tools go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+	GOTOOLCHAIN=go1.27.2 CGO_ENABLED=0 GOBIN=$(CURDIR)/bin/tools go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
 lint-linux: $(GOLANGCI_LINT_BIN)
 	GOOS=linux $(GOLANGCI_LINT_BIN) run ./...
