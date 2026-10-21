@@ -52,7 +52,7 @@ records nothing:
 | --- | --- | --- |
 | A member Pod is still present more than two minutes after its termination grace ended, because its node no longer answers | Force-delete the Pod. The StatefulSet recreates it and the member keeps its disk. Also applies to Ordered Bucket fleets. | `MemberForceDeleted` |
 | A member's claim is `Lost`, because its volume no longer exists | Delete the claim and the Pod. The StatefulSet recreates both. | `MemberDiskLost` |
-| One member has been down for the replacement delay while every other member has been ready for five minutes | Delete the claim and the Pod. The member returns on a fresh disk. | `MemberReplaced` |
+| One member of two or more has been down for the replacement delay while every other member has been ready for five minutes | Delete the claim and the Pod. The member returns on a fresh disk. A fleet's only member holds every copy of its writes and is never given a fresh disk this way. | `MemberReplaced` |
 
 celld's lease fences a process that survives on a lost node, and a
 `ReadWriteOncePod` disk attaches to one node at a time.

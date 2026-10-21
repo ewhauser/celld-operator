@@ -31,7 +31,9 @@ The operator deletes an existing disk on its own only when the disk cannot come
 back. A claim that Kubernetes marks `Lost` has no volume behind it and is
 replaced as soon as the scheduler has decided every other member's Pod.
 Otherwise one member must have been down for the replacement delay, 10 minutes
-by default, while every other member has been ready for five minutes. Leaders
+by default, while every other member has been ready for five minutes. A fleet's
+only member holds every copy of its writes, so it is never replaced this way;
+it waits to return on its own disk. Leaders
 stop using a departed member within seconds, and every member sweeps dead
 leaders every 30 seconds, so by then no session depends on the down member's
 disk. A member on a fresh disk answers recovery for its old disk with a

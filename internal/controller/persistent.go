@@ -300,6 +300,11 @@ func (r *Reconciler) replacementDue(f *fleet.CelldFleet, sts *appsv1.StatefulSet
 	if !c.CreationTimestamp.Time.Before(p.CreationTimestamp.Add(-time.Minute)) {
 		return time.Time{}, false
 	}
+	// A fresh disk is safe only because other members hold copies of its
+	// writes. A fleet's only member holds every copy, so it waits to return.
+	if replicas(sts) < 2 {
+		return time.Time{}, false
+	}
 	for other := range replicas(sts) {
 		if other == ordinal {
 			continue
