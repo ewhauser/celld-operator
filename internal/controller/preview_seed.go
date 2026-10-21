@@ -294,25 +294,34 @@ func (r *Reconciler) gateSeed(ctx context.Context, f *fleet.CelldFleet, res *fle
 
 // deleteUninitializedFleet handles only fleets whose seed gate never opened.
 // Once startup wins, the existing lifecycle journal/finalizer is authoritative.
+// stopFleetSeed cancels a fleet's seed and returns its reservation once the
+// executor has stopped all writes. Every call is cluster-scoped.
+func (r *Reconciler) stopFleetSeed(ctx context.Context, f *fleet.CelldFleet) (*fleet.CelldStorageReservation, error) {
+	s, err := ensureSeedReservation(ctx, r.Client, f)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := getFleetSeed(ctx, r.Client, f); err != nil {
+		return nil, err
+	}
+	stopped, err := cancelSeed(ctx, r.Client, s)
+	if err != nil {
+		return nil, err
+	}
+	if !stopped {
+		return nil, fmt.Errorf("waiting for seed executor to stop all writes")
+	}
+	return s, nil
+}
+
 func (r *Reconciler) deleteUninitializedFleet(ctx context.Context, f *fleet.CelldFleet) (bool, error) {
 	if f.Spec.Storage.Initialization == nil {
 		return false, nil
 	}
-	s, err := ensureSeedReservation(ctx, r.Client, f)
+	res, err := r.stopFleetSeed(ctx, f)
 	if err != nil {
 		return true, err
 	}
-	if _, err := getFleetSeed(ctx, r.Client, f); err != nil {
-		return true, err
-	}
-	stopped, err := cancelSeed(ctx, r.Client, s)
-	if err != nil {
-		return true, err
-	}
-	if !stopped {
-		return true, fmt.Errorf("waiting for seed executor to stop all writes")
-	}
-	res := s
 	// A startup winner must use ordinary fleet shutdown; its retained receipt
 	// cannot authorize the never-started deletion shortcut.
 	if seedReceiptReady(f, res) {

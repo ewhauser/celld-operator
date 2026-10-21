@@ -20,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -94,6 +95,98 @@ func TestFleetNamespaceWithoutRoleIsReportedNotReconciled(t *testing.T) {
 	}
 }
 
+// forbidNamespacedCalls models a namespace whose fleet-namespace Role binding
+// is gone: every call on a namespaced object other than a fleet is Forbidden.
+func forbidNamespacedCalls(base client.Client, namespace string) client.Client {
+	forbidden := func(obj runtime.Object, name string) error {
+		gvk := obj.GetObjectKind().GroupVersionKind()
+		return apierrors.NewForbidden(schema.GroupResource{Group: gvk.Group, Resource: strings.ToLower(gvk.Kind)}, name, nil)
+	}
+	fleetObject := func(obj runtime.Object) bool {
+		switch obj.(type) {
+		case *fleet.CelldFleet, *fleet.CelldFleetList:
+			return true
+		}
+		return false
+	}
+	return interceptor.NewClient(base.(client.WithWatch), interceptor.Funcs{
+		Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if key.Namespace == namespace && !fleetObject(obj) {
+				return forbidden(obj, key.Name)
+			}
+			return c.Get(ctx, key, obj, opts...)
+		},
+		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			if o := (&client.ListOptions{}).ApplyOptions(opts); o.Namespace == namespace && !fleetObject(list) {
+				return forbidden(list, "")
+			}
+			return c.List(ctx, list, opts...)
+		},
+		Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+			if obj.GetNamespace() == namespace && !fleetObject(obj) {
+				return forbidden(obj, obj.GetName())
+			}
+			return c.Delete(ctx, obj, opts...)
+		},
+	})
+}
+
+// deleteNamespace starts deleting a fleet namespace and holds it terminating,
+// as the namespace controller does while namespaced objects remain.
+func deleteNamespace(t *testing.T, c client.Client, name string) {
+	t.Helper()
+	ns := &corev1.Namespace{Name: name, Finalizers: []string{"test.celld.eric.dev/terminating"}}
+	if err := c.Create(t.Context(), ns); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Delete(t.Context(), ns); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Deleting a namespace removes the fleet-namespace Role binding along with the
+// fleet's workload, Pods and claims. A deleted fleet there must release its
+// finalizer, or the namespace stays Terminating forever. Outside a terminating
+// namespace the missing Role is still reported and the finalizer kept.
+func TestDeletedFleetInTerminatingNamespaceReleasesFinalizer(t *testing.T) {
+	for _, terminating := range []bool{true, false} {
+		t.Run(map[bool]string{true: "terminating", false: "active"}[terminating], func(t *testing.T) {
+			f := fixture("alpha", "bucket-alpha", "PersistentFleet")
+			r := setup(t, f)
+			reconcile(t, r, f)
+			reconcile(t, r, f)
+			if err := r.Delete(t.Context(), f); err != nil {
+				t.Fatal(err)
+			}
+			if terminating {
+				deleteNamespace(t, r.Client, f.Namespace)
+			}
+			base := r.Client
+			r.Client = auditManifestClient(t, forbidNamespacedCalls(base, f.Namespace))
+			_, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(f)})
+			r.Client = base
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := &fleet.CelldFleet{}
+			err = r.Get(t.Context(), client.ObjectKeyFromObject(f), got)
+			if terminating {
+				if !apierrors.IsNotFound(err) {
+					t.Fatalf("fleet in a terminating namespace kept its finalizer: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			reason(t, got, "NamespaceAccessDenied")
+			if len(got.Finalizers) == 0 {
+				t.Fatal("finalizer released outside a terminating namespace")
+			}
+		})
+	}
+}
+
 // Cluster-scoped API calls the reconciler makes must be granted by the
 // ClusterRole in config/manager/operator.yaml. Unit tests run against the fake
 // client, which never enforces RBAC, so a missing verb stays invisible until the
@@ -106,6 +199,7 @@ func TestClusterRoleGrantsTheVerbsTheReconcilerUses(t *testing.T) {
 		{"celld.eric.dev", "celldfleets", "patch"},
 		{"celld.eric.dev", "celldstoragereservations", "update"},
 		{"storage.k8s.io", "storageclasses", "get"},
+		{"", "namespaces", "get"},
 	} {
 		if !grantedByClusterRole(role, want.group, want.resource, want.verb) {
 			t.Errorf("ClusterRole does not grant %q on %s/%s; the reconciler would be Forbidden in a real cluster", want.verb, want.group, want.resource)

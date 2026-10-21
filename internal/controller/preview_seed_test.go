@@ -288,6 +288,49 @@ func TestPreviewSeedCancellation(t *testing.T) {
 	}
 }
 
+// A seed's reservation is cluster-scoped and outlives the namespace, so a
+// terminating namespace releases a seeded fleet only after its executor stops.
+func TestPreviewSeedHoldsFleetInTerminatingNamespace(t *testing.T) {
+	pr, fr, p := seededSetup(t)
+	previewReconcile(t, pr, p)
+	s, f := getSeedAndFleet(t, pr.Client, p)
+	assertSeedGated(t, fr, f)
+	s.Status = fleet.PreviewSeedStatus{Phase: "Running", ExecutorID: "execution-one", TargetFleetUID: string(f.UID)}
+	if err := fr.Status().Update(t.Context(), s); err != nil {
+		t.Fatal(err)
+	}
+	if err := fr.Delete(t.Context(), f); err != nil {
+		t.Fatal(err)
+	}
+	deleteNamespace(t, fr.Client, f.Namespace)
+	base := fr.Client
+	fr.Client = forbidNamespacedCalls(base, f.Namespace)
+	defer func() { fr.Client = base }()
+	step := func() {
+		t.Helper()
+		if _, err := fr.Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(f)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	step()
+	got := &fleet.CelldFleet{}
+	if err := base.Get(t.Context(), client.ObjectKeyFromObject(f), got); err != nil {
+		t.Fatalf("fleet released during an active import: %v", err)
+	}
+	reason(t, got, "SeedCancellationBlocked")
+	if err := base.Get(t.Context(), client.ObjectKeyFromObject(s), s); err != nil || !s.Status.Canceled {
+		t.Fatalf("cancellation not persisted: %v", err)
+	}
+	s.Status.Phase = "Canceled"
+	if err := base.Status().Update(t.Context(), s); err != nil {
+		t.Fatal(err)
+	}
+	step()
+	if err := base.Get(t.Context(), client.ObjectKeyFromObject(f), got); !apierrors.IsNotFound(err) {
+		t.Fatalf("fleet kept its finalizer after the executor stopped: %v", err)
+	}
+}
+
 func envSeededPreview(t *testing.T) (client.Client, *fleet.CelldPreview, *fleet.CelldStorageReservation, *fleet.CelldFleet) {
 	t.Helper()
 	c := envtestClient(t)

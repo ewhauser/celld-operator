@@ -9,8 +9,8 @@ celld alone holds the fleet's runtime bucket identity.
 
 ## Kubernetes access
 
-The cluster-scoped role covers fleet discovery/status, permanent reservations
-and StorageClass reads. It has no PersistentVolume, Node or VolumeAttachment
+The cluster-scoped role covers fleet discovery/status, permanent reservations,
+StorageClass reads and Namespace reads. It has no PersistentVolume, Node or VolumeAttachment
 access. Each fleet namespace has a separate Role for workloads, Pods (reads,
 scheduling-gate updates and deletion), Services, policies, credentials, and
 PVCs (reads and deletion). The operator binds every Pod and PVC delete to the

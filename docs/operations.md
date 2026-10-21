@@ -8,8 +8,8 @@ Use the task-oriented [installation guide](../site/src/content/docs/start/instal
 Both Bucket and PersistentFleet need a compatible digest-pinned fork runtime and
 run celld directly. The operator has Kubernetes credentials only; celld receives the runtime
 bucket identity. The manager does not read S3 recovery metadata or terminate EC2
-instances. The ClusterRole covers only the fleet API and StorageClass reads; it
-has no PersistentVolume, Node or VolumeAttachment access. The fleet namespace
+instances. The ClusterRole covers only the fleet API, StorageClass reads and Namespace
+reads; it has no PersistentVolume, Node or VolumeAttachment access. The fleet namespace
 Role grants Pod and PVC deletion, and the operator binds every delete to the
 object's UID. It force-deletes a member Pod left on a node that no longer
 answers, deletes a member's claim and Pod when its volume is gone or the member
