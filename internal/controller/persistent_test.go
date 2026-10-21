@@ -514,6 +514,26 @@ func TestPersistentReplacesMemberThatCannotReturn(t *testing.T) {
 	}
 }
 
+// A fleet's only member holds every copy of its writes, so a fresh disk would
+// lose them all: it waits to return however long it is down.
+func TestPersistentNeverReplacesTheOnlyMember(t *testing.T) {
+	x := agedFleet(t)
+	x.desired(1)
+	x.settle()
+	if replicas(x.workload()) != 1 {
+		t.Fatal("contraction did not reach one member")
+	}
+	claim := x.claimUIDs()["data-alpha-0"]
+	x.setMember("alpha-0", x.clock.Add(-2*time.Hour), corev1.ConditionFalse, x.clock.Add(-time.Minute))
+	for range 3 {
+		x.clock = x.clock.Add(DefaultMemberReplacementDelay)
+		x.operatorStep()
+	}
+	if x.claimUIDs()["data-alpha-0"] != claim {
+		t.Fatal("the only member's disk was replaced")
+	}
+}
+
 func TestPersistentLeavesMembersThatAFreshDiskWouldNotHelp(t *testing.T) {
 	for name, setup := range map[string]func(x *operationFixture){
 		"another member recently restarted": func(x *operationFixture) {

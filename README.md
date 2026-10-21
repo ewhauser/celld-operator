@@ -30,7 +30,7 @@ the full user guide and generated reference. `make site` builds it locally.
 
 ## Development
 
-Install Go 1.27.2 and a C compiler for race-enabled tests, then run:
+Install Go 1.27.3 and a C compiler for race-enabled tests, then run:
 
 ```sh
 make check
