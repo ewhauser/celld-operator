@@ -112,6 +112,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		// the namespaced Role from config/rbac/fleet-namespace.yaml. Report that
 		// instead of requeueing silently, and never touch namespace resources.
 		f.Default()
+		if result, released, err := r.releaseInTerminatingNamespace(ctx, f); released || err != nil {
+			return result, err
+		}
 		return r.report(ctx, f, nil, "NamespaceAccessDenied", "Operator lacks the fleet-namespace Role in "+f.Namespace+"; apply config/rbac/fleet-namespace.yaml there ("+err.Error()+")", false)
 	}
 	if err == nil {
