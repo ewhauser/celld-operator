@@ -112,6 +112,16 @@ type ExportKafkaSpec struct {
 	// same Secret carries, such as ssl.ca.location=/etc/celld/export/ca.crt.
 	// +optional
 	PropertiesSecretKeyRef *SecretKeyRef `json:"propertiesSecretKeyRef,omitempty"`
+	// How the sink signs in to the brokers (CELLD_EXPORT_KAFKA_AUTH). None,
+	// the default, leaves authentication to the properties. AwsMskIam signs in
+	// to Amazon MSK over SASL/OAUTHBEARER with the ServiceAccount's AWS
+	// credentials (IRSA or EKS Pod Identity): list the cluster's IAM brokers
+	// (port 9098), and the properties may then not set security.protocol,
+	// sasl.mechanism(s) or sasl.oauthbearer.method. Needs celld
+	// v0.6.2-ewhauser.5 or later.
+	// +optional
+	// +kubebuilder:validation:Enum=None;AwsMskIam
+	Auth string `json:"auth,omitempty"`
 	// The brokers, for one TCP egress rule on the brokers' ports: labeled
 	// broker Pods, or a cidr that may be a whole network, such as a managed
 	// cluster's subnets.
@@ -227,6 +237,9 @@ func validateExportKafka(k *ExportKafkaSpec) error {
 	}
 	if k.RetryMilliseconds < 0 {
 		return fmt.Errorf("export.kafka.retryMilliseconds must be positive")
+	}
+	if k.Auth != "" && k.Auth != "None" && k.Auth != "AwsMskIam" {
+		return fmt.Errorf("export.kafka.auth must be None or AwsMskIam")
 	}
 	if r := k.PropertiesSecretKeyRef; r != nil && (len(validation.IsDNS1123Subdomain(r.Name)) != 0 || len(validation.IsConfigMapKey(r.Key)) != 0) {
 		return fmt.Errorf("export.kafka.propertiesSecretKeyRef is invalid")

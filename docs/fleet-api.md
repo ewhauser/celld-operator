@@ -77,6 +77,7 @@ the `CELLD_EXPORT_*` settings below, and reserves the `CELLD_EXPORT` prefix in
 | `bucket.retentionDays` | `CELLD_EXPORT_RETENTION=<n>d` |
 | `kafka.brokers`, `kafka.topic`, `kafka.retryMilliseconds` | `CELLD_EXPORT_KAFKA_BROKERS`, `CELLD_EXPORT_TOPIC`, `CELLD_EXPORT_RETRY_MS` |
 | `kafka.propertiesSecretKeyRef` | `CELLD_EXPORT_KAFKA_PROPERTIES=/etc/celld/export/<key>`; the whole Secret is mounted read-only there |
+| `kafka.auth` | `CELLD_EXPORT_KAFKA_AUTH`: `None` (default, unset) or `AwsMskIam` (`aws-msk-iam`) |
 
 The Bucket sink writes Parquet objects under `export/changes/` in the fleet
 bucket, or in `bucket.name` on the same endpoint and credentials, so the
@@ -92,7 +93,17 @@ Secret and the properties name its file, for example
 `ssl.ca.location=/etc/celld/export/ca.crt`. celld refuses properties that
 weaken delivery: `acks` below `all`, `message.timeout.ms`,
 `delivery.timeout.ms`, and turning on `delivery.report.only.error` or
-`allow.auto.create.topics`. Kafka needs a celld
+`allow.auto.create.topics`. For Amazon MSK with IAM access control, set
+`kafka.auth: AwsMskIam` and list the cluster's IAM brokers (port 9098, so the
+egress rule follows). The sink then signs in over SASL/OAUTHBEARER with the
+fleet ServiceAccount's AWS credentials (IRSA or EKS Pod Identity), whose role
+needs `kafka-cluster:Connect` and `WriteDataIdempotently` on the cluster and
+`DescribeTopic` and `WriteData` on the topic. The fleet already reaches STS
+through its port 443 egress. The properties may still carry TLS and batching
+settings but not `security.protocol`, `sasl.mechanism(s)` or
+`sasl.oauthbearer.method`. `AwsMskIam` needs celld `v0.6.2-ewhauser.5` or
+later; an earlier runtime ignores the setting, and its sink cannot sign in to
+the IAM listener. Kafka needs a celld
 built with the `export-kafka` feature. Starting with `v0.6.1-ewhauser.3`,
 the fork publishes a `-kafka` image variant with this feature; pin its verified
 manifest digest in `runtimeImage` (see [runtime requirements](runtime-versions.md#change-export)).

@@ -52,6 +52,11 @@ func exportEnv(e *fleet.ExportSpec) []corev1.EnvVar {
 		if k.PropertiesSecretKeyRef != nil {
 			add("CELLD_EXPORT_KAFKA_PROPERTIES", exportKafkaDir+"/"+k.PropertiesSecretKeyRef.Key)
 		}
+		// None is celld's default, so it stays unset: a fleet that does not
+		// use IAM keeps the environment earlier runtimes accept.
+		if k.Auth == "AwsMskIam" {
+			add("CELLD_EXPORT_KAFKA_AUTH", "aws-msk-iam")
+		}
 		return env
 	}
 	add("CELLD_EXPORT_SINK", "bucket")
