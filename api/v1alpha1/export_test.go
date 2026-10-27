@@ -11,6 +11,8 @@ func TestExportValidation(t *testing.T) {
 		"bucket defaults": {},
 		"bucket tuned":    {Classes: []string{"Cart", "Order"}, ExcludeTables: []string{"Cart.audit"}, QueueBytes: 1 << 20, MaxRecordBytes: 1 << 20, Bucket: &ExportBucketSpec{Name: "acme-export", FlushMilliseconds: 1000, RetentionDays: 7}},
 		"kafka":           kafkaExport(),
+		"kafka no auth":   {Sink: "Kafka", Kafka: &ExportKafkaSpec{Brokers: []string{"b-1.msk:9094"}, Auth: "None", Egress: CollectorEgress{CIDR: "10.20.0.0/16"}}},
+		"kafka msk iam":   {Sink: "Kafka", Kafka: &ExportKafkaSpec{Brokers: []string{"b-1.msk:9098"}, Auth: "AwsMskIam", Egress: CollectorEgress{CIDR: "10.20.0.0/16"}}},
 		"kafka pods":      {Sink: "Kafka", Kafka: &ExportKafkaSpec{Brokers: []string{"[fd00::1]:9093"}, Topic: "celld.changes", Egress: CollectorEgress{PodLabels: map[string]string{"app": "kafka"}, Namespace: "kafka"}, PropertiesSecretKeyRef: &SecretKeyRef{Name: "kafka-client", Key: "kafka.properties"}}},
 	} {
 		f := valid()
@@ -36,6 +38,7 @@ func TestExportValidation(t *testing.T) {
 		"broker port":       func(e *ExportSpec) { *e = *kafkaExport(); e.Kafka.Brokers = []string{"kafka-0.kafka"} },
 		"broker list":       func(e *ExportSpec) { *e = *kafkaExport(); e.Kafka.Brokers = []string{"a:9092,b:9092"} },
 		"topic":             func(e *ExportSpec) { *e = *kafkaExport(); e.Kafka.Topic = "celld changes" },
+		"auth":              func(e *ExportSpec) { *e = *kafkaExport(); e.Kafka.Auth = "aws-msk-iam" },
 		"no egress":         func(e *ExportSpec) { *e = *kafkaExport(); e.Kafka.Egress = CollectorEgress{} },
 		"host bits":         func(e *ExportSpec) { *e = *kafkaExport(); e.Kafka.Egress.CIDR = "10.20.0.1/16" },
 		"cidr namespace":    func(e *ExportSpec) { *e = *kafkaExport(); e.Kafka.Egress.Namespace = "kafka" },

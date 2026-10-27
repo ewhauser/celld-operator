@@ -103,6 +103,38 @@ func TestKafkaExportRendersEnvSecretAndEgress(t *testing.T) {
 	}
 }
 
+func TestKafkaExportAuth(t *testing.T) {
+	f := fixture("alpha", "bucket-alpha", "PersistentFleet")
+	f.Spec.Export = &fleet.ExportSpec{Sink: "Kafka", Kafka: &fleet.ExportKafkaSpec{
+		Brokers: []string{"b-1.msk:9098", "b-2.msk:9098"},
+		Egress:  fleet.CollectorEgress{CIDR: "10.20.0.0/16"},
+	}}
+	before := podTemplate(f, Options{}).Spec.Containers[0].Env
+	if _, ok := envValue(before, "CELLD_EXPORT_KAFKA_AUTH"); ok {
+		t.Fatal("auth rendered without a field")
+	}
+	// None is celld's default, so it renders the same environment as omitting it.
+	f.Spec.Export.Kafka.Auth = "None"
+	if err := f.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if got := podTemplate(f, Options{}).Spec.Containers[0].Env; len(got) != len(before) {
+		t.Fatalf("explicit None changed the environment: %+v", got)
+	}
+	f.Spec.Export.Kafka.Auth = "AwsMskIam"
+	if err := f.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := envValue(podTemplate(f, Options{}).Spec.Containers[0].Env, "CELLD_EXPORT_KAFKA_AUTH"); got != "aws-msk-iam" {
+		t.Fatalf("CELLD_EXPORT_KAFKA_AUTH = %q", got)
+	}
+	last := fleetPolicy(t, f).Spec.Egress
+	rule := last[len(last)-1]
+	if len(rule.Ports) != 1 || rule.Ports[0].Port.IntValue() != 9098 {
+		t.Fatalf("IAM broker port = %+v", rule.Ports)
+	}
+}
+
 func TestNoExportRendersNothing(t *testing.T) {
 	f := fixture("alpha", "bucket-alpha", "Bucket")
 	for _, e := range podTemplate(f, Options{}).Spec.Containers[0].Env {

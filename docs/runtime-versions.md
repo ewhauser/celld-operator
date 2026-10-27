@@ -39,7 +39,9 @@ only the bucket sink. Starting with `v0.6.1-ewhauser.3`, the `-kafka` image
 variant includes both the bucket sink and the Kafka sink (`export-kafka`).
 Pin that variant's verified manifest digest for `spec.export.sink: Kafka`.
 Compiling in Kafka support does not enable export; `spec.export` still controls
-whether and where changes are exported.
+whether and where changes are exported. `spec.export.kafka.auth: AwsMskIam`
+(Amazon MSK IAM sign-in) needs the `-kafka` variant of `v0.6.2-ewhauser.5` or
+later.
 
 ## Published fork artifact
 
