@@ -115,6 +115,14 @@ type CelldFleetSpec struct {
 	// change only the NetworkPolicy and AuthorizationPolicy.
 	// +optional
 	Mesh *MeshSpec `json:"mesh,omitempty"`
+	// Additional annotations on member Pods, for admission webhooks and node
+	// agents that read them, such as eks.amazonaws.com/skip-containers. Keys
+	// under celld.eric.dev/ and the Istio keys the mesh sets are reserved. A
+	// change rolls the fleet one member at a time.
+	// +optional
+	// +kubebuilder:validation:MaxProperties=32
+	// +kubebuilder:validation:XValidation:rule="self.all(k, !(k.startsWith('celld.eric.dev/') || k in ['sidecar.istio.io/nativeSidecar','traffic.sidecar.istio.io/excludeOutboundIPRanges']))",message="podAnnotations may not set operator-owned annotations"
+	PodAnnotations map[string]string `json:"podAnnotations,omitempty"`
 }
 
 // MeshSpec places fleet members in a service mesh.

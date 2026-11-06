@@ -57,6 +57,7 @@ func reservationJSON(f *fleet.CelldFleet, keepExport bool) []byte {
 	spec.Capacity = nil
 	spec.Routing = nil
 	spec.Mesh = nil
+	spec.PodAnnotations = nil
 	spec.RuntimeImage = ""
 	spec.Maintenance = nil
 	if !keepExport {
