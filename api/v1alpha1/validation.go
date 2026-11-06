@@ -86,6 +86,9 @@ func (f *CelldFleet) ValidateRuntime() error {
 	if err := validateMesh(s.Mesh); err != nil {
 		return err
 	}
+	if err := validatePodAnnotations(s.PodAnnotations); err != nil {
+		return err
+	}
 	switch {
 	case s.BucketWorkload != "" && s.BucketWorkload != "Deployment" && s.BucketWorkload != "Ordered":
 		return fmt.Errorf("bucketWorkload must be Deployment or Ordered")

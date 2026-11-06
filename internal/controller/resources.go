@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"maps"
 	"net/url"
 	"strconv"
 	"time"
@@ -243,10 +244,18 @@ func podTemplate(f *fleet.CelldFleet, opts Options) corev1.PodTemplateSpec {
 		}
 	}
 	template := corev1.PodTemplateSpec{Labels: labels(f), Spec: pod}
+	if len(s.PodAnnotations) != 0 {
+		// Validation keeps these off the operator's own keys, which are written
+		// after and win regardless.
+		template.Annotations = maps.Clone(s.PodAnnotations)
+	}
 	if token := restartToken(f); token != "" {
 		// A changed token rolls the template; the workload controller replaces
 		// one member at a time.
-		template.Annotations = map[string]string{restartTokenAnnotation: token}
+		if template.Annotations == nil {
+			template.Annotations = map[string]string{}
+		}
+		template.Annotations[restartTokenAnnotation] = token
 	}
 	meshTemplate(f, &template)
 	return template

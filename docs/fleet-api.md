@@ -17,8 +17,8 @@ is converted in place. Infrastructure outside Kubernetes, including bucket,
 IAM roles, worker nodes and EBS CSI, remains administrator-owned.
 
 The mutable request fields are `replicas`, `capacity`, `runtimeImage`,
-`maintenance`, `export`, `routing`, `mesh`, `execution`, `lifecycle`, `env` and
-`telemetry`. Profile, service account, storage, layout and placement are fixed
+`maintenance`, `export`, `routing`, `mesh`, `execution`, `lifecycle`, `env`,
+`telemetry` and `podAnnotations`. Profile, service account, storage, layout and placement are fixed
 at creation. `maintenance.paused` stops new
 workload changes. A new `restartToken` requests a same-version restart. Restarts
 and upgrades are one-member rolling updates for both profiles;
@@ -188,6 +188,16 @@ restarts, even in a namespace configured for injection. Fleets that never opted
 in keep their previous template. The operator reads each member's `/state`
 on 8081 directly, so under STRICT mTLS the operator Pods must be in the mesh too.
 See [Istio networking](../site/src/content/docs/configure/networking.md#istio-strict-mtls-and-authorization).
+
+`spec.podAnnotations` adds up to 32 annotations to member Pods, for admission
+webhooks and node agents that read Pod metadata. On EKS, for example,
+`eks.amazonaws.com/skip-containers: istio-proxy,istio-validation` keeps the pod
+identity webhook from mounting the AWS web identity token into mesh sidecars.
+Keys under `celld.eric.dev/` and the two Istio annotations `spec.mesh` sets
+(`sidecar.istio.io/nativeSidecar`,
+`traffic.sidecar.istio.io/excludeOutboundIPRanges`) are reserved. The field is
+not part of the storage reservation, so it may be added, changed or removed on a
+live fleet; each change rolls members one at a time.
 
 `spec.routing` optionally creates one Gateway API v1 HTTPRoute or a standard
 Ingress, named `FLEET-routing`. Both forward `/` for explicit `hostnames` to

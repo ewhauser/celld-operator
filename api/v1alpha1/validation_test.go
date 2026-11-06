@@ -203,3 +203,27 @@ func TestMeshDefaultsAndValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestPodAnnotationsValidation(t *testing.T) {
+	f := valid()
+	f.Spec.PodAnnotations = map[string]string{"eks.amazonaws.com/skip-containers": "istio-proxy,istio-validation"}
+	if err := f.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for name, annotations := range map[string]map[string]string{
+		"restart token":   {"celld.eric.dev/restart-token": "r1"},
+		"operator prefix": {"celld.eric.dev/anything": "x"},
+		"native sidecar":  {"sidecar.istio.io/nativeSidecar": "false"},
+		"mesh exclusion":  {"traffic.sidecar.istio.io/excludeOutboundIPRanges": "0.0.0.0/0"},
+		"invalid key":     {"not a key": "x"},
+		"long value":      {"example.com/v": strings.Repeat("x", 4097)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := valid()
+			f.Spec.PodAnnotations = annotations
+			if err := f.Validate(); err == nil {
+				t.Fatal("accepted invalid podAnnotations")
+			}
+		})
+	}
+}

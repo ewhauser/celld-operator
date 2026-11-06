@@ -457,6 +457,41 @@ func TestEnvtestTuningAdmission(t *testing.T) {
 	}
 }
 
+// The CRD rejects operator-owned pod annotations and accepts others, on
+// creation and as a later change.
+func TestEnvtestPodAnnotationsAdmission(t *testing.T) {
+	c := envtestClient(t)
+	ctx := t.Context()
+	ns := fmt.Sprintf("annotations-%d", envtestSeq.Add(1))
+	if err := c.Create(ctx, &corev1.Namespace{Name: ns}); err != nil {
+		t.Fatal(err)
+	}
+	base := func(name string) *fleet.CelldFleet {
+		return &fleet.CelldFleet{Name: name, Namespace: ns, Spec: fleet.CelldFleetSpec{
+			Profile: "Bucket", ServiceAccountName: "runtime",
+			Storage:   fleet.StorageSpec{Bucket: "bucket-" + ns + "-" + name, Region: "us-east-1"},
+			Placement: fleet.PlacementSpec{AZCount: 1, Zones: []string{"us-east-1a"}},
+		}}
+	}
+	for _, key := range []string{"celld.eric.dev/restart-token", "sidecar.istio.io/nativeSidecar", "traffic.sidecar.istio.io/excludeOutboundIPRanges"} {
+		t.Run(key, func(t *testing.T) {
+			f := base("invalid")
+			f.Spec.PodAnnotations = map[string]string{key: "x"}
+			if err := c.Create(ctx, f); !apierrors.IsInvalid(err) {
+				t.Fatalf("admission accepted %s: %v", key, err)
+			}
+		})
+	}
+	f := base("plain")
+	if err := c.Create(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	f.Spec.PodAnnotations = map[string]string{"eks.amazonaws.com/skip-containers": "istio-proxy,istio-validation"}
+	if err := c.Update(ctx, f); err != nil {
+		t.Fatalf("adding pod annotations after creation rejected: %v", err)
+	}
+}
+
 // The /scale subresource is served by the API server from the CRD definition.
 // An HPA reads status.replicas and the selector and writes spec.replicas.
 func TestEnvtestScaleSubresource(t *testing.T) {
